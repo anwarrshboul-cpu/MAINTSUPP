@@ -1,6 +1,9 @@
 import { getChatGPTUser } from "../chatgpt-auth";
+import { ROLE_LABELS, type WorkspaceRole } from "./roles";
 
-export type WorkspaceRole = "super_admin" | "admin" | "client";
+// The role set is defined once, in `roles.ts`. Re-exported so the many modules
+// that already import the type from here did not all have to move.
+export type { WorkspaceRole } from "./roles";
 
 export type WorkspaceActor = {
   email: string;
@@ -8,11 +11,7 @@ export type WorkspaceActor = {
   role: WorkspaceRole;
 };
 
-const roleNames: Record<WorkspaceRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  client: "Client",
-};
+const roleNames: Record<WorkspaceRole, string> = ROLE_LABELS;
 
 export function workspaceCookieValue(request: Request, name: string) {
   const cookies = request.headers.get("cookie") ?? "";
@@ -39,7 +38,9 @@ export function workspaceRoleFromRequest(request: Request): WorkspaceRole {
    */
   if (process.env.NODE_ENV === "production") return "client";
   const value = workspaceCookieValue(request, "maintsupp_demo_role");
-  return value === "admin" || value === "client" ? value : "super_admin";
+  return value === "admin" || value === "manager" || value === "client"
+    ? value
+    : "super_admin";
 }
 
 /**

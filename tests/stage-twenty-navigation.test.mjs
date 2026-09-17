@@ -39,6 +39,19 @@ import {
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:3000";
 const ADMIN = "admin@sunnamusk-uk.test.maintsupp.com";
 const CLIENT = "client@sunnamusk-uk.test.maintsupp.com";
+/*
+ * THE WORKSPACE-DEFAULT WRITER MOVED FROM ADMIN TO SUPER ADMIN — the
+ * roles-and-access batch.
+ *
+ * The workspace default sidebar (its arrangement and its locks) is now
+ * `navigation.edit`, reserved for Super Admin. The live tests below used ADMIN
+ * as the account that writes the DEFAULT; those writes now go as SUPER_ADMIN,
+ * which stands in the same (primary) workspace, and the test that shows a
+ * default being set also asserts an admin is refused. A PERSONAL arrangement is
+ * `navigation.personalise`, which every role holds by default, so the
+ * personal-scope tests still write as CLIENT or ADMIN, exactly as they did.
+ */
+const SUPER_ADMIN = "super-admin@test.maintsupp.com";
 
 async function source(path) {
   return readFile(new URL(`../${path}`, import.meta.url), "utf8");
@@ -370,7 +383,7 @@ test("locking is enforced in the PUT handler, not only in the UI", async () => {
   assert.match(
     route,
     /mayEditDefault\(context\)/,
-    "and the workspace default is admin-only",
+    "and the workspace default is gated",
   );
   /*
    * This used to assert the literal `context.actor.role === "admin"`.
@@ -398,10 +411,27 @@ test("locking is enforced in the PUT handler, not only in the UI", async () => {
     /resolvePermissions\(/,
     "the decision is resolved from the database, not compared inline",
   );
+  /*
+   * `navigation.edit`, not `settings.edit`, since the roles-and-access batch:
+   * the owner reserved menu administration for Super Admin, and
+   * `settings.edit` is held by every Admin. Still a capability through `can()`
+   * — the guarantee this block describes is unchanged — and now one the
+   * matrix cannot grant below Super Admin (`SUPER_ADMIN_ONLY`).
+   */
   assert.match(
     route,
-    /can\(subject, "settings\.edit"\)/,
+    /can\(subject, "navigation\.edit"\)/,
     "and it is a capability, not a role literal",
+  );
+  assert.match(
+    route,
+    /scope === "user" && body\.reset !== true && !\(await mayCustomise\(context\)\)/,
+    "a personal arrangement needs its own capability",
+  );
+  assert.match(
+    route,
+    /personalise: can\(subject, "navigation\.personalise"\)/,
+    "and that capability is the personal one, not the workspace one",
   );
   assert.match(
     route,
@@ -509,11 +539,15 @@ function call(path, options = {}, identity = ADMIN) {
 
 /** Back to the built-in order, both layers. */
 async function clear() {
-  await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({ scope: "workspace", reset: true }),
-  });
-  for (const identity of [ADMIN, CLIENT]) {
+  await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({ scope: "workspace", reset: true }),
+    },
+    SUPER_ADMIN,
+  );
+  for (const identity of [ADMIN, CLIENT, SUPER_ADMIN]) {
     await call("/api/navigation", { method: "DELETE" }, identity);
   }
 }
@@ -529,21 +563,25 @@ test("live: GET answers with the built-in order when nothing is stored", { skip:
   await clear();
 });
 
-test("live: an admin sets the workspace default and everyone inherits it", { skip: !live }, async () => {
+test("live: a super admin sets the workspace default and everyone inherits it", { skip: !live }, async () => {
   await clear();
-  const response = await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({
-      scope: "workspace",
-      locked: ["compliance"],
-      items: [
-        heading(OPERATIONS),
-        item("compliance"),
-        item("overview"),
-        item("reports", { hidden: true }),
-      ],
-    }),
+  const layout = JSON.stringify({
+    scope: "workspace",
+    locked: ["compliance"],
+    items: [
+      heading(OPERATIONS),
+      item("compliance"),
+      item("overview"),
+      item("reports", { hidden: true }),
+    ],
   });
+
+  // An Admin used to be able to do this. Menu administration is Super Admin's.
+  const byAdmin = await call("/api/navigation", { method: "PUT", body: layout }, ADMIN);
+  assert.equal(byAdmin.status, 403, "an admin may no longer rewrite the workspace sidebar");
+  assert.equal((await byAdmin.json()).capability, "navigation.edit");
+
+  const response = await call("/api/navigation", { method: "PUT", body: layout }, SUPER_ADMIN);
   assert.equal(response.status, 200);
 
   const seen = await (await call("/api/navigation", {}, CLIENT)).json();
@@ -574,14 +612,18 @@ test("live: a client cannot write the workspace default", { skip: !live }, async
 
 test("live: A CRAFTED PUT THAT HIDES A LOCKED ITEM IS REJECTED", { skip: !live }, async () => {
   await clear();
-  await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({
-      scope: "workspace",
-      locked: ["compliance"],
-      items: [heading(OPERATIONS), item("compliance"), item("overview")],
-    }),
-  });
+  await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        scope: "workspace",
+        locked: ["compliance"],
+        items: [heading(OPERATIONS), item("compliance"), item("overview")],
+      }),
+    },
+    SUPER_ADMIN,
+  );
 
   // Nothing in the browser is involved here. This is the payload somebody
   // writes in a console once they notice the button is disabled.
@@ -619,19 +661,43 @@ test("live: A CRAFTED PUT THAT HIDES A LOCKED ITEM IS REJECTED", { skip: !live }
   // And nothing was written: the refusal is total, not partial.
   const after = await (await call("/api/navigation", {}, CLIENT)).json();
   assert.equal(after.source, "workspace", "no personal layout was created");
+
+  // A personal save cannot move a lock either: `locked` in a user-scope body is
+  // ignored, and the workspace's set is what comes back.
+  const unlock = await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        scope: "user",
+        locked: [],
+        items: [heading(OPERATIONS), item("overview"), item("compliance")],
+      }),
+    },
+    CLIENT,
+  );
+  assert.equal(unlock.status, 200);
+  assert.deepEqual((await unlock.json()).locked, ["compliance"]);
+  const defaultAfter = await (await call("/api/navigation", {}, ADMIN)).json();
+  assert.deepEqual(defaultAfter.locked, ["compliance"], "the workspace lock is untouched");
+  assert.equal(defaultAfter.source, "workspace", "and the admin still sees the default");
   await clear();
 });
 
 test("live: a person's own arrangement wins, and reset gives it back", { skip: !live }, async () => {
   await clear();
-  await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({
-      scope: "workspace",
-      items: [heading(OPERATIONS), item("settings"), item("overview")],
-    }),
-  });
   await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        scope: "workspace",
+        items: [heading(OPERATIONS), item("settings"), item("overview")],
+      }),
+    },
+    SUPER_ADMIN,
+  );
+  const saved = await call(
     "/api/navigation",
     {
       method: "PUT",
@@ -642,11 +708,19 @@ test("live: a person's own arrangement wins, and reset gives it back", { skip: !
     },
     CLIENT,
   );
+  assert.equal(saved.status, 200, "a client may arrange their own sidebar");
 
   let seen = await (await call("/api/navigation", {}, CLIENT)).json();
   assert.equal(seen.source, "user");
+  assert.equal(seen.canCustomise, true);
+  assert.equal(seen.canEditDefault, false, "but not the workspace's");
   assert.equal(seen.layout.groups[0].label, "Mine");
   assert.equal(seen.layout.groups[0].items[0].key, "reports");
+
+  // The personal save reached nobody else, and not the default.
+  const admin = await (await call("/api/navigation", {}, ADMIN)).json();
+  assert.equal(admin.source, "workspace");
+  assert.equal(admin.layout.groups[0].items[0].key, "settings");
 
   const reset = await call("/api/navigation", { method: "DELETE" }, CLIENT);
   assert.equal(reset.status, 200);
@@ -658,22 +732,27 @@ test("live: a person's own arrangement wins, and reset gives it back", { skip: !
 
 test("live: a section the stored layout never heard of comes back visible", { skip: !live }, async () => {
   await clear();
-  await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({
-      scope: "user",
-      items: [
-        heading(OPERATIONS),
-        ...BUILT_IN_ORDER.map((entry) => item(entry.key)),
-      ],
-    }),
-  });
+  const saved = await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        scope: "user",
+        items: [
+          heading(OPERATIONS),
+          ...BUILT_IN_ORDER.map((entry) => item(entry.key)),
+        ],
+      }),
+    },
+    ADMIN,
+  );
+  assert.equal(saved.status, 200, "the layout under test must actually be stored");
 
   // The browser reports a catalogue containing four sections that did not
   // exist when that layout was saved.
   const sections = [...BUILT_IN_ORDER.map((entry) => entry.key), "admin", "audit", "teams", "account"];
   const payload = await (
-    await call(`/api/navigation?sections=${sections.join(",")}`)
+    await call(`/api/navigation?sections=${sections.join(",")}`, {}, ADMIN)
   ).json();
   const shown = payload.layout.groups
     .flatMap((group) => group.items)
@@ -733,13 +812,22 @@ test("live: a section the stored layout never heard of comes back visible", { sk
 
 test("live: a layout saved by one organisation is invisible to another", { skip: !live }, async () => {
   await clear();
-  await call("/api/navigation", {
-    method: "PUT",
-    body: JSON.stringify({
-      scope: "workspace",
-      items: [heading(OPERATIONS), item("reports"), item("overview")],
-    }),
-  });
+  const saved = await call(
+    "/api/navigation",
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        scope: "workspace",
+        items: [heading(OPERATIONS), item("reports"), item("overview")],
+      }),
+    },
+    SUPER_ADMIN,
+  );
+  // Without this the test passes vacuously when the save is refused: an
+  // unwritten layout is invisible everywhere.
+  assert.equal(saved.status, 200, "the layout under test must actually be stored");
+  const here = await (await call("/api/navigation", {}, CLIENT)).json();
+  assert.equal(here.source, "workspace", "and it is visible in the workspace it was saved in");
   const other = await (
     await call("/api/navigation", {}, "admin@demo-client-ltd.test.maintsupp.com")
   ).json();
@@ -763,5 +851,11 @@ test("live: an empty or malformed save is refused", { skip: !live }, async () =>
     body: JSON.stringify({ scope: "user", items: "nonsense" }),
   });
   assert.equal(junk.status, 400);
+  // The workspace scope is refused before it is validated for an admin: 403.
+  const byAdmin = await call("/api/navigation", {
+    method: "PUT",
+    body: JSON.stringify({ scope: "workspace", items: [] }),
+  });
+  assert.equal(byAdmin.status, 403);
   await clear();
 });

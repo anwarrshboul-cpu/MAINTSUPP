@@ -26,6 +26,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar, Icon, type IconName } from "../../components";
+import { useCapability } from "../../lib/client-capabilities";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
@@ -451,6 +452,16 @@ export function AccountMenu({
     }
   };
 
+  /*
+   * Doors to screens this person cannot use are not drawn. "Administration"
+   * opens Users & access, which answers 403 without `users.view`; "Invite
+   * members" is the invitation form, which needs `users.invite`. Each screen and
+   * route still refuses on its own — this only stops advertising them. `null`
+   * (still loading) keeps Administration hidden rather than flashing it.
+   */
+  const canAdminister = useCapability("users.view");
+  const canInvite = useCapability("users.invite");
+
   const accountItems = useMemo<MenuItem[]>(
     () => [
       {
@@ -719,11 +730,15 @@ export function AccountMenu({
           <div className="account-menu__columns">
             <section data-menu-column="account">
               <h3>Account</h3>
-              {accountItems.map((item) => renderItem(item))}
+              {accountItems
+                .filter((item) => item.key !== "admin" || canAdminister === true)
+                .map((item) => renderItem(item))}
             </section>
             <section data-menu-column="explore">
               <h3>Explore</h3>
-              {exploreItems.map((item) => renderItem(item))}
+              {exploreItems
+                .filter((item) => item.key !== "invite" || canInvite !== false)
+                .map((item) => renderItem(item))}
             </section>
           </div>
 

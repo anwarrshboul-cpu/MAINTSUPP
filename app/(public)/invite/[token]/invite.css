@@ -75,7 +75,20 @@
   font-size: 13px;
 }
 .invite__facts dt { color: #8099a3; }
-.invite__facts dd { margin: 0; color: #f5fafc; font-weight: 600; }
+/*
+ * `minmax(0, 1fr)` and `overflow-wrap: anywhere`: an email address has no
+ * natural break points, and a long one (a client's full name at a long domain)
+ * used to set the column's minimum width — pushing the whole card 39px past
+ * the edge of a 390px phone and making the page scroll sideways.
+ */
+.invite__facts { grid-template-columns: auto minmax(0, 1fr); }
+.invite__facts dd {
+  min-width: 0;
+  margin: 0;
+  color: #f5fafc;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 
 .invite__role {
   display: inline-block;
@@ -125,6 +138,52 @@
 }
 
 .invite__field input:disabled { opacity: 0.6; }
+
+/*
+ * The show/hide control sits inside the field, on the right, over padding the
+ * input reserves for it — so a revealed password never runs underneath the
+ * button. 44px wide, the height of the field less its border, which keeps the
+ * target comfortable on a phone without making the field any taller.
+ */
+.invite__password {
+  position: relative;
+  display: grid;
+}
+.invite__field .invite__password input {
+  padding-right: 54px;
+}
+/* Edge draws its own reveal eye on password inputs; two eyes is one too many. */
+.invite__password input::-ms-reveal,
+.invite__password input::-ms-clear {
+  display: none;
+}
+
+.invite__reveal {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  display: grid;
+  width: 44px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #8099a3;
+  cursor: pointer;
+}
+.invite__reveal:hover:not(:disabled) {
+  background: rgba(18, 180, 168, 0.12);
+  color: #f5fafc;
+}
+.invite__reveal:focus-visible {
+  outline: 2px solid #20d8c6;
+  outline-offset: -2px;
+  color: #f5fafc;
+}
+.invite__reveal[data-shown="true"] { color: #20d8c6; }
+.invite__reveal:disabled { cursor: progress; opacity: 0.6; }
 
 .invite__hint { color: #8099a3; font-size: 12px; }
 

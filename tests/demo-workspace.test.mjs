@@ -111,7 +111,12 @@ test("every seeded row id is recognisable as demo data from its key alone", () =
   }
   assert.match(seed, /`demo-compliance-\$\{site\.key\}-\$\{index\}`/);
   assert.match(seed, /`demo-unit-\$\{site\.key\}-\$\{index\}`/);
-  assert.match(seed, /`demo-member-' \|\| m\.user_id|'demo-member-' \|\| m\.user_id/);
+  // The `demo-member-` rows were super_admin memberships of the demo
+  // workspace. Since the three-level batch a Platform Super Admin reaches
+  // every workspace from `platform_admins`, so the seed writes none — and no
+  // membership at all, which is the strictest form of "recognisable".
+  assert.doesNotMatch(seed, /INSERT[^;]*INTO memberships/i);
+  assert.doesNotMatch(seed, /'demo-member-' \|\| m\.user_id/);
 });
 
 /* ── 3. Idempotent, and cheap on a path that runs at every cold start ─────── */

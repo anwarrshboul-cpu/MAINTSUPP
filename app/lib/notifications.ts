@@ -19,7 +19,13 @@ export type NotificationRequest = {
    * subject id points at a different table. Labelling it "lead" would have made
    * the notification log lie about what the row is.
    */
-  subjectType: "lead" | "job" | "compliance" | "system" | "contractor-application";
+  subjectType:
+    | "lead"
+    | "job"
+    | "compliance"
+    | "system"
+    | "contractor-application"
+    | "invitation";
   subjectId?: string | null;
   to: string;
   subject: string;
@@ -41,7 +47,54 @@ export type NotificationRequest = {
    * being absent.
    */
   replyTo?: string;
+  /**
+   * The sender, when it is not the deployment's `NOTIFY_FROM`.
+   *
+   * Invitations are the one message that goes to somebody OUTSIDE the
+   * business — a new client — and the owner asked for them to come from
+   * `admin@maintsupp.com`, the address a client can reply to and recognise,
+   * rather than the send-only notifications address. Same provider, same
+   * verified domain, same kill switch; only the From line differs.
+   */
+  from?: string;
 };
+
+/**
+ * Who a client's invitation comes from, and where their reply lands.
+ *
+ * Constants, not configuration: the owner named this address, and an
+ * environment variable that could quietly swap it is a way for a client to be
+ * invited by an address nobody recognises. `admin@maintsupp.com` is a real,
+ * read inbox — it is already where contractor applications are delivered
+ * (`NOTIFY_CONTRACTORS`) — so it is the reply-to as well.
+ */
+export const INVITATION_SENDER = "MAINTSUPP <admin@maintsupp.com>";
+export const INVITATION_REPLY_TO = "admin@maintsupp.com";
+
+/**
+ * WHETHER INVITATION EMAILS ARE SWITCHED ON AT ALL. Off unless set to `live`.
+ *
+ * Real invitation delivery is a deferred follow-up (the owner's decision):
+ * no Resend account, no key, no verified domain yet. So invitations get their
+ * own opt-in on top of everything `sendNotification` already checks. Unless
+ * `INVITATION_EMAIL_MODE=live`, the invitation route does not call the mail
+ * path at all — nothing is attempted, nothing is logged as a send, and the
+ * administrator is handed the link to share, exactly as before email existed.
+ *
+ * It is a SECOND gate, not a replacement: with it set to `live`, the global
+ * `EMAIL_MODE` and `RESEND_API_KEY` still decide what happens, so a Preview
+ * left on `sink` still cannot reach a real client. And turning the global
+ * `EMAIL_MODE` to `live` for other notifications does not, by itself, start
+ * mailing invitations.
+ *
+ * Read from `process.env` the way `providerConfig` reads it.
+ */
+export function invitationEmailEnabled() {
+  const env = (globalThis as Record<string, unknown>).process as
+    | { env?: Record<string, string | undefined> }
+    | undefined;
+  return (env?.env?.INVITATION_EMAIL_MODE ?? "").trim().toLowerCase() === "live";
+}
 
 export type SendResult = {
   ok: boolean;
@@ -208,7 +261,7 @@ async function deliverEmail(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        from: config.from,
+        from: request.from ?? config.from,
         to: [to],
         subject,
         html: body,
@@ -345,7 +398,15 @@ export async function sendNotification(
   }
 }
 
-/** Retries every failed or skipped message for an organisation. */
+/**
+ * Retries every failed or skipped message for an organisation.
+ *
+ * NOT INVITATIONS. A replay rebuilds a message from its log row, and the log
+ * deliberately holds no body — for an invitation the body is the only place the
+ * link ever existed, and only its hash was stored. A replayed invitation would
+ * be an email saying "you are invited" with nothing to click. Those rows are
+ * left for the administrator's explicit Resend, which mints a fresh link.
+ */
 export async function replayFailed(db: Database, organisationId: string, limit = 50) {
   const pending = await db
     .select()
@@ -354,6 +415,7 @@ export async function replayFailed(db: Database, organisationId: string, limit =
       and(
         eq(notificationLog.organisationId, organisationId),
         sql`${notificationLog.status} IN ('failed', 'skipped')`,
+        sql`${notificationLog.subjectType} <> 'invitation'`,
       ),
     )
     .limit(limit);
@@ -640,6 +702,98 @@ export function complianceDigestTemplate(summary: {
   };
 }
 
+
+/**
+ * The invitation a new person receives.
+ *
+ * Everything a reader needs to decide whether to click — which workspace, who
+ * asked, what role, until when — and one button. What is NOT here, on purpose:
+ * no password (none exists yet), no internal ids, no member list, nothing about
+ * any other workspace. The link is the only secret in the message, and it
+ * appears only where it has to: the button and the copy-paste fallback.
+ *
+ * Every interpolated value is escaped. The workspace name, the inviter's name
+ * and the optional message are all text somebody typed.
+ */
+export function invitationEmailTemplate(invite: {
+  workspaceName: string;
+  roleLabel: string;
+  inviterName: string | null;
+  inviteUrl: string;
+  expiresAt: string;
+  message?: string | null;
+}) {
+  const workspace = escapeHtml(invite.workspaceName);
+  const url = escapeHtml(invite.inviteUrl);
+  const expires = formatExpiry(invite.expiresAt);
+  const inviter = invite.inviterName?.trim() || null;
+  const lead = inviter
+    ? `${escapeHtml(inviter)} has invited you to join <strong>${workspace}</strong> on MAINTSUPP.`
+    : `You have been invited to join <strong>${workspace}</strong> on MAINTSUPP.`;
+  const note = invite.message?.trim() || null;
+
+  const html = SHELL(
+    `Join ${workspace}`,
+    `<p style="font-size:14px;line-height:1.55;margin:0 0 14px">${lead}</p>
+     <table style="border-collapse:collapse;margin:0 0 14px">
+       ${row("Workspace", invite.workspaceName)}
+       ${row("Your role", invite.roleLabel)}
+       ${row("Link expires", expires)}
+     </table>
+     ${
+       note
+         ? `<p style="font-size:14px;line-height:1.55;margin:0 0 14px;padding:10px 12px;border-left:3px solid #12B4A8;background:#f3faf9">${escapeHtml(note)}</p>`
+         : ""
+     }
+     <p style="margin:20px 0">
+       <a href="${url}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#12B4A8;color:#06221f;font-size:15px;font-weight:700;text-decoration:none">Accept invitation</a>
+     </p>
+     <p style="font-size:12px;line-height:1.5;color:#6b7a83;margin:0 0 10px">
+       If the button does not work, copy this link into your browser:<br>
+       <span style="word-break:break-all">${url}</span>
+     </p>
+     <p style="font-size:12px;line-height:1.5;color:#6b7a83;margin:0">
+       The link works once and expires on ${escapeHtml(expires)}. You will choose your own
+       password when you open it. If you were not expecting this invitation you can
+       ignore this email — nothing happens unless the link is used.
+     </p>`,
+  );
+
+  const text = [
+    inviter
+      ? `${inviter} has invited you to join ${invite.workspaceName} on MAINTSUPP.`
+      : `You have been invited to join ${invite.workspaceName} on MAINTSUPP.`,
+    "",
+    `Workspace: ${invite.workspaceName}`,
+    `Your role: ${invite.roleLabel}`,
+    `Link expires: ${expires}`,
+    ...(note ? ["", note] : []),
+    "",
+    "Accept the invitation:",
+    invite.inviteUrl,
+    "",
+    "The link works once. You will choose your own password when you open it.",
+    "If you were not expecting this invitation you can ignore this email.",
+  ].join("\n");
+
+  return {
+    subject: `You're invited to join ${invite.workspaceName} on MAINTSUPP`,
+    body: html,
+    text,
+  };
+}
+
+/** "23 Sept 2026", in UK time — the same day the invite page shows. */
+function formatExpiry(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "a date your administrator can confirm";
+  return date.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Europe/London",
+  });
+}
 
 export function contractorEventTemplate(event: {
   kind: "opened" | "uploaded" | "completion" | "blocked";

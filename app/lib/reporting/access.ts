@@ -4,8 +4,10 @@
  * ── NO PARALLEL ROLE SYSTEM ────────────────────────────────────────────────
  *
  * The owner described four roles: Administrator, Operations Manager, Finance,
- * Viewer. This workspace has three (`client`, `admin`, `super_admin`) and one
- * capability catalogue, and `app/lib/permissions.ts` explains at length why
+ * Viewer. This workspace has four (`client`, `manager`, `admin`, `super_admin`,
+ * defined in `app/lib/roles.ts`) and one capability catalogue — the built-in
+ * `manager` holds `board.edit`, so it IS the Operations Manager below — and
+ * `app/lib/permissions.ts` explains at length why
  * `role_capabilities` is a sparse diff rather than a source of truth. Inventing
  * a second role table for reports would mean two systems disagreeing about who
  * an Administrator is, and an owner editing the roles matrix would find it did

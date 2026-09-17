@@ -399,6 +399,9 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
       "password_resets",
       "team_members",
       "memberships",
+      /* The three-level batch: both reference `users`, so both go first. */
+      "client_company_members",
+      "platform_admins",
       "users",
     ],
     "the delete order is a dependency order, not a list somebody tidied alphabetically",

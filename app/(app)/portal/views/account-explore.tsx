@@ -22,6 +22,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon } from "../../../components";
+import { useCapability } from "../../../lib/client-capabilities";
+import { assignableRoles, roleLabel } from "../../../lib/roles";
 import type { AccountSnapshot } from "../account-menu";
 import {
   AccountCard,
@@ -371,6 +373,19 @@ export function AccountInvitePanel({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  /*
+   * Only the roles this person may grant IN THIS WORKSPACE are offered.
+   * `snapshot.role` is the role held here (the tenancy resolver's answer for
+   * the selected workspace), and `assignableRoles` is the same rule the
+   * invitation route enforces — so Super Admin is never offered to an Admin,
+   * rather than offered and then refused. `users.invite` decides whether the
+   * form is offered at all; the route refuses without it either way. Owner is
+   * not offered: this form invites into THIS workspace, and an Owner is
+   * appointed to a whole client company from the client console.
+   */
+  const roles = assignableRoles(snapshot.role).filter((entry) => entry !== "owner");
+  const effectiveRole = roles.find((entry) => entry === role) ?? roles[0] ?? "client";
+  const canInvite = useCapability("users.invite");
 
   /**
    * `/api/auth/invitations` belongs to the authentication work. This form does
@@ -379,6 +394,7 @@ export function AccountInvitePanel({
    */
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     setBusy(true);
     setResult(null);
     try {
@@ -387,7 +403,7 @@ export function AccountInvitePanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email,
-          role,
+          role: effectiveRole,
           message,
           organisationId: snapshot.workspace.id,
         }),
@@ -400,14 +416,22 @@ export function AccountInvitePanel({
       }
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
+        delivery?: { status: string; message: string };
       };
       if (!response.ok) {
         throw new Error(payload.error || "The invitation could not be sent.");
       }
       setEmail("");
       setMessage("");
-      setResult(`Invitation created for ${email}.`);
-      onNotify("Invitation created.");
+      setResult(
+        `Invitation created for ${email}. ${
+          payload.delivery?.message ??
+          "Open Administration → Users to copy the link if it needs sharing."
+        }`,
+      );
+      onNotify(
+        payload.delivery?.status === "sent" ? "Invitation emailed." : "Invitation created.",
+      );
     } catch (caught) {
       setResult(
         caught instanceof Error ? caught.message : "The invitation could not be sent.",
@@ -425,6 +449,13 @@ export function AccountInvitePanel({
         lede={`Invite someone into ${snapshot.workspace.name}. The role travels on the invitation, so accepting it cannot grant more than was offered.`}
       />
 
+      {canInvite === false || roles.length === 0 ? (
+        <AccountCard tone="notice" title="Your role cannot invite people">
+          <p className="account-note">
+            Invitations to {snapshot.workspace.name} are sent by its administrators.
+          </p>
+        </AccountCard>
+      ) : (
       <AccountCard title="Send an invitation">
         <form className="account-form" onSubmit={submit}>
           <div className="account-form__grid">
@@ -439,10 +470,15 @@ export function AccountInvitePanel({
             </label>
             <label className="account-field">
               <span>Role</span>
-              <select value={role} onChange={(event) => setRole(event.target.value)}>
-                <option value="client">Client</option>
-                <option value="admin">Admin</option>
-                <option value="super_admin">Super admin</option>
+              <select
+                value={effectiveRole}
+                onChange={(event) => setRole(event.target.value)}
+              >
+                {roles.map((entry) => (
+                  <option key={entry} value={entry}>
+                    {roleLabel(entry)}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
@@ -466,6 +502,7 @@ export function AccountInvitePanel({
           </div>
         </form>
       </AccountCard>
+      )}
 
       <AccountCard tone="notice" title="Where the rule lives">
         <p className="account-note">

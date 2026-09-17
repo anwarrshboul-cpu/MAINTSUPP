@@ -863,23 +863,27 @@ export async function ensureOwnerAccount(d1: D1DatabaseLike) {
     }
   }
 
+  /*
+   * THE OWNER IS A PLATFORM SUPER ADMIN — one row, not one per workspace.
+   *
+   * This loop used to insert a `super_admin` membership into every active
+   * organisation on every visit to /login. Platform authority now belongs to
+   * the person (`platform_admins`), and `resolveTenantAccess` gives a Platform
+   * Super Admin every workspace — including ones created later — without a row
+   * in any of them. The membership rows written before are left in place and
+   * grant nothing.
+   *
+   * `INSERT OR IGNORE`, so a status an operator set by hand is never
+   * overwritten here.
+   */
   const userId = credential?.id ? String(credential.id) : OWNER_USER_ID;
-  for (const organisation of organisations) {
-    if (!organisation.id) continue;
-    await d1
-      .prepare(
-        `INSERT OR IGNORE INTO memberships
-           (id, user_id, organisation_id, role, status, accepted_at)
-         VALUES (?, ?, ?, 'super_admin', 'active', ?)`,
-      )
-      .bind(
-        `membership-${userId}-${organisation.id}`,
-        userId,
-        organisation.id,
-        new Date().toISOString(),
-      )
-      .run();
-  }
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
+       VALUES (?, 'active', 'owner-bootstrap')`,
+    )
+    .bind(userId)
+    .run();
 }
 
 /* ------------------------------------------------------------------ */

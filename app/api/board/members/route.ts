@@ -15,13 +15,14 @@
  * controls and an honest note when it cannot.
  */
 
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { invitations, memberships, users } from "../../../../db/schema";
+import { clientCompanyMembers, invitations, memberships, users } from "../../../../db/schema";
 import { can, resolvePermissions } from "../../../lib/permissions";
+import { invitationEmailEnabled } from "../../../lib/notifications";
+import { assignableRoles, MEMBERSHIP_ROLES } from "../../../lib/roles";
+import { roleInOrganisation } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
-import { invitingRole } from "../../auth/invitations/invitation-tokens";
-import { getD1 } from "../../../../db";
 
 export const dynamic = "force-dynamic";
 
@@ -31,40 +32,70 @@ export async function GET(request: Request) {
     const scope = await scopedDb(request);
     const { db, orgId } = scope;
 
-    const rows = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        fullName: users.fullName,
-        role: memberships.role,
-        jobTitle: sql<string | null>`users.job_title`,
-        avatarColour: sql<string | null>`users.avatar_colour`,
-      })
-      .from(memberships)
-      .innerJoin(users, eq(users.id, memberships.userId))
-      .where(
-        and(
-          eq(memberships.organisationId, orgId),
-          eq(memberships.status, "active"),
-          eq(users.active, true),
-        ),
-      )
-      .orderBy(asc(users.fullName), asc(users.email));
+    const person = {
+      id: users.id,
+      email: users.email,
+      fullName: users.fullName,
+      jobTitle: sql<string | null>`users.job_title`,
+      avatarColour: sql<string | null>`users.avatar_colour`,
+    };
+    /*
+     * Who can open this board: the workspace's members, plus the Owners of its
+     * client company, who reach every workspace of it without a membership.
+     * Legacy `super_admin` membership rows are not listed — MAINTSUPP staff
+     * are not members of a customer's workspace.
+     */
+    const [memberRows, ownerRows] = await Promise.all([
+      db
+        .select({ ...person, role: memberships.role })
+        .from(memberships)
+        .innerJoin(users, eq(users.id, memberships.userId))
+        .where(
+          and(
+            eq(memberships.organisationId, orgId),
+            eq(memberships.status, "active"),
+            inArray(memberships.role, [...MEMBERSHIP_ROLES]),
+            eq(users.active, true),
+          ),
+        )
+        .orderBy(asc(users.fullName), asc(users.email)),
+      scope.clientCompanyId
+        ? db
+            .select({ ...person, role: sql<string>`'owner'` })
+            .from(clientCompanyMembers)
+            .innerJoin(users, eq(users.id, clientCompanyMembers.userId))
+            .where(
+              and(
+                eq(clientCompanyMembers.clientCompanyId, scope.clientCompanyId),
+                eq(clientCompanyMembers.relationship, "owner"),
+                eq(clientCompanyMembers.status, "active"),
+                eq(users.active, true),
+              ),
+            )
+            .orderBy(asc(users.fullName), asc(users.email))
+        : Promise.resolve([]),
+    ]);
+    const ownerIds = new Set(ownerRows.map((row) => row.id));
+    const rows = [...ownerRows, ...memberRows.filter((row) => !ownerIds.has(row.id))];
 
     const subject = await resolvePermissions(db, orgId, scope.actor.role);
     const canViewPeople = can(subject, "users.view");
 
     /*
-     * The role the caller may grant. `invitingRole` is the rule the invitation
-     * route itself applies — a real membership in THIS organisation, super
-     * admins everywhere — so the dialog's role list cannot disagree with the
-     * refusal it would meet.
+     * The role the caller may grant FROM, answered by the same resolver the
+     * invitation route asks (`roleInOrganisation`): Platform Super Admin
+     * everywhere, an Owner in their company's workspaces, otherwise the
+     * membership here. So the dialog's role list cannot disagree with the
+     * refusal it would meet. Only a signed-in person can invite.
      */
-    let inviteAs: string | null = null;
-    if (scope.session?.user.id) {
-      inviteAs = await invitingRole(await getD1(), scope.session.user.id, orgId);
-    }
-    const canInvite = Boolean(inviteAs && (inviteAs === "admin" || inviteAs === "super_admin")) && can(subject, "users.invite");
+    const inviteAs = scope.session?.user.id ? roleInOrganisation(scope, orgId) : null;
+    // The capability decides, as it does in `/api/auth/invitations` itself —
+    // a rank test here would disagree with that route the moment a Super
+    // Admin narrowed or widened `users.invite` for a role.
+    const canInvite =
+      Boolean(inviteAs) &&
+      can(subject, "users.invite") &&
+      assignableRoles(inviteAs).some((role) => role !== "owner");
 
     const pending = canViewPeople
       ? await db
@@ -106,8 +137,10 @@ export async function GET(request: Request) {
         ? null
         : !scope.session
           ? "Sign in to invite people. The preview identity cannot issue invitations."
-          : "Only admins can invite people to this workspace.",
-      delivery: "No email is sent. Share the link with the person you are inviting.",
+          : "Your role cannot invite people to this workspace.",
+      delivery: invitationEmailEnabled()
+        ? "An invitation email is sent from admin@maintsupp.com, and the link is shown here too in case it does not arrive."
+        : "No email is sent yet. Share the link with the person you are inviting.",
     });
   } catch (error) {
     const refusal = anonymousRefusal(error);

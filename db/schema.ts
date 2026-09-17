@@ -267,6 +267,88 @@ export const organisations = sqliteTable("organisations", {
    * were handed three distinct numbers.
    */
   assetSequence: integer("asset_sequence").notNull().default(0),
+  /*
+   * THE CLIENT COMPANY THIS WORKSPACE BELONGS TO.
+   *
+   * An `organisations` row is a WORKSPACE. The customer that owns one or more
+   * of them is a `client_companies` row, and this column is the only link.
+   * Nullable and added by `ensureClientCompanies`, which gives every existing
+   * workspace a company of its own — one each, because nothing in the data
+   * says which existing workspaces belong to the same customer, and guessing
+   * would merge two customers' access. A workspace with no company is still
+   * reachable by a Platform Super Admin and by its own members; it is simply
+   * invisible to every Owner.
+   */
+  clientCompanyId: text("client_company_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+/**
+ * THE CUSTOMER — a client company that owns one or more workspaces.
+ *
+ * The level between the MAINTSUPP platform and its workspaces. An Owner
+ * (`client_company_members`) sees every workspace whose
+ * `organisations.client_company_id` names this row, including ones created
+ * after they became Owner; nobody below Owner inherits anything from it.
+ * `default_organisation_id` is where an Owner lands when they have no valid
+ * last-selected workspace. `kind` is `customer` or `internal` (MAINTSUPP's own
+ * demonstration company, reached by Platform Super Admins only).
+ */
+export const clientCompanies = sqliteTable(
+  "client_companies",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    status: text("status").notNull().default("active"),
+    kind: text("kind").notNull().default("customer"),
+    defaultOrganisationId: text("default_organisation_id"),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("client_companies_slug_idx").on(table.slug)],
+);
+
+/**
+ * A person's relationship with a client company. Today the only relationship
+ * is `owner`. Removed rather than deleted (`status`), so "who owned this
+ * company in March" stays answerable.
+ */
+export const clientCompanyMembers = sqliteTable(
+  "client_company_members",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    clientCompanyId: text("client_company_id").notNull().references(() => clientCompanies.id),
+    relationship: text("relationship").notNull().default("owner"),
+    status: text("status").notNull().default("active"),
+    invitedBy: text("invited_by"),
+    acceptedAt: text("accepted_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("client_company_members_user_company_idx").on(table.userId, table.clientCompanyId),
+    index("client_company_members_company_idx").on(table.clientCompanyId),
+  ],
+);
+
+/**
+ * MAINTSUPP's own staff: the Platform Super Admins.
+ *
+ * Platform authority is a property of the PERSON, not a membership in every
+ * workspace. It used to be modelled as a `super_admin` row in `memberships`,
+ * copied into every organisation by the seeds; those rows are left where they
+ * are, and `ensureClientCompanies` carries every active one across to this
+ * table once. From then on this table is the only thing that makes somebody a
+ * Platform Super Admin.
+ */
+export const platformAdmins = sqliteTable("platform_admins", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  status: text("status").notNull().default("active"),
+  grantedBy: text("granted_by"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -1866,6 +1948,15 @@ export const invitations = sqliteTable(
     acceptedAt: text("accepted_at"),
     acceptedUserId: text("accepted_user_id"),
     revokedAt: text("revoked_at"),
+    /*
+     * Added with client companies. `client_company_id` is the company the
+     * invitation is for; `workspace_ids` is a JSON array of every workspace a
+     * workspace-role invitation grants (`organisation_id` stays the first of
+     * them, and is where the invitee lands). Both NULL on invitations written
+     * before companies existed, which still mean "this one workspace".
+     */
+    clientCompanyId: text("client_company_id"),
+    workspaceIds: text("workspace_ids"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [

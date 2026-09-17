@@ -41,6 +41,13 @@ class Statement {
   }
 
   #run() {
+    /* D1 refuses a statement with more than 100 bound variables; node:sqlite
+       allows thousands. Opt-in, so a test can prove a read stays under D1's
+       ceiling without changing what every other caller of this stub sees. */
+    const ceiling = Number(process.env["D1_STUB_MAX_BOUND_PARAMETERS"] ?? 0);
+    if (ceiling && this.params.length > ceiling) {
+      throw new Error(`D1_ERROR: too many SQL variables (${this.params.length} > ${ceiling})`);
+    }
     const statement = database().prepare(this.sql);
     /* `all()` on a non-SELECT throws in node:sqlite, and `run()` on a SELECT
        returns no rows — so which one is right is decided by the statement. */

@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 import { getD1 } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import {
+  invitationGrant,
   invitationProblem,
   resolveInvitation,
   ROLE_LABEL,
-  normaliseRole,
 } from "../../../api/auth/invitations/invitation-tokens";
 import AcceptInviteForm from "./accept-invite-form";
 import inviteCss from "./invite.css?url";
@@ -48,8 +48,15 @@ export default async function InvitePage({
   const d1 = await getD1();
 
   const { state, invitation } = await resolveInvitation(d1, token);
+  /*
+   * What the link grants — company, workspaces, role — read back from the
+   * database, exactly as the accept route will. A link whose workspaces have
+   * gone, or a legacy Super Admin invitation, is shown as unusable here rather
+   * than as a form that would then be refused.
+   */
+  const grant = state === "valid" && invitation ? await invitationGrant(d1, invitation) : null;
 
-  if (state !== "valid" || !invitation) {
+  if (state !== "valid" || !invitation || !grant) {
     return (
       <>
         <link rel="stylesheet" href={inviteCss} />
@@ -75,7 +82,11 @@ export default async function InvitePage({
             </div>
             <p className="invite__eyebrow">Invitation</p>
             <h1>This link cannot be used</h1>
-            <p className="invite__lede">{invitationProblem(state)}</p>
+            <p className="invite__lede">
+              {state === "valid"
+                ? "This invitation can no longer be used. Ask your administrator for a new one."
+                : invitationProblem(state)}
+            </p>
             <a className="invite__link" href="/login">
               Go to sign in
             </a>
@@ -90,7 +101,8 @@ export default async function InvitePage({
   }
 
   const email = (invitation.email ?? "").toLowerCase();
-  const role = normaliseRole(invitation.role) ?? "client";
+  const role = grant.role;
+  const joinName = role === "owner" ? (grant.companyName ?? grant.landing.name) : grant.landing.name;
 
   /*
    * Does this address already have a password?
@@ -124,16 +136,32 @@ export default async function InvitePage({
 
         <div className="invite__card">
           <p className="invite__eyebrow">Invitation</p>
-          <h1>Join {invitation.organisation_name}</h1>
+          <h1>Join {joinName}</h1>
           <p className="invite__lede">
             {existingAccount
-              ? "You have been added to this workspace."
+              ? role === "owner"
+                ? "You have been made an Owner of this company."
+                : grant.workspaces.length > 1
+                  ? "You have been added to these workspaces."
+                  : "You have been added to this workspace."
               : "Set a password and your account is ready."}
           </p>
 
           <dl className="invite__facts">
-            <dt>Workspace</dt>
-            <dd>{invitation.organisation_name}</dd>
+            {grant.companyName ? (
+              <>
+                <dt>Company</dt>
+                <dd>{grant.companyName}</dd>
+              </>
+            ) : null}
+            <dt>{grant.workspaces.length > 1 || role === "owner" ? "Workspaces" : "Workspace"}</dt>
+            <dd>
+              {role === "owner" ? (
+                <span>All of this company&rsquo;s workspaces ({grant.workspaces.length}), including new ones</span>
+              ) : (
+                <span className="invite__workspaces">{grant.workspaces.map((row) => row.name).join(", ")}</span>
+              )}
+            </dd>
             <dt>Email</dt>
             <dd>{email}</dd>
             <dt>Role</dt>
@@ -162,8 +190,8 @@ export default async function InvitePage({
         </div>
 
         <p className="invite__legal">
-          The role above was set by the administrator who invited you and cannot
-          be changed from this page.
+          The role, company and workspaces above were set by the person who
+          invited you and cannot be changed from this page.
         </p>
       </main>
     </>

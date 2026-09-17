@@ -3072,6 +3072,14 @@ button.analytics-score-panel {
   font-weight: 700;
 }
 
+/* The client company's name above the picker: one line, never a wrapped
+   block that pushes the rail down. The full name is in its title. */
+.workspace-switcher__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace-switcher__copy select {
   width: 100%;
   min-width: 0;

@@ -60,6 +60,7 @@ import { and, eq, getTableColumns, like, or, sql } from "drizzle-orm";
 import {
   attachments,
   calendarEvents,
+  clientCompanyMembers,
   complianceDocuments,
   contractorCertifications,
   contractorNameAliases,
@@ -73,6 +74,7 @@ import {
   memberships,
   passwordResets,
   plannedMaintenance,
+  platformAdmins,
   quotations,
   reminderDispatch,
   reminderRecipients,
@@ -722,6 +724,15 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
   );
   await record("memberships", () =>
     db.delete(memberships).where(sql`user_id in ${seededUsers}`),
+  );
+  /* The company and platform relationships reference `users` too; a seeded
+     account never holds either, but a purge that assumed so would stop
+     half-way on Postgres the day one did. */
+  await record("client_company_members", () =>
+    db.delete(clientCompanyMembers).where(sql`user_id in ${seededUsers}`),
+  );
+  await record("platform_admins", () =>
+    db.delete(platformAdmins).where(sql`user_id in ${seededUsers}`),
   );
   await record("users", () =>
     db.delete(users).where(or(sql`is_seed = ${1}`, like(users.id, prefix))),

@@ -619,8 +619,8 @@ function SectionManagerBody({
       <div className="ba-modal__body sec-body">
         {!canEdit && catalogue && (
           <p className="ba-error" role="note">
-            Only roles with the settings.edit permission can change the platform
-            structure. You can see what exists.
+            Only a Super Admin (the navigation.edit permission) can change the
+            sidebar&rsquo;s sections. You can see what exists.
           </p>
         )}
         {error && (

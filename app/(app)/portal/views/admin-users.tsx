@@ -14,6 +14,12 @@
  * refused because the person is the last Super Admin, the strip at the top says
  * exactly that, because a generic "that didn't work" would leave the operator
  * with no idea what to do next.
+ *
+ * SCOPE-AWARE. The roster is one workspace's members plus its client company's
+ * Owners. Invitations grant a company (Owner, from a Super Admin) or chosen
+ * workspaces of one company (everybody else), and the access dialog adds or
+ * removes a workspace at a time — each offered only where the server says the
+ * caller may (`companyWorkspaces[].inviteRoles` / `accessRoles`).
  */
 
 import { useMemo, useState } from "react";
@@ -28,6 +34,13 @@ import {
   useAdminResource,
   type AdminActor,
 } from "./admin-shell";
+import {
+  CompanyWorkspacesPanel,
+  WorkspaceAccessDialog,
+  WorkspacePicker,
+  type CompanyRef,
+  type CompanyWorkspace,
+} from "./admin-company";
 
 type MembershipSummary = {
   organisationId: string;
@@ -56,29 +69,56 @@ type AdminUser = {
   membershipStatus: string;
   memberships: MembershipSummary[];
   isSelf: boolean;
+  /** The server's answer to "does the caller outrank-or-equal this person". */
+  manageable?: boolean;
+  /** An Owner of this workspace's client company: every workspace of it. */
+  companyOwner?: boolean;
+  /** The company's only active Owner, who cannot be removed or switched off. */
+  soleOwner?: boolean;
+  platformAdmin?: boolean;
 };
 
 type Invitation = {
   id: string;
   email: string;
   role: string;
+  roleLabel?: string;
+  /** The inviter's name or email — never their internal id. */
   invitedBy: string | null;
   expiresAt: string;
   createdAt: string;
   /** Past its expiry, so the link in that inbox no longer opens anything. */
   expired?: boolean;
+  /** An Owner invitation: the whole company rather than listed workspaces. */
+  companyWide?: boolean;
+  workspaces?: Array<{ id: string; name: string }>;
+  /** Whether the caller may resend or withdraw it — the power to issue it. */
+  manageable?: boolean;
 };
 
 type UsersPayload = {
   organisation: { id: string; name: string; slug: string; planTier: string };
-  organisations: Array<{ id: string; name: string; slug: string }>;
-  actor: AdminActor;
+  organisations: Array<{ id: string; name: string; slug: string; companyName?: string | null }>;
+  company?: CompanyRef;
+  companyWorkspaces?: CompanyWorkspace[];
+  actor: AdminActor & { platformAdmin?: boolean; ownsCompany?: boolean };
   roles: Array<{ key: string; label: string; assignable: boolean }>;
   users: AdminUser[];
   invitations: Invitation[];
 };
 
 type Flash = { ok: boolean; message: string } | null;
+
+/** What `/api/auth/invitations` says happened to the email. */
+export type Delivery = {
+  status: "sent" | "sink" | "failed" | "skipped" | "suppressed" | "disabled";
+  message: string;
+};
+
+export function deliveryOf(payload: Record<string, unknown> | null | undefined): Delivery | null {
+  const delivery = payload?.delivery as Delivery | undefined;
+  return delivery && typeof delivery.message === "string" ? delivery : null;
+}
 
 export function AdminUsersView() {
   const [organisationId, setOrganisationId] = useState<string | null>(null);
@@ -90,24 +130,50 @@ export function AdminUsersView() {
   const [flash, setFlash] = useState<Flash>(null);
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [inviting, setInviting] = useState(false);
+  const [granting, setGranting] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /*
-   * The link, held until the admin has actually copied it.
+   * The link, held until the admin has dismissed it.
    *
-   * There is no mail server in this product, so the invitation link IS the
-   * delivery mechanism, and it exists exactly once — the row stores only its
-   * hash, by design, so nothing can hand it back afterwards. Losing it means
-   * the invitation cannot be accepted by anybody. So it stays on screen until
+   * Invitation emails from admin@maintsupp.com exist in the code but are
+   * switched off until real delivery is set up (`INVITATION_EMAIL_MODE`) — and
+   * even when they are on, the link exists
+   * exactly once either way: the row stores only its hash, so nothing can hand
+   * it back afterwards. So the link is still shown, with the server's own
+   * sentence about whether an email actually left, and it stays on screen until
    * dismissed rather than vanishing with the dialog.
    */
   const [issued, setIssued] = useState<{
     email: string;
     url: string;
     kind: "invitation" | "reset";
+    delivery?: Delivery | null;
   } | null>(null);
   const [search, setSearch] = useState("");
 
   const can = (capability: string) => Boolean(data?.actor.capabilities?.[capability]);
+  const assignable = useMemo(
+    () => (data?.roles ?? []).filter((role) => role.assignable),
+    [data],
+  );
+  /* A membership's role is changed only between the three workspace roles. */
+  const workspaceRoles = assignable.filter(
+    (role) => role.key !== "owner" && role.key !== "super_admin",
+  );
+  const companyWorkspaces = data?.companyWorkspaces ?? [];
+  const canGrantAccess = companyWorkspaces.some(
+    (workspace) => !workspace.isCurrent && workspace.accessRoles.length > 0,
+  );
+  const organisationGroups = useMemo(() => {
+    const groups = new Map<string, UsersPayload["organisations"]>();
+    for (const organisation of data?.organisations ?? []) {
+      const key = organisation.companyName ?? "";
+      groups.set(key, [...(groups.get(key) ?? []), organisation]);
+    }
+    const entries = [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+    // Grouped only when a company has several workspaces; otherwise flat.
+    return entries.some(([, list]) => list.length > 1) ? entries : [];
+  }, [data]);
 
   const visible = useMemo(() => {
     if (!data) return [];
@@ -125,7 +191,7 @@ export function AdminUsersView() {
     return {
       active: users.filter((user) => user.active).length,
       deactivated: users.filter((user) => !user.active).length,
-      admins: users.filter((user) => user.role === "admin" || user.role === "super_admin")
+      admins: users.filter((user) => ["admin", "owner", "super_admin"].includes(user.role))
         .length,
       // Expired invitations are listed, but they are not waiting for anybody.
       pending: (data?.invitations ?? []).filter((invitation) => !invitation.expired).length,
@@ -133,26 +199,29 @@ export function AdminUsersView() {
   }, [data]);
 
   /**
-   * Mint a fresh link for somebody already invited.
+   * Resend an invitation — explicitly, by naming it.
    *
-   * `createInvitation` revokes any outstanding invitation for that address
-   * before writing the new one, so this cannot leave two live links to the same
+   * Only the invitation's id is sent: the address, the role and the message
+   * are read back from the stored row, so a resend repeats the invitation and
+   * cannot change it. `createInvitation` revokes the outstanding link before
+   * writing the new one, so this cannot leave two live links to the same
    * workspace — the old one stops working the moment the new one is issued.
-   * That is what makes this safe to offer as "send again" when a link was lost
-   * or has expired.
    */
   async function reissue(invitation: Invitation) {
     setBusy(invitation.id);
     const result = await adminWrite("/api/admin/users", "POST", {
       organisationId: data?.organisation.id,
-      email: invitation.email,
-      role: invitation.role,
+      invitationId: invitation.id,
     });
     setBusy(null);
     const url = result.payload?.inviteUrl;
     if (result.ok && typeof url === "string") {
-      setIssued({ email: invitation.email, url, kind: "invitation" });
-      setFlash({ ok: true, message: `A new link for ${invitation.email}. The previous one no longer works.` });
+      const delivery = deliveryOf(result.payload);
+      setIssued({ email: invitation.email, url, kind: "invitation", delivery });
+      setFlash({
+        ok: true,
+        message: `A new invitation for ${invitation.email}; the previous link no longer works. ${delivery?.message ?? ""}`.trim(),
+      });
       await reload();
       return;
     }
@@ -232,12 +301,13 @@ export function AdminUsersView() {
           </span>
           <h1>Users</h1>
           <p>
-            Everyone with a membership of this workspace, the role that membership
-            grants and the other workspaces they belong to. Deactivating somebody
-            suspends their access without deleting them or their history.
+            Everyone who can open this workspace — its members, and the Owners of its
+            client company — with the role each holds here and the other workspaces of
+            yours they belong to. Deactivating somebody suspends their access without
+            deleting them or their history.
           </p>
         </div>
-        {can("users.invite") ? (
+        {can("users.invite") && assignable.length > 0 && !data?.company?.internal ? (
           <button className="primary-button" type="button" onClick={() => setInviting(true)}>
             <Icon name="plus" size={17} />
             Invite person
@@ -275,11 +345,21 @@ export function AdminUsersView() {
                   value={data.organisation.id}
                   onChange={(event) => setOrganisationId(event.target.value)}
                 >
-                  {data.organisations.map((organisation) => (
-                    <option key={organisation.id} value={organisation.id}>
-                      {organisation.name}
-                    </option>
-                  ))}
+                  {organisationGroups.length > 1
+                    ? organisationGroups.map(([company, organisations]) => (
+                        <optgroup key={company || "none"} label={company || "Other workspaces"}>
+                          {organisations.map((organisation) => (
+                            <option key={organisation.id} value={organisation.id}>
+                              {organisation.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))
+                    : data.organisations.map((organisation) => (
+                        <option key={organisation.id} value={organisation.id}>
+                          {organisation.name}
+                        </option>
+                      ))}
                 </select>
               </label>
             ) : null}
@@ -306,7 +386,7 @@ export function AdminUsersView() {
               <span className="site-stat-icon site-stat-icon--teal">
                 <Icon name="shield" size={19} />
               </span>
-              <small>Admins &amp; super admins</small>
+              <small>Owners &amp; admins</small>
               <strong>{counts.admins}</strong>
             </div>
             <div>
@@ -328,7 +408,11 @@ export function AdminUsersView() {
           <section className="panel admin-panel">
             <div className="panel-heading">
               <div>
-                <span>{data.organisation.name}</span>
+                <span>
+                  {data.company && data.company.name !== data.organisation.name
+                    ? `${data.company.name} · ${data.organisation.name}`
+                    : data.organisation.name}
+                </span>
                 <h2>Members</h2>
               </div>
             </div>
@@ -367,9 +451,23 @@ export function AdminUsersView() {
                           </span>
                         </td>
                         <td>
-                          {can("users.edit") && !user.isSelf ? (
+                          {/*
+                            A picker only where a change could be accepted: the
+                            caller may edit people, this is not them, the person
+                            does not outrank them, and their current role is one
+                            the caller could grant. The options are ONLY the
+                            assignable roles — a role the caller cannot grant is
+                            not offered at all rather than shown disabled. The
+                            API refuses every one of these cases on its own.
+                          */}
+                          {can("users.edit") &&
+                          !user.isSelf &&
+                          user.manageable !== false &&
+                          !user.companyOwner &&
+                          workspaceRoles.some((role) => role.key === user.role) ? (
                             <select
                               className="admin-role-select"
+                              aria-label={`Role for ${user.fullName ?? user.email}`}
                               value={user.role}
                               disabled={busy === user.id}
                               onChange={(event) =>
@@ -379,15 +477,8 @@ export function AdminUsersView() {
                                 )
                               }
                             >
-                              {data.roles.map((role) => (
-                                <option
-                                  key={role.key}
-                                  value={role.key}
-                                  /* An admin cannot grant Super Admin; the API
-                                     refuses it too, so this only saves a round
-                                     trip. */
-                                  disabled={!role.assignable}
-                                >
+                              {workspaceRoles.map((role) => (
+                                <option key={role.key} value={role.key}>
                                   {role.label}
                                 </option>
                               ))}
@@ -400,6 +491,11 @@ export function AdminUsersView() {
                         </td>
                         <td>
                           <span className="admin-workspaces">
+                            {user.companyOwner ? (
+                              <span className="admin-chip admin-chip--current">
+                                Every {data.company?.name ?? "company"} workspace
+                              </span>
+                            ) : null}
                             {user.memberships.map((membership) => (
                               <span
                                 key={membership.organisationId}
@@ -426,7 +522,22 @@ export function AdminUsersView() {
                         <td>{relativeTime(user.lastLoginAt)}</td>
                         <td>
                           <span className="admin-actions">
-                            {can("users.edit") ? (
+                            {canGrantAccess &&
+                            data.company &&
+                            !data.company.internal &&
+                            user.manageable !== false &&
+                            !user.isSelf &&
+                            !user.companyOwner &&
+                            !user.platformAdmin ? (
+                              <button
+                                type="button"
+                                className="secondary-button admin-mini"
+                                onClick={() => setGranting(user)}
+                              >
+                                Workspaces
+                              </button>
+                            ) : null}
+                            {can("users.edit") && user.manageable !== false ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
@@ -435,7 +546,10 @@ export function AdminUsersView() {
                                 Edit
                               </button>
                             ) : null}
-                            {can("users.edit") && !user.isSelf && user.active ? (
+                            {can("users.edit") &&
+                            user.manageable !== false &&
+                            !user.isSelf &&
+                            user.active ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
@@ -446,11 +560,19 @@ export function AdminUsersView() {
                                 Reset password
                               </button>
                             ) : null}
-                            {can("users.deactivate") ? (
+                            {can("users.deactivate") && user.manageable !== false ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
-                                disabled={busy === user.id}
+                                /* The only Owner of a company stays switched on
+                                   until another Owner is appointed; the server
+                                   refuses it either way. */
+                                title={
+                                  user.soleOwner && user.active
+                                    ? `The only Owner of ${data.company?.name ?? "this company"} cannot be deactivated. Appoint another Owner first.`
+                                    : undefined
+                                }
+                                disabled={busy === user.id || Boolean(user.soleOwner && user.active)}
                                 onClick={() =>
                                   void run(
                                     {
@@ -486,6 +608,24 @@ export function AdminUsersView() {
 
           {issued ? <IssuedLink issued={issued} onDismiss={() => setIssued(null)} /> : null}
 
+          {data.company?.internal ? (
+            <AdminNotice tone="empty" icon="shield" title="MAINTSUPP internal workspace">
+              This workspace belongs to MAINTSUPP&rsquo;s own demonstration company. Only Platform
+              Super Admins work in it, so nobody is invited or given access here.
+            </AdminNotice>
+          ) : null}
+
+          {data.company && (data.actor.platformAdmin || data.company.owned) ? (
+            <CompanyWorkspacesPanel
+              company={data.company}
+              workspaces={companyWorkspaces}
+              canAdd
+              canRename
+              onFlash={setFlash}
+              onAdded={reload}
+            />
+          ) : null}
+
           <section className="panel admin-panel">
             <div className="panel-heading">
               <div>
@@ -500,6 +640,7 @@ export function AdminUsersView() {
                     <tr>
                       <th>Email</th>
                       <th>Role on acceptance</th>
+                      <th>Grants</th>
                       <th>Invited by</th>
                       <th>Sent</th>
                       <th>Expires</th>
@@ -512,7 +653,22 @@ export function AdminUsersView() {
                         <td>{invitation.email}</td>
                         <td>
                           <span className={`admin-role-chip admin-role-chip--${invitation.role}`}>
-                            {invitation.role}
+                            {invitation.roleLabel ?? invitation.role}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="admin-workspaces">
+                            {invitation.companyWide ? (
+                              <span className="admin-chip">
+                                Every {data.company?.name ?? "company"} workspace
+                              </span>
+                            ) : (
+                              (invitation.workspaces ?? []).map((workspace) => (
+                                <span key={workspace.id} className="admin-chip">
+                                  {workspace.name}
+                                </span>
+                              ))
+                            )}
                           </span>
                         </td>
                         <td>{invitation.invitedBy ?? "—"}</td>
@@ -528,6 +684,10 @@ export function AdminUsersView() {
                         </td>
                         {can("users.invite") ? (
                           <td>
+                            {/* Only for an invitation the caller could have
+                                issued — in every workspace it grants: the API
+                                refuses resending or withdrawing any other. */}
+                            {invitation.manageable ?? assignable.some((role) => role.key === invitation.role) ? (
                             <span className="admin-actions">
                             <button
                               type="button"
@@ -535,7 +695,7 @@ export function AdminUsersView() {
                               disabled={busy === invitation.id}
                               onClick={() => reissue(invitation)}
                             >
-                              {invitation.expired ? "Send a new link" : "Get the link again"}
+                              {invitation.expired ? "Send a new invitation" : "Resend invitation"}
                             </button>
                             <button
                               type="button"
@@ -546,6 +706,7 @@ export function AdminUsersView() {
                               Withdraw
                             </button>
                             </span>
+                            ) : null}
                           </td>
                         ) : null}
                       </tr>
@@ -575,9 +736,28 @@ export function AdminUsersView() {
         />
       ) : null}
 
+      {granting && data?.company ? (
+        <WorkspaceAccessDialog
+          user={granting}
+          company={data.company}
+          workspaces={companyWorkspaces}
+          organisationId={data.organisation.id}
+          onClose={() => setGranting(null)}
+          onChanged={async (result) => {
+            setFlash(result);
+            if (result.ok) {
+              await reload();
+              setGranting(null);
+            }
+          }}
+        />
+      ) : null}
+
       {inviting && data ? (
         <InviteDialog
           roles={data.roles}
+          company={data.company ?? null}
+          workspaces={companyWorkspaces}
           organisationId={data.organisation.id}
           onClose={() => setInviting(false)}
           onSent={async (result, link) => {
@@ -708,29 +888,32 @@ function ProfileDialog({
 /**
  * The invitation link, and the only chance to copy it.
  *
- * Stated plainly rather than dressed up as a sent email, because no email is
- * sent — this product has no mail server, and a screen that says "invitation
- * sent" while nothing leaves the building is the kind of lie that has somebody
- * waiting a week for a message that was never going to arrive.
+ * Invitations are emailed now — but only where the deployment has email
+ * configured and switched on, and only if the provider accepted the message.
+ * So this panel repeats the SERVER's sentence about what happened rather than
+ * assuming: a screen that says "invitation sent" while nothing left the
+ * building is the kind of lie that has somebody waiting a week for a message
+ * that was never going to arrive.
  *
  * Not dismissed on a timer or by clicking elsewhere: losing this link means the
  * invitation cannot be accepted by anyone, and it cannot be fetched again.
  */
-function IssuedLink({
+export function IssuedLink({
   issued,
   onDismiss,
 }: {
-  issued: { email: string; url: string; kind: "invitation" | "reset" };
+  issued: { email: string; url: string; kind: "invitation" | "reset"; delivery?: Delivery | null };
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const reset = issued.kind === "reset";
+  const emailed = issued.delivery?.status === "sent";
 
   return (
     <section className="panel admin-panel admin-invite-link">
       <div className="panel-heading">
         <div>
-          <span>Send this to {issued.email}</span>
+          <span>{emailed ? `Emailed to ${issued.email}` : `Send this to ${issued.email}`}</span>
           <h2>{reset ? "Their password reset link" : "Their invitation link"}</h2>
         </div>
         <button type="button" className="secondary-button admin-mini" onClick={onDismiss}>
@@ -740,7 +923,7 @@ function IssuedLink({
       <p className="admin-invite-link__note">
         {reset
           ? "Shown once, and it expires in 24 hours. Give it to them directly — it opens their account, so treat it like a password. Using it signs out every device they are signed in on."
-          : "Shown once. Only a hash of it is stored, so it cannot be looked up again — if it is lost, use “Send a new link” to issue a replacement, which retires this one."}
+          : `${issued.delivery?.message ?? "No email was sent — share this link with them directly."} Shown once. Only a hash of it is stored, so it cannot be looked up again — if it is lost, use “Resend invitation”, which retires this one.`}
       </p>
       <div className="admin-invite-link__row">
         <input
@@ -777,23 +960,48 @@ function IssuedLink({
 
 function InviteDialog({
   roles,
+  company,
+  workspaces,
   organisationId,
   onClose,
   onSent,
 }: {
   roles: Array<{ key: string; label: string; assignable: boolean }>;
+  company: CompanyRef;
+  workspaces: CompanyWorkspace[];
   organisationId: string;
   onClose: () => void;
   onSent: (
     result: { ok: boolean; message: string },
-    link: { email: string; url: string } | null,
+    link: { email: string; url: string; delivery: Delivery | null } | null,
   ) => void | Promise<void>;
 }) {
-  const assignable = roles.filter((role) => role.assignable);
+  /*
+   * THE RELATIONSHIP comes first: Owner of the company, or a role in chosen
+   * workspaces of it. Only relationships the caller may grant are listed — an
+   * Owner only for a Super Admin — and for a workspace role, only the
+   * workspaces where they may grant it. The invitee chooses none of this.
+   */
+  const assignable = roles.filter(
+    (role) =>
+      role.assignable &&
+      role.key !== "super_admin" &&
+      (role.key === "owner"
+        ? Boolean(company)
+        : !workspaces.length || workspaces.some((workspace) => workspace.inviteRoles.includes(role.key))),
+  );
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState(assignable[0]?.key ?? "client");
+  const [role, setRole] = useState(
+    assignable.find((item) => item.key === "client")?.key ?? assignable[0]?.key ?? "client",
+  );
+  const [selected, setSelected] = useState<string[]>([organisationId]);
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const owner = role === "owner";
+  const grantable = workspaces.filter((workspace) => workspace.inviteRoles.includes(role));
+  const chosen = workspaces.length
+    ? selected.filter((id) => grantable.some((workspace) => workspace.id === id))
+    : [organisationId];
 
   return (
     <AdminDialog title="Invite somebody" subtitle="People &amp; access" onClose={onClose}>
@@ -801,20 +1009,30 @@ function InviteDialog({
         className="admin-form"
         onSubmit={async (event) => {
           event.preventDefault();
+          // One request per invitation: a second press while the first is in
+          // flight is ignored here, and the server refuses a duplicate anyway.
+          if (sending) return;
+          if (!owner && !chosen.length) return;
           setSending(true);
           const result = await adminWrite("/api/admin/users", "POST", {
             organisationId,
             email,
             role,
+            organisationIds: owner ? [] : chosen,
+            clientCompanyId: company?.id,
             message,
           });
           setSending(false);
           const url = result.payload?.inviteUrl;
+          const delivery = deliveryOf(result.payload);
           await onSent(
             result.ok
-              ? { ok: true, message: `${email} has been invited. Send them the link below.` }
+              ? {
+                  ok: true,
+                  message: `${email} has been invited. ${delivery?.message ?? "Send them the link below."}`,
+                }
               : result,
-            result.ok && typeof url === "string" ? { email, url } : null,
+            result.ok && typeof url === "string" ? { email, url, delivery } : null,
           );
         }}
       >
@@ -829,19 +1047,34 @@ function InviteDialog({
           />
         </label>
         <label className="admin-field">
-          <span>Role on acceptance</span>
+          <span>Relationship</span>
           <select value={role} onChange={(event) => setRole(event.target.value)}>
             {assignable.map((item) => (
               <option key={item.key} value={item.key}>
-                {item.label}
+                {item.key === "owner" ? `Owner of ${company?.name ?? "the company"}` : item.label}
               </option>
             ))}
           </select>
           <small>
-            You can only invite at or below your own role. The role is written onto the
-            invitation, so accepting it cannot grant anything more.
+            Only what you are allowed to grant is listed. It is written onto the
+            invitation, so accepting it cannot grant anything more. You will get a link
+            to share; invitation emails are not switched on yet.
           </small>
         </label>
+        {owner ? (
+          <p className="admin-company-note">
+            An Owner of {company?.name ?? "this company"} reaches every one of its
+            workspaces, including ones added later, and can invite Admins, Managers and
+            Clients to them.
+          </p>
+        ) : workspaces.length ? (
+          <WorkspacePicker
+            workspaces={workspaces}
+            role={role}
+            selected={chosen}
+            onChange={setSelected}
+          />
+        ) : null}
         <label className="admin-field">
           <span>Message (optional)</span>
           <textarea
@@ -854,8 +1087,12 @@ function InviteDialog({
           <button type="button" className="secondary-button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="primary-button" disabled={sending}>
-            {sending ? "Creating…" : "Create invitation"}
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={sending || (!owner && !chosen.length)}
+          >
+            {sending ? "Sending…" : "Send invitation"}
           </button>
         </div>
       </form>

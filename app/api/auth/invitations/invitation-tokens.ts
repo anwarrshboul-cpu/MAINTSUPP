@@ -27,33 +27,36 @@
 
 import type { getD1 } from "../../../../db";
 import { hashToken } from "../../../lib/auth-session";
+import { invitationWorkspaceIds } from "./invitation-scope";
+import {
+  ROLE_LABELS,
+  ROLE_RANK,
+  normaliseRole as normaliseWorkspaceRole,
+  type WorkspaceRole,
+} from "../../../lib/roles";
 
 type D1DatabaseLike = Awaited<ReturnType<typeof getD1>>;
 
-export type InvitableRole = "super_admin" | "admin" | "client";
+/*
+ * The role vocabulary is `roles.ts`'s. These names are kept because the
+ * invitation routes, the invite page and the admin context import them from
+ * here; they used to be a private three-role copy, which is exactly the kind
+ * of list a fourth role gets left out of.
+ */
+export type InvitableRole = WorkspaceRole;
 
 /** Ranked so an inviter can never grant more than they hold. */
-export const ROLE_RANK: Record<InvitableRole, number> = {
-  client: 0,
-  admin: 1,
-  super_admin: 2,
-};
+export { ROLE_RANK };
 
 /** The label written to `users.role`, which is display text, not authority. */
-export const ROLE_LABEL: Record<InvitableRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  client: "Client",
-};
+export const ROLE_LABEL: Record<InvitableRole, string> = ROLE_LABELS;
 
 /** Long enough to survive a weekend and a forwarded email, short enough to rot. */
 export const DEFAULT_EXPIRY_DAYS = 7;
 const MAX_EXPIRY_DAYS = 30;
 
 export function normaliseRole(value: unknown): InvitableRole | null {
-  return value === "super_admin" || value === "admin" || value === "client"
-    ? value
-    : null;
+  return normaliseWorkspaceRole(value);
 }
 
 export function normaliseEmail(value: unknown) {
@@ -93,8 +96,11 @@ export type InvitationRow = {
   accepted_user_id?: string | null;
   revoked_at?: string | null;
   created_at?: string;
+  client_company_id?: string | null;
+  workspace_ids?: string | null;
   organisation_name?: string | null;
   organisation_slug?: string | null;
+  company_name?: string | null;
 };
 
 export type InvitationState =
@@ -135,9 +141,12 @@ export async function resolveInvitation(
     .prepare(
       `SELECT i.id, i.organisation_id, i.email, i.role, i.invited_by, i.message,
               i.expires_at, i.accepted_at, i.accepted_user_id, i.revoked_at, i.created_at,
-              o.name AS organisation_name, o.slug AS organisation_slug
+              i.client_company_id, i.workspace_ids,
+              o.name AS organisation_name, o.slug AS organisation_slug,
+              c.name AS company_name
          FROM invitations i
          JOIN organisations o ON o.id = i.organisation_id
+         LEFT JOIN client_companies c ON c.id = i.client_company_id
         WHERE i.token_hash = ?
         LIMIT 1`,
     )
@@ -173,6 +182,59 @@ export function invitationProblem(state: InvitationState): string | null {
 }
 
 /**
+ * The outstanding, unexpired invitation for this person, if any.
+ *
+ * What stops a second click from sending a second email: an ordinary invite is
+ * refused while one of these exists, and "send it again" has to be asked for
+ * explicitly. An EXPIRED invitation does not count — the link in that inbox
+ * opens nothing, so a fresh invite is the right answer, and `createInvitation`
+ * retires the dead row as it always has.
+ *
+ * Scoped to the CLIENT COMPANY: one person has at most one live invitation per
+ * company, whichever of its workspaces it grants. Invitations written before
+ * companies existed carry no company, and still match by their workspace.
+ */
+export async function findOutstandingInvitation(
+  d1: D1DatabaseLike,
+  scope: { email: string; clientCompanyId: string | null; organisationIds: string[] },
+): Promise<{
+  id: string;
+  role: string;
+  expires_at: string;
+  workspace_ids: string | null;
+  organisation_id: string;
+} | null> {
+  const workspaceIds = scope.organisationIds.length ? scope.organisationIds : [""];
+  const result = await d1
+    .prepare(
+      `SELECT id, role, expires_at, workspace_ids, organisation_id
+         FROM invitations
+        WHERE lower(email) = ?
+          AND accepted_at IS NULL
+          AND revoked_at IS NULL
+          AND (client_company_id = ? OR organisation_id IN (${workspaceIds.map(() => "?").join(", ")}))
+        ORDER BY created_at DESC
+        LIMIT 5`,
+    )
+    .bind(scope.email, scope.clientCompanyId ?? "", ...workspaceIds)
+    .all();
+  const rows = (result.results ?? []) as Array<{
+    id: string;
+    role: string;
+    expires_at: string;
+    workspace_ids: string | null;
+    organisation_id: string;
+  }>;
+  const now = Date.now();
+  return (
+    rows.find((row) => {
+      const expires = timestampMs(row.expires_at);
+      return expires !== null && expires > now;
+    }) ?? null
+  );
+}
+
+/**
  * Creates an invitation and returns its token exactly once.
  *
  * The plaintext token is in the return value and nowhere else — it is not
@@ -181,15 +243,20 @@ export function invitationProblem(state: InvitationState): string | null {
  * a contractor link. What matters is that this is the *only* moment it exists,
  * and that it goes to the admin who just proved they may issue it.
  *
- * Any outstanding invitation for the same person and workspace is revoked
- * first. Two live links to one seat means a withdrawn invitation is not
+ * Any outstanding invitation for the same person and company (or landing
+ * workspace) is revoked first. Two live links to one seat means a withdrawn invitation is not
  * actually withdrawn, which is the sort of thing nobody notices until it is
  * the reason somebody still has access.
  */
 export async function createInvitation(
   d1: D1DatabaseLike,
   input: {
+    /** Where the invitee lands, and the first workspace a workspace role grants. */
     organisationId: string;
+    /** The client company the invitation is for. */
+    clientCompanyId: string | null;
+    /** Every workspace a workspace-role invitation grants; null for an Owner. */
+    workspaceIds: string[] | null;
     email: string;
     role: InvitableRole;
     invitedBy: string | null;
@@ -206,23 +273,31 @@ export async function createInvitation(
   );
   const expiresAt = new Date(Date.now() + days * 86_400_000).toISOString();
 
+  /* Retire every outstanding invitation for this person in the same company
+     (or, for pre-company rows, the same landing workspace). */
   await d1
     .prepare(
       `UPDATE invitations
           SET revoked_at = ?
-        WHERE organisation_id = ?
+        WHERE (organisation_id = ? OR client_company_id = ?)
           AND lower(email) = ?
           AND accepted_at IS NULL
           AND revoked_at IS NULL`,
     )
-    .bind(new Date().toISOString(), input.organisationId, input.email)
+    .bind(
+      new Date().toISOString(),
+      input.organisationId,
+      input.clientCompanyId ?? "",
+      input.email,
+    )
     .run();
 
   await d1
     .prepare(
       `INSERT INTO invitations
-         (id, organisation_id, email, role, token_hash, invited_by, message, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, organisation_id, email, role, token_hash, invited_by, message, expires_at,
+          client_company_id, workspace_ids)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -233,6 +308,8 @@ export async function createInvitation(
       input.invitedBy,
       input.message?.trim().slice(0, 500) || null,
       expiresAt,
+      input.clientCompanyId,
+      input.workspaceIds ? JSON.stringify(input.workspaceIds) : null,
     )
     .run();
 
@@ -240,39 +317,103 @@ export async function createInvitation(
 }
 
 /**
- * The strongest role a user actually holds, for the purpose of inviting.
- *
- * Mirrors `resolveTenantAccess`: a super admin of any organisation is a super
- * admin everywhere, and everyone else is whatever their membership in *this*
- * organisation says. Read from `memberships` rather than from `users.role`,
- * because `users.role` is a display label and has never been the authority.
+ * `invitingRole` used to live here: a second reader of "which role does this
+ * person hold in this workspace", with its own super-admin query. It is gone.
+ * The invitation route and the board's member list now ask the tenancy
+ * resolver (`roleInOrganisation`), which also knows about Owners — one reader,
+ * one answer.
  */
-export async function invitingRole(
-  d1: D1DatabaseLike,
-  userId: string,
-  organisationId: string,
-): Promise<InvitableRole | null> {
-  const anywhere = await d1
-    .prepare(
-      `SELECT 1 AS found
-         FROM memberships m
-         JOIN organisations o ON o.id = m.organisation_id
-        WHERE m.user_id = ? AND m.status = 'active'
-          AND m.role = 'super_admin' AND o.status = 'active'
-        LIMIT 1`,
-    )
-    .bind(userId)
-    .all();
-  if ((anywhere.results ?? []).length) return "super_admin";
 
-  const here = await d1
+/* The workspace ids a stored invitation grants: see `invitation-scope.ts`. */
+export { invitationWorkspaceIds };
+
+type GrantedWorkspace = { id: string; name: string };
+
+/**
+ * WHAT THIS INVITATION GRANTS, re-read from the database at the moment it is
+ * used — never from the request.
+ *
+ *   · an OWNER invitation grants the client company. The workspaces listed are
+ *     the company's active ones today (ownership reaches later ones too), and
+ *     the landing workspace is the invitation's, else the company default,
+ *     else the first.
+ *   · a WORKSPACE invitation grants the workspaces stored on it, narrowed to
+ *     those still active and still in the invitation's company. A workspace
+ *     archived or moved since the invite was sent is simply not granted.
+ *
+ * Null when nothing grantable is left, or the role is one no invitation may
+ * carry any more (`super_admin` — Platform Super Admins are not appointed by
+ * link). The caller refuses in that case, before the token is consumed.
+ */
+export type InvitationGrant = {
+  role: "owner" | "admin" | "manager" | "client";
+  clientCompanyId: string | null;
+  companyName: string | null;
+  landing: GrantedWorkspace;
+  workspaces: GrantedWorkspace[];
+};
+
+export async function invitationGrant(
+  d1: D1DatabaseLike,
+  invitation: InvitationRow,
+): Promise<InvitationGrant | null> {
+  const role = normaliseRole(invitation.role);
+  if (!role || role === "super_admin" || !invitation.organisation_id) return null;
+  const companyId = invitation.client_company_id ?? null;
+
+  if (role === "owner") {
+    if (!companyId) return null;
+    const company = await d1
+      .prepare(
+        "SELECT id, name, default_organisation_id FROM client_companies WHERE id = ? AND status = 'active' LIMIT 1",
+      )
+      .bind(companyId)
+      .all();
+    const [companyRow] = (company.results ?? []) as Array<{
+      id: string;
+      name: string;
+      default_organisation_id: string | null;
+    }>;
+    if (!companyRow) return null;
+    const rows = await d1
+      .prepare(
+        `SELECT id, name FROM organisations
+          WHERE client_company_id = ? AND status = 'active'
+          ORDER BY created_at, id`,
+      )
+      .bind(companyId)
+      .all();
+    const workspaces = (rows.results ?? []) as GrantedWorkspace[];
+    const landing =
+      workspaces.find((row) => row.id === invitation.organisation_id) ??
+      workspaces.find((row) => row.id === companyRow.default_organisation_id) ??
+      workspaces[0];
+    if (!landing) return null;
+    return { role, clientCompanyId: companyId, companyName: companyRow.name, landing, workspaces };
+  }
+
+  const wanted = invitationWorkspaceIds(invitation);
+  if (!wanted.length) return null;
+  const rows = await d1
     .prepare(
-      `SELECT role FROM memberships
-        WHERE user_id = ? AND organisation_id = ? AND status = 'active'
-        LIMIT 1`,
+      `SELECT id, name, client_company_id FROM organisations
+        WHERE status = 'active' AND id IN (${wanted.map(() => "?").join(", ")})`,
     )
-    .bind(userId, organisationId)
+    .bind(...wanted)
     .all();
-  const [row] = (here.results ?? []) as Array<{ role?: string }>;
-  return normaliseRole(row?.role);
+  const found = (rows.results ?? []) as Array<GrantedWorkspace & { client_company_id: string | null }>;
+  const workspaces = wanted
+    .map((id) => found.find((row) => row.id === id))
+    .filter((row): row is GrantedWorkspace & { client_company_id: string | null } => Boolean(row))
+    .filter((row) => !companyId || row.client_company_id === companyId)
+    .map(({ id, name }) => ({ id, name }));
+  if (!workspaces.length) return null;
+  const landing = workspaces.find((row) => row.id === invitation.organisation_id) ?? workspaces[0];
+  return {
+    role,
+    clientCompanyId: companyId,
+    companyName: invitation.company_name ?? null,
+    landing,
+    workspaces,
+  };
 }

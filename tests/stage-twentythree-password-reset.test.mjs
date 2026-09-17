@@ -116,9 +116,11 @@ test("issuing a link is gated, scoped, and refuses upward and self", async () =>
     /eq\(memberships\.organisationId, context\.targetOrganisationId\)/,
     "another workspace's account is not found rather than refused",
   );
+  // A rank comparison until the owner's role decision; now the assignment
+  // table, which ALSO keeps an Admin from resetting another Admin.
   assert.match(
     source,
-    /if \(ROLE_RANK\[targetRole\] > ROLE_RANK\[context\.actor\.role\]\)/,
+    /if \(!canManageRole\(context\.actor\.role, targetRole\)\)/,
     "an admin issuing a reset for a super admin would hand themselves that account",
   );
   assert.match(

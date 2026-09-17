@@ -25,6 +25,8 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
+// Resolves the extensionless imports inside app/lib/*.ts for the unit checks.
+import "./reports-ts-loader.mjs";
 
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:3000";
 const PRIMARY_ORGANISATION_ID = "org_000000000000000000000001";
@@ -238,8 +240,11 @@ test("a signed-in account cannot be widened by a membership it does not hold", a
   );
 
   // And the role fallback must not reach for the cookie role, which defaults
-  // to super_admin when the cookie is absent.
-  assert.match(text, /:\s*session\s*\n?\s*\?\s*"client"\s*\n?\s*:\s*actor\.role/);
+  // to super_admin when the cookie is absent. Re-pointed: only the
+  // development `unaffiliated` fallback (never set with a session) keeps the
+  // cookie role; a session with no access is refused outright (`noAccess`).
+  assert.match(text, /grantHere\?\.role \?\? \(unaffiliated \? actor\.role : "client"\)/);
+  assert.match(text, /if \(session\) \{\s*organisationIds = \[\];\s*noAccess = true;/);
 });
 
 test("the Stage 19 tenancy rules are untouched", async () => {
@@ -247,10 +252,15 @@ test("the Stage 19 tenancy rules are untouched", async () => {
 
   // The organisation cookie is still filtered through the allowed set, and the
   // session's own organisation is a request on exactly the same terms.
-  assert.match(text, /allowed\.has\(requestedId\)/);
-  assert.match(text, /session\?\.organisationId/);
-  assert.match(text, /crossOrganisation: role === "super_admin"/);
-  assert.match(text, /eq\(memberships\.status, "active"\)/);
+  assert.match(text, /Boolean\(id && allowed\.has\(id\)\)/);
+  assert.match(text, /isAllowed\(session\?\.organisationId\)/);
+  // Cross-organisation reach: `role === "super_admin"`, then the strongest
+  // membership anywhere, and since the three-level batch platform authority
+  // (`platform_admins`), which no membership row can grant.
+  assert.match(text, /const platformAdmin = authority\?\.platformAdmin \?\? false;/);
+  assert.match(text, /crossOrganisation: platformAdmin/);
+  // The membership reader now lives in `tenant-grants.ts`.
+  assert.match(await source("app/lib/tenant-grants.ts"), /eq\(memberships\.status, "active"\)/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -322,16 +332,20 @@ test("accepting an invitation cannot escalate the role", async () => {
   const accept = await source("app/api/auth/invitations/[token]/route.ts");
 
   // The role comes out of the invitation row, never out of the request body.
-  assert.match(accept, /const role = normaliseRole\(invitation\.role\)/);
+  // Re-pointed: `invitationGrant` reads the row (role, company, workspaces).
+  assert.match(accept, /const grant = await invitationGrant\(d1, invitation\);/);
+  assert.match(accept, /const role = grant\.role;/);
+  const tokens = await source("app/api/auth/invitations/invitation-tokens.ts");
+  assert.match(tokens, /const role = normaliseRole\(invitation\.role\);/);
   assert.doesNotMatch(
     accept,
     /payload\.role/,
     "the accept endpoint must not read a role from the request",
   );
 
-  // The membership INSERT binds that same `role`.
+  // The membership INSERT binds that same `role`, once per granted workspace.
   assert.match(accept, /INSERT INTO memberships/);
-  assert.match(accept, /invitation\.organisation_id,\s*\n\s*role,/);
+  assert.match(accept, /workspace\.id,\s*\n\s*role,/);
 
   // Single use, enforced as a compare-and-set rather than a read-then-write.
   assert.match(accept, /WHERE id = \? AND accepted_at IS NULL AND revoked_at IS NULL/);
@@ -346,18 +360,48 @@ test("only an admin may invite, and never above their own role", async () => {
   const create = await source("app/api/auth/invitations/route.ts");
 
   assert.match(create, /requireSession\(request\)/);
-  assert.match(create, /invitingRole\(d1, current\.user\.id, organisationId\)/);
-  assert.match(create, /ROLE_RANK\[granting\] < ROLE_RANK\.admin/);
+  // Re-pointed: `invitingRole` is gone; the tenancy resolver answers, per
+  // target workspace, which role the caller holds there.
+  assert.match(create, /scope = await scopedDb\(request\);/);
+  assert.match(create, /const actingRole = roleInOrganisation\(scope, target\.id\);/);
+  /*
+   * "Only an admin" is now the permission matrix's answer, not a rank test.
+   *
+   * This pinned `ROLE_RANK[granting] < ROLE_RANK.admin`, which ignored the
+   * matrix: an admin whose `users.invite` had been withdrawn could still invite
+   * by calling this route directly. The route now resolves the caller's
+   * permissions IN THE TARGET WORKSPACE and asks `can(…, "users.invite")`, and
+   * the built-in defaults are what keep it to admins — checked below.
+   */
   assert.match(
     create,
-    /ROLE_RANK\[role\] > ROLE_RANK\[granting\]/,
-    "an inviter must not be able to grant a role above their own",
+    /const subject = await resolvePermissions\(db, target\.id, actingRole\);\s*if \(!can\(subject, "users\.invite"\)\)/,
   );
+  const permissions = await import("../app/lib/permissions.ts");
+  assert.equal(permissions.defaultAllows("admin", "users.invite"), true);
+  assert.equal(permissions.defaultAllows("manager", "users.invite"), false);
+  assert.equal(permissions.defaultAllows("client", "users.invite"), false);
+  // `ROLE_RANK[role] > ROLE_RANK[granting]` until the owner's assignment
+  // decision: an Admin may no longer grant Admin (equal rank), and a Manager
+  // grants nothing although a Client ranks below them. The rule is the table
+  // in `canAssignRole`, and it is still applied before anything is written.
+  assert.match(
+    create,
+    /if \(!canAssignRole\(actingRole, role\)\) \{/,
+    "an inviter must not be able to grant a role their table does not allow",
+  );
+  const roles = await import("../app/lib/roles.ts");
+  assert.equal(roles.canAssignRole("admin", "super_admin"), false);
+  assert.equal(roles.canAssignRole("admin", "admin"), false);
 
-  // The authority is memberships, not the display label on users.role.
+  // The authority is memberships (and company/platform rows), not the display
+  // label on users.role. Re-pointed: the inviter's authority is read by the
+  // tenancy resolver, which the route asks; neither file reads users.role.
   const helpers = await source("app/api/auth/invitations/invitation-tokens.ts");
-  assert.match(helpers, /FROM memberships/);
+  const resolver = await source("app/lib/tenant-grants.ts");
+  assert.match(resolver, /from\(memberships\)/);
   assert.doesNotMatch(helpers, /FROM users\s+WHERE[\s\S]{0,80}role/);
+  assert.doesNotMatch(create, /FROM users\s+WHERE[\s\S]{0,80}role/);
 });
 
 test("changing a password requires the current one and ends other sessions", async () => {

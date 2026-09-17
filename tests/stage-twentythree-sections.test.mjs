@@ -332,14 +332,22 @@ test("the icon list agrees with the one the renderer draws from", async () => {
 });
 
 test("every write is guarded by settings.edit, through the established helper", async () => {
+  /*
+   * The title is kept so runs compare by name; the capability moved. Section
+   * administration is `navigation.edit` (the route's `SECTION_ADMIN`) since
+   * the roles-and-access batch reserved menu administration for Super Admin.
+   * The shape pinned here — every write resolves its scope through the
+   * capability guard and returns its refusal — is unchanged.
+   */
   const route = await source("app/api/workspace-sections/route.ts");
+  assert.match(route, /const SECTION_ADMIN: Capability = "navigation\.edit"/);
   for (const method of ["export async function POST", "export async function PATCH", "export async function DELETE"]) {
     const start = route.indexOf(method);
     assert.ok(start > 0, `${method} is missing`);
     const body = route.slice(start, start + 800);
     assert.match(
       body,
-      /scopedDbWithCapability\(request, "settings\.edit"\)/,
+      /scopedDbWithCapability\(request, SECTION_ADMIN\)/,
       `${method} must resolve its scope through the capability guard`,
     );
     assert.match(body, /if \(guard\.denied\) return guard\.denied;/, `${method} must return the refusal`);
@@ -439,13 +447,27 @@ test("the navigation route treats workspace sections as catalogue, not arrangeme
 /* 5 — against a running server                                        */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Section ADMINISTRATION (add, rename, reorder, archive, purge) is Super
+ * Admin's since the roles-and-access batch — `navigation.edit`. The fixtures
+ * here were managed as ADMIN; those writes, and only those, go as the seeded
+ * super admin. Explicit identities, reads and the per-section VIEW routes
+ * (still `settings.edit`, still an admin's) are unchanged.
+ */
+function asSectionAdmin(path, options, identity) {
+  const write = ["POST", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase());
+  return identity === ADMIN && write && /^\/api\/workspace-sections(\?|$)/.test(path)
+    ? "super-admin@test.maintsupp.com"
+    : identity;
+}
+
 function call(path, options = {}, identity = ADMIN) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "x-maintsupp-identity": identity,
+      "x-maintsupp-identity": asSectionAdmin(path, options, identity),
       ...(options.headers ?? {}),
     },
   });
@@ -577,6 +599,10 @@ test("a client may read the sections and is refused every write, by name", async
       ["PUT", "/api/workspace-sections/view", { section: KEY, view: "main", scope: "workspace" }],
       ["DELETE", `/api/workspace-sections/view?section=${KEY}&scope=workspace`, null],
     ];
+    // Section administration names `navigation.edit`; the per-section view
+    // default still names `settings.edit` — two capabilities, two routes.
+    const capabilityFor = (path) =>
+      path.startsWith("/api/workspace-sections/view") ? "settings.edit" : "navigation.edit";
     for (const [method, path, body] of writes) {
       const response = await call(
         path,
@@ -585,8 +611,25 @@ test("a client may read the sections and is refused every write, by name", async
       );
       assert.equal(response.status, 403, `${method} ${path}`);
       const payload = await response.json();
-      assert.equal(payload.capability, "settings.edit", `${method} ${path} must name the capability`);
+      assert.equal(payload.capability, capabilityFor(path), `${method} ${path} must name the capability`);
       assert.equal(payload.denied, true);
+    }
+
+    // And an ADMIN — who used to be able to do all of this — is now refused the
+    // section-administration writes too. Sent with the header set directly, so
+    // the fixture rule above does not swap the identity.
+    for (const [method, path, body] of writes.filter(([, path]) => !path.includes("/view"))) {
+      const response = await fetch(`${BASE_URL}${path}`, {
+        method,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "x-maintsupp-identity": ADMIN,
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+      assert.equal(response.status, 403, `admin ${method} ${path}`);
+      assert.equal((await response.json()).capability, "navigation.edit");
     }
 
     const read = await call("/api/workspace-sections", {}, CLIENT);

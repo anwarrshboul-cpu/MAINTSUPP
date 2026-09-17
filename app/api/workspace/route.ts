@@ -341,6 +341,12 @@ function databaseError(error: unknown) {
 
 type WorkspaceDb = Awaited<ReturnType<typeof scopedDb>>["db"];
 
+/** The development sample accounts that get a membership, and as what. */
+const SAMPLE_MEMBERSHIPS = [
+  { email: "sample-admin@maintsupp.local", role: "admin" },
+  { email: "sample-client@maintsupp.local", role: "client" },
+] as const;
+
 async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
   await ensureDatabase();
   if (orgId !== PRIMARY_ORGANISATION_ID) return;
@@ -488,16 +494,27 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
       }).onConflictDoNothing();
     }
   }
+  /*
+   * The two sample accounts' memberships, named here with their roles.
+   *
+   * This used to walk EVERY `users` row of the workspace and turn its display
+   * label into a membership, so a person added from the Team tab with the
+   * label "Admin" became an Admin the next time this ran. A label is a caption,
+   * never authority: only these two fixture accounts get a membership, and
+   * the "Workspace Super Admin" sample above is a directory entry only.
+   */
   const memberRows = await db
-    .select({ id: users.id, role: users.role })
+    .select({ id: users.id, email: users.email })
     .from(users)
-    .where(eq(users.organisationId, orgId));
+    .where(
+      and(
+        eq(users.organisationId, orgId),
+        inArray(users.email, SAMPLE_MEMBERSHIPS.map((sample) => sample.email)),
+      ),
+    );
   for (const member of memberRows) {
-    const role = member.role.toLowerCase() === "super admin"
-      ? "super_admin"
-      : member.role.toLowerCase() === "admin"
-        ? "admin"
-        : "client";
+    const role = SAMPLE_MEMBERSHIPS.find((sample) => sample.email === member.email)?.role;
+    if (!role) continue;
     await db.insert(memberships).values({
       id: `membership-${member.id}-${orgId}`,
       userId: member.id,
@@ -1980,6 +1997,82 @@ function memberRoleRefusal(data: Record<string, unknown>): Response | null {
  * values are refused — the same treatment `role` and `email` get above rather
  * than a silent guess.
  */
+/**
+ * THE TEAM TAB IS A DIRECTORY, NOT AN ACCESS CONTROL.
+ *
+ * A member row here is a `users` row, and for somebody who can sign in it is
+ * also their ACCOUNT. Two of its columns are security, not display: `active`
+ * switches the whole account off (every workspace, every company), and
+ * `email` is the sign-in identity every membership lookup joins on. Writing
+ * either from here skipped every rule Users & access applies — that an Admin
+ * cannot act on an Owner or a Super Admin, that an account belonging to other
+ * workspaces is changed only by whoever administers all of them, that a
+ * company keeps its last Owner.
+ *
+ * So for a person with portal access — a password, a membership anywhere, a
+ * company relationship or platform authority — those two fields are refused
+ * here and the refusal says where to go. A plain directory entry (nobody who
+ * can sign in) keeps the old behaviour. The name and the role LABEL stay
+ * editable for everybody, because they grant nothing: see
+ * `db/legacy-memberships.ts` for why a label is never read as access.
+ */
+async function portalAccountRefusal(
+  db: WorkspaceDb,
+  orgId: string,
+  userId: string,
+  data: Record<string, unknown>,
+): Promise<Response | null> {
+  const touchesAccess = "active" in data;
+  const touchesIdentity = "email" in data;
+  if (!touchesAccess && !touchesIdentity) return null;
+
+  const [target] = await db
+    .select({
+      email: users.email,
+      hasPassword: sql<number>`case when users.password_hash is null then 0 else 1 end`,
+      memberships: sql<number>`(select count(*) from memberships m where m.user_id = users.id)`,
+      companies: sql<number>`(select count(*) from client_company_members c where c.user_id = users.id and c.status = 'active')`,
+      platform: sql<number>`(select count(*) from platform_admins p where p.user_id = users.id and p.status = 'active')`,
+    })
+    .from(users)
+    .where(and(eq(users.id, userId), eq(users.organisationId, orgId)))
+    .limit(1);
+  if (!target) return null;
+
+  const portalAccount =
+    Number(target.hasPassword) > 0 ||
+    Number(target.memberships) > 0 ||
+    Number(target.companies) > 0 ||
+    Number(target.platform) > 0;
+  if (!portalAccount) return null;
+
+  const emailChanged =
+    touchesIdentity && text(data.email, 180).toLowerCase() !== target.email.toLowerCase();
+  if (emailChanged) {
+    return Response.json(
+      {
+        error:
+          "This person signs in to the portal, and their email is their sign-in identity. It cannot be changed from the Team tab.",
+        denied: true,
+        guardRail: "portal_account",
+      },
+      { status: 409 },
+    );
+  }
+  if (touchesAccess) {
+    return Response.json(
+      {
+        error:
+          "This person has portal access. Deactivate or reactivate them from Users & access, where their workspaces and role are checked.",
+        denied: true,
+        guardRail: "portal_account",
+      },
+      { status: 409 },
+    );
+  }
+  return null;
+}
+
 function memberActiveRefusal(data: Record<string, unknown>): Response | null {
   if (!("active" in data)) return null;
   return readableBoolean(data.active)
@@ -3607,6 +3700,8 @@ export async function PATCH(request: Request) {
       if (badRole) return badRole;
       const badAccess = memberActiveRefusal(data);
       if (badAccess) return badAccess;
+      const guarded = await portalAccountRefusal(db, orgId, id, data);
+      if (guarded) return guarded;
       await db.update(users).set({
         ...("name" in data ? { fullName: text(data.name, 120) } : {}),
         ...supplied(data, "email", (value) => text(value, 180).toLowerCase()),
@@ -3765,7 +3860,11 @@ export async function DELETE(request: Request) {
       if (outOfScope) return outOfScope;
       await db.update(plannedMaintenance).set({ status: "Cancelled", updatedAt: new Date().toISOString() }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     }
-    else if (entity === "member") await db.update(users).set({ active: false, updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
+    else if (entity === "member") {
+      const guarded = await portalAccountRefusal(db, orgId, id, { active: false });
+      if (guarded) return guarded;
+      await db.update(users).set({ active: false, updatedAt: new Date().toISOString() }).where(and(eq(users.id, id), eq(users.organisationId, orgId)));
+    }
     else return Response.json({ error: "This record cannot be archived." }, { status: 400 });
 
     await logChange(db, orgId, entity, id, "archived", actor.email, {});

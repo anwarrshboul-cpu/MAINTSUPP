@@ -42,33 +42,45 @@ type LayoutRow = typeof navigationLayouts.$inferSelect;
  * says about the caller.
  */
 /**
- * Whether this caller may rewrite the WORKSPACE-DEFAULT sidebar.
+ * The two sidebar permissions, resolved once per request.
  *
- * A CAPABILITY, not a role literal. It used to read
- * `role === "admin" || role === "super_admin"`, which quietly opted this route
- * out of the permission matrix: a super admin could revoke `settings.edit`
- * from `admin` and that admin would still be able to rewrite the default
- * sidebar — including its locked items — for everyone in the workspace.
+ * THE OWNER'S DECISION, AND WHY THERE ARE TWO. The workspace's sidebar — its
+ * default arrangement, its locks, its sections — is the product's menu and is
+ * administered by a Super Admin: `navigation.edit`, reserved in
+ * permissions.ts. A person arranging their OWN sidebar is a different act: it
+ * writes a row keyed to them (`navigation_layouts.user_id`), it can never
+ * change the workspace default or its locks, and a locked item stays locked in
+ * it. That is `navigation.personalise`, held by every role by default.
  *
- * `settings.edit` is the capability its two siblings already use for exactly
- * this decision (`/api/workspace-sections` and `/api/dashboard-layout`), so
- * this is the matrix answering one question once rather than three routes
- * answering it three ways. It is also the rule
- * `tests/stage-twenty-teams-audit.test.mjs` states — that gates are
- * capabilities and not role strings — applied to a file its allowlist happened
- * not to name.
+ * Until the roles-and-access batch the default sidebar was `settings.edit`
+ * (every Admin) and a personal arrangement needed no capability at all. The
+ * reasoning the older note gave still holds for both: a capability rather than
+ * a role literal, so the matrix stays the one answer —
+ * `tests/stage-twenty-teams-audit.test.mjs` states that rule for gates.
  *
- * A caller's OWN arrangement is untouched by this: that path is self-scoped and
- * needs no capability, because rearranging your own sidebar is not an
- * administrative act.
+ * Resetting your own arrangement (DELETE, or PUT with `reset`) needs neither:
+ * throwing away your own customisation grants nothing.
  */
-async function mayEditDefault(context: ScopedDatabase) {
+async function sidebarPermissions(context: ScopedDatabase) {
   const subject = await resolvePermissions(
     context.db,
     context.orgId,
     context.actor.role,
   );
-  return can(subject, "settings.edit");
+  return {
+    editDefault: can(subject, "navigation.edit"),
+    personalise: can(subject, "navigation.personalise"),
+  };
+}
+
+/** Whether this caller may rewrite the WORKSPACE-DEFAULT sidebar. Super Admin. */
+async function mayEditDefault(context: ScopedDatabase) {
+  return (await sidebarPermissions(context)).editDefault;
+}
+
+/** Whether this caller may save an arrangement of their OWN sidebar. */
+async function mayCustomise(context: ScopedDatabase) {
+  return (await sidebarPermissions(context)).personalise;
 }
 
 function parseItems(row: LayoutRow | null): NavArrangementItem[] {
@@ -223,6 +235,7 @@ export async function GET(request: Request) {
       locked,
     });
 
+    const allowed = await sidebarPermissions(context);
     return Response.json({
       /* The effective sidebar, already merged. Enough on its own for a caller
          that just wants to know what this person sees. */
@@ -240,11 +253,14 @@ export async function GET(request: Request) {
       locked,
       /* Which layer answered. "builtin" means nobody has arranged anything. */
       source: personalItems ? "user" : workspaceItems.length ? "workspace" : "builtin",
-      canEditDefault: await mayEditDefault(context),
-      /* Null when the identity has no `users` row: they can still see a layout,
-         they just have nowhere to save a personal one. Told plainly rather
-         than discovered when a save silently does nothing. */
-      canEditOwn: userId !== null,
+      /* The workspace default — Super Admin only. */
+      canEditDefault: allowed.editDefault,
+      /* Their own arrangement: `navigation.personalise`, and a `users` row to
+         save it against. Told plainly rather than discovered when a save is
+         refused. */
+      canEditOwn: allowed.personalise && userId !== null,
+      /* Whether to offer "Customise sidebar" at all. */
+      canCustomise: allowed.editDefault || (allowed.personalise && userId !== null),
       role: context.actor.role,
     });
   } catch (error) {
@@ -301,8 +317,9 @@ async function writeRow(
  * The two rules worth stating out loud, because both are the sort of thing a
  * disabled button is usually mistaken for:
  *
- *  1. `scope: "workspace"` requires an admin. Refused on the caller's resolved
- *     role, not on anything in the request.
+ *  1. The workspace default requires `navigation.edit` (Super Admin); a
+ *     personal arrangement requires `navigation.personalise`. Refused on the
+ *     caller's resolved role, not on anything in the request.
  *  2. A locked item cannot be hidden or renamed by a user, checked here on the
  *     submitted payload. A crafted `fetch` with `hidden: true` on a locked key
  *     is rejected with 422 and saves nothing — not partially applied, not
@@ -351,7 +368,26 @@ export async function PUT(request: Request) {
 
     if (scope === "workspace" && !(await mayEditDefault(context))) {
       return Response.json(
-        { error: "Only an admin can change the workspace default sidebar." },
+        {
+          error: "Only a Super Admin can change the workspace default sidebar.",
+          capability: "navigation.edit",
+          denied: true,
+        },
+        { status: 403 },
+      );
+    }
+
+    /* A personal arrangement needs `navigation.personalise`. Resetting your
+       own (below, and DELETE) needs nothing, and stays open. Whatever is saved
+       here goes to the caller's own row — `writeRow` below is handed their
+       user id — so it cannot reach the workspace default or its locks. */
+    if (scope === "user" && body.reset !== true && !(await mayCustomise(context))) {
+      return Response.json(
+        {
+          error: "Your role cannot arrange its own sidebar in this workspace.",
+          capability: "navigation.personalise",
+          denied: true,
+        },
         { status: 403 },
       );
     }

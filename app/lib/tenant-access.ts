@@ -28,10 +28,12 @@
  * real sign-in, because a real sign-in always answers first.
  */
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { memberships, organisations, users } from "../../db/schema";
+import { organisations } from "../../db/schema";
 import { getSession, type AuthenticatedSession } from "./auth-session";
+import { loadCompanyAuthority, loadInternalCompanyIds } from "./company-authority";
+import { loadGrants, type MembershipGrant } from "./tenant-grants";
 import {
   getWorkspaceActor,
   workspaceCookieValue,
@@ -104,11 +106,12 @@ export function sampleSeedingAllowed() {
   return process.env.NODE_ENV !== "production";
 }
 
-const ROLE_RANK: Record<WorkspaceRole, number> = {
-  client: 0,
-  admin: 1,
-  super_admin: 2,
-};
+/*
+ * `ROLE_RANK` and `normaliseRole` used to be private copies here. Both come from
+ * `roles.ts` now, which is the one list of roles a membership may hold — a
+ * membership naming anything else is still discarded by `loadGrants`, exactly
+ * as before.
+ */
 
 /** The seeded demo identity that backs each sidebar test role. */
 export function roleIdentityEmail(role: WorkspaceRole) {
@@ -120,50 +123,52 @@ export function organisationIdentityEmail(slug: string, role: WorkspaceRole) {
   return `${role.replaceAll("_", "-")}@${slug}.test.maintsupp.com`;
 }
 
-function normaliseRole(value: string | null | undefined): WorkspaceRole | null {
-  if (value === "super_admin" || value === "admin" || value === "client") {
-    return value;
-  }
-  return null;
-}
-
-function parseSiteScope(value: string | null): string[] | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const ids = parsed.filter((item): item is string => typeof item === "string");
-    return ids.length ? ids : null;
-  } catch {
-    return null;
-  }
-}
-
-export type MembershipGrant = {
-  organisationId: string;
-  role: WorkspaceRole;
-  siteScope: string[] | null;
-};
+/* The membership reader and its types live in `tenant-grants.ts`. */
+export type { MembershipGrant } from "./tenant-grants";
 
 export type TenantAccess = {
-  /** The actor, with `role` replaced by the role the database grants. */
+  /**
+   * The actor, with `role` replaced by the role this person acts with IN THE
+   * SELECTED WORKSPACE (`orgId`): `super_admin` for a Platform Super Admin,
+   * `owner` for an Owner of the workspace's company, otherwise the membership's
+   * role. See the note where `role` is computed.
+   */
   actor: WorkspaceActor;
-  /** The email the membership lookup was answered against. */
+  /**
+   * Every active workspace membership the identity holds, one per workspace.
+   * Company ownership and platform authority are NOT here — see
+   * `ownedCompanyIds` and `platformAdmin`.
+   */
+  grants: MembershipGrant[];
+  /** The email the access lookup was answered against. */
   identityEmail: string;
-  /** The organisation this request reads and writes. */
+  /** The workspace this request reads and writes. */
   organisation: typeof organisations.$inferSelect;
   orgId: string;
-  /** Every organisation the actor may read. One entry unless super admin. */
+  /** The client company `orgId` belongs to, if it has one. */
+  clientCompanyId: string | null;
+  /**
+   * Every workspace the actor may read, oldest first: all of them for a
+   * Platform Super Admin; otherwise the workspaces of the companies they own
+   * plus the ones their memberships name.
+   */
   organisationIds: string[];
-  /** Every active organisation, resolved once so callers need not re-query. */
+  /** Every active workspace, resolved once so callers need not re-query. */
   activeOrganisations: Array<typeof organisations.$inferSelect>;
-  /** True only for a super admin: the actor may read across organisations. */
+  /** True only for a Platform Super Admin. Kept under its original name. */
   crossOrganisation: boolean;
+  /** True only for a Platform Super Admin (`platform_admins`). */
+  platformAdmin: boolean;
+  /** Active client companies this person owns. */
+  ownedCompanyIds: string[];
+  /** Internal (demonstration) companies, which only the platform reaches. */
+  internalCompanyIds: string[];
   /** Site restriction carried by the membership for `orgId`, if any. */
   siteScope: string[] | null;
   /**
-   * True when no membership matched and the cookie role was used instead. The
-   * actor is confined to the primary organisation in that case.
+   * True when a development request with no session matched no access at all
+   * and the role cookie was used instead. Confined to the primary workspace.
+   * Never true for a signed-in request.
    */
   unaffiliated: boolean;
   /**
@@ -172,6 +177,13 @@ export type TenantAccess = {
    * should ever see it as a normal state.
    */
   anonymous: boolean;
+  /**
+   * True when a SIGNED-IN person has no workspace access at all — no platform
+   * authority, no company, no membership. `scopedDb` refuses. This used to put
+   * them in the primary workspace as a Client, which is another customer's
+   * data now that there is more than one customer.
+   */
+  noAccess: boolean;
   /**
    * Stage 20 — true when this request carried a valid session cookie.
    *
@@ -209,9 +221,9 @@ const DEVELOPMENT_PREVIEW_EMAIL = "preview@maintsupp.local";
  * cookie), the dispatcher's own user, and finally the demo account for the
  * cookie role.
  *
- * The list is only a set of *candidates*. Whichever one holds an active
- * membership is the one that decides anything, so naming an identity grants
- * exactly the access that identity already had and nothing more.
+ * The list is only a set of *candidates*. Whichever one holds access is the one
+ * that decides anything, so naming an identity grants exactly the access that
+ * identity already had and nothing more.
  */
 function resolveIdentityCandidates(
   request: Request,
@@ -230,10 +242,10 @@ function resolveIdentityCandidates(
    *
    * `authenticated`, `actor.email` and `roleIdentityEmail(actor.role)` all
    * derive from `getWorkspaceActor`, which never fails and falls back to
-   * `<role>@test.maintsupp.com` — a seeded super admin of *every* organisation.
-   * Keeping any of them is what let an anonymous caller resolve to a real
-   * membership in every tenant. Outside the preview they are dropped, leaving
-   * an unauthenticated request with no candidates and therefore no grants.
+   * `<role>@test.maintsupp.com` — a seeded Platform Super Admin. Keeping any of
+   * them is what let an anonymous caller resolve to real access in every
+   * tenant. Outside the preview they are dropped, leaving an unauthenticated
+   * request with no candidates and therefore no access.
    *
    * The session stays first in every environment: a signed-in account must
    * never inherit a testing identity's access.
@@ -257,51 +269,25 @@ function resolveIdentityCandidates(
   return ordered;
 }
 
-/** Active memberships held by any of `emails`, keyed back to the email. */
-async function loadGrants(db: Database, emails: string[]) {
-  if (!emails.length) return new Map<string, MembershipGrant[]>();
-  const rows = await db
-    .select({
-      email: sql<string>`lower(${users.email})`,
-      organisationId: memberships.organisationId,
-      role: memberships.role,
-      siteScope: memberships.siteScope,
-    })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
-    .where(
-      and(
-        eq(memberships.status, "active"),
-        eq(users.active, true),
-        sql`lower(${users.email}) in (${sql.join(
-          emails.map((email) => sql`${email}`),
-          sql`, `,
-        )})`,
-      ),
-    );
-
-  const grants = new Map<string, MembershipGrant[]>();
-  for (const row of rows) {
-    const role = normaliseRole(row.role);
-    if (!role) continue;
-    const list = grants.get(row.email) ?? [];
-    list.push({
-      organisationId: row.organisationId,
-      role,
-      siteScope: parseSiteScope(row.siteScope),
-    });
-    grants.set(row.email, list);
-  }
-  return grants;
-}
-
 /**
- * Resolves the actor, their role and the organisations they may read.
+ * Resolves the actor, their role and the workspaces they may read.
  *
  * The single place tenancy is decided. `scopedDb` is a thin wrapper over this,
  * and every data route goes through `scopedDb`, so a change here reaches all of
  * them at once — which is the point: a rule that has to be restated per route is
  * a rule that will eventually be missed in one.
+ *
+ * THREE SOURCES OF ACCESS, and nothing else:
+ *
+ *   1. Platform Super Admin (`platform_admins`)  → every active workspace.
+ *   2. Owner of a client company                  → every active workspace of
+ *      that company, including ones created after they became Owner.
+ *   3. Workspace membership (admin/manager/client) → exactly that workspace.
+ *
+ * Access never flows downwards: an Admin, Manager or Client of one company
+ * workspace gains nothing in that company's other workspaces, and a new
+ * workspace is visible only to the Platform Super Admins and that company's
+ * Owners until somebody is explicitly given a membership.
  */
 export async function resolveTenantAccess(
   db: Database,
@@ -313,7 +299,7 @@ export async function resolveTenantAccess(
     .select()
     .from(organisations)
     .where(eq(organisations.status, "active"))
-    .orderBy(asc(organisations.createdAt));
+    .orderBy(asc(organisations.createdAt), asc(organisations.id));
 
   if (!activeOrganisations.length) {
     throw new Error("No active organisation is configured for this workspace.");
@@ -331,84 +317,98 @@ export async function resolveTenantAccess(
   const session = await getSession(request);
 
   const candidates = resolveIdentityCandidates(request, actor, session);
-  const grantsByEmail = await loadGrants(db, candidates);
+  const [grantsByEmail, authorityByEmail, internalCompanies] = await Promise.all([
+    loadGrants(db, candidates),
+    loadCompanyAuthority(db, candidates),
+    loadInternalCompanyIds(db),
+  ]);
+  /*
+   * An INTERNAL company's workspaces (MAINTSUPP's demonstration company) are
+   * the platform's alone. A membership row there grants a customer account
+   * nothing, so it is dropped before anything below counts it.
+   */
+  const internalOrganisationIds = new Set(
+    activeOrganisations
+      .filter((item) => item.clientCompanyId && internalCompanies.has(item.clientCompanyId))
+      .map((item) => item.id),
+  );
+  for (const [email, list] of grantsByEmail) {
+    grantsByEmail.set(
+      email,
+      list.filter((grant) => !internalOrganisationIds.has(grant.organisationId)),
+    );
+  }
+  const holdsAccess = (email: string) => {
+    const authority = authorityByEmail.get(email);
+    return Boolean(
+      grantsByEmail.get(email)?.length ||
+        authority?.platformAdmin ||
+        authority?.ownedCompanyIds.length,
+    );
+  };
 
   /*
    * With a session, the identity is the session's account. Full stop.
    *
    * The `find` below would otherwise walk past a signed-in user who happens to
-   * hold no memberships and settle on a *testing* identity that does — handing
-   * a real account somebody else's access because it was the first candidate
-   * with a membership row. Signing in must never be able to give you more than
-   * signing in gives you, so the search is skipped entirely when a session
-   * decided the question.
+   * hold no access and settle on a *testing* identity that does — handing a
+   * real account somebody else's access because it was the first candidate
+   * with a row. Signing in must never be able to give you more than signing in
+   * gives you, so the search is skipped entirely when a session decided.
    */
   const identityEmail = session
     ? session.user.email.trim().toLowerCase()
-    : (candidates.find((email) => grantsByEmail.get(email)?.length) ??
-      candidates[0] ??
-      actor.email);
-  const grants = grantsByEmail.get(identityEmail) ?? [];
-
-  /*
-   * The strongest role held anywhere, so a super admin of one organisation is a
-   * super admin everywhere.
-   *
-   * The no-membership fallback is where the two worlds part. Without a session
-   * the cookie role stands in, which is what keeps a freshly provisioned
-   * database usable before anybody has been invited. WITH a session it must
-   * not: `workspaceRoleFromRequest` defaults to `super_admin` when the role
-   * cookie is absent, so honouring it here would promote every signed-in
-   * account that had not yet been given a membership straight to super admin.
-   * A real account with no grants gets the least privilege there is.
-   */
-  const role: WorkspaceRole = grants.length
-    ? grants.reduce<WorkspaceRole>(
-        (best, grant) => (ROLE_RANK[grant.role] > ROLE_RANK[best] ? grant.role : best),
-        "client",
-      )
-    : session
-      ? "client"
-      : actor.role;
+    : (candidates.find(holdsAccess) ?? candidates[0] ?? actor.email);
 
   const activeIds = new Set(activeOrganisations.map((item) => item.id));
+  const grants = (grantsByEmail.get(identityEmail) ?? []).filter((grant) =>
+    activeIds.has(grant.organisationId),
+  );
+  const authority = authorityByEmail.get(identityEmail);
+  const platformAdmin = authority?.platformAdmin ?? false;
+  const ownedCompanyIds = authority?.ownedCompanyIds ?? [];
+  const owned = new Set(ownedCompanyIds);
+  const ownsWorkspace = (organisation: (typeof activeOrganisations)[number]) =>
+    Boolean(organisation.clientCompanyId && owned.has(organisation.clientCompanyId));
+
   const primary =
     activeOrganisations.find((item) => item.id === PRIMARY_ORGANISATION_ID) ??
     activeOrganisations[0];
 
-  // A super admin reads every organisation. Everyone else reads exactly the ones
-  // their memberships name — never the one the cookie asked for.
   let organisationIds: string[];
   let unaffiliated = false;
-  /** No session, no membership, not a development environment. Refuse. */
+  /** No session, no access, not a development environment. Refuse. */
   let anonymous = false;
-  if (role === "super_admin") {
+  /** A signed-in person with no access anywhere. Refuse. */
+  let noAccess = false;
+  if (platformAdmin) {
     organisationIds = activeOrganisations.map((item) => item.id);
   } else {
-    organisationIds = grants
-      .map((grant) => grant.organisationId)
-      .filter((id) => activeIds.has(id));
+    organisationIds = reachableOrganisationIds({
+      activeOrganisations,
+      grants,
+      ownedCompanyIds,
+      internalCompanyIds: internalCompanies,
+    });
     if (!organisationIds.length) {
       /*
-       * No membership anywhere.
+       * NO ACCESS ANYWHERE.
        *
-       * This used to confine the caller to the PRIMARY organisation rather than
-       * fail — so that a database seeded before invitations existed still
-       * rendered. In development that is a convenience. In production it was
-       * the whole security model failing open: an anonymous request has no
-       * session, so `resolveIdentityCandidates` drops every candidate, so there
-       * are no grants, so it landed here and was handed the live client's
-       * tenant as a `client`. A stranger with curl could read every job, every
-       * site's access notes and out-of-hours contacts, every team member's
-       * email, and the file bytes.
+       * This used to confine the caller to the PRIMARY workspace rather than
+       * fail. In production that was, first, the whole security model failing
+       * open for anonymous requests (closed in Stage 20), and then — for a
+       * SIGNED-IN account with no membership — a quiet grant of another
+       * customer's workspace as a Client. With more than one client company
+       * that is a cross-company leak by construction, so a session with no
+       * access now resolves to nothing and `scopedDb` refuses.
        *
-       * The fallback is kept ONLY where it was actually meant to help: a
-       * request that has proved who it is (a real account not yet given a
-       * membership), or a development environment where the demo identities
-       * are allowed. Anything else resolves to no organisation at all, and
-       * `scopedDb` refuses.
+       * The fallback survives only for the development demo, where no session
+       * exists and the role cookie is the point.
        */
-      if (session || demoIdentityAllowed()) {
+      if (session) {
+        organisationIds = [];
+        noAccess = true;
+      } else if (demoIdentityAllowed()) {
         organisationIds = [primary.id];
         unaffiliated = true;
       } else {
@@ -420,32 +420,59 @@ export async function resolveTenantAccess(
   }
 
   /*
-   * Which organisation to stand in.
+   * WHICH WORKSPACE TO STAND IN — deterministic, and never wider than above.
    *
-   * The cookie is asked first because it is what the sidebar switcher writes,
-   * and the session's own `organisation_id` is the fallback so a fresh sign-in
-   * lands where the account belongs rather than always in the primary tenant.
-   * Both are *requests*, not grants: whichever wins is still filtered through
-   * `allowed` on the next line, so neither can select a tenant the memberships
-   * above did not already permit.
+   *   1. The last workspace this browser selected (the cookie the switcher
+   *      writes) — if still allowed.
+   *   2. An Owner with no valid last selection lands on their company's
+   *      designated default workspace.
+   *   3. The workspace the session was opened in (the account's home, where
+   *      its invitation landed) — if still allowed. After the company default
+   *      for an Owner, because for them the home is only where the link
+   *      happened to point, and the default is the company's own choice.
+   *   4. A Platform Super Admin lands on the primary workspace.
+   *   5. Otherwise the oldest allowed workspace.
+   *
+   * Every candidate is filtered through `allowed`, so a forged cookie or a
+   * stale session value can choose among the workspaces this person already
+   * has and never adds one.
    */
-  const requestedId =
-    workspaceCookieValue(request, ORGANISATION_COOKIE) ??
-    session?.organisationId ??
-    null;
   const allowed = new Set(organisationIds);
-  const selectedId =
-    requestedId && allowed.has(requestedId)
-      ? requestedId
-      : allowed.has(primary.id)
-        ? primary.id
-        : organisationIds[0];
+  const isAllowed = (id: string | null | undefined): id is string => Boolean(id && allowed.has(id));
+  const cookieChoice = workspaceCookieValue(request, ORGANISATION_COOKIE);
+  let selectedId: string | undefined = isAllowed(cookieChoice) ? cookieChoice : undefined;
+  if (!selectedId && !platformAdmin) {
+    selectedId = (authority?.ownedCompanies ?? [])
+      .map((company) => company.defaultOrganisationId)
+      .find(isAllowed);
+  }
+  if (!selectedId && isAllowed(session?.organisationId)) selectedId = session?.organisationId ?? undefined;
+  if (!selectedId && platformAdmin && allowed.has(primary.id)) selectedId = primary.id;
+  selectedId ??= organisationIds[0];
   const organisation =
     activeOrganisations.find((item) => item.id === selectedId) ?? primary;
 
-  const siteScope =
-    grants.find((grant) => grant.organisationId === organisation.id)?.siteScope ??
-    null;
+  const grantHere = grants.find((grant) => grant.organisationId === organisation.id);
+  const ownerHere = !platformAdmin && ownsWorkspace(organisation);
+  const siteScope = ownerHere ? null : (grantHere?.siteScope ?? null);
+
+  /*
+   * THE ROLE IS THE ONE HELD IN THE SELECTED WORKSPACE.
+   *
+   * Platform Super Admin everywhere; Owner in their own company's workspaces;
+   * otherwise the membership here. It used to be the strongest role held
+   * ANYWHERE, which let an Admin of one workspace act as an Admin in another
+   * where they were only a Client — see the users-access-rbac tests.
+   *
+   * With no access here the answer is the weakest role (and `scopedDb`
+   * refuses a `noAccess` request before any route sees it). The unaffiliated
+   * development fallback keeps the role cookie it was resolved with.
+   */
+  const role: WorkspaceRole = platformAdmin
+    ? "super_admin"
+    : ownerHere
+      ? "owner"
+      : (grantHere?.role ?? (unaffiliated ? actor.role : "client"));
 
   return {
     /*
@@ -464,19 +491,34 @@ export async function resolveTenantAccess(
           role,
         }
       : { ...actor, role },
+    grants,
     identityEmail,
     organisation,
     orgId: organisation.id,
+    clientCompanyId: organisation.clientCompanyId ?? null,
     organisationIds,
     activeOrganisations,
-    crossOrganisation: role === "super_admin",
+    crossOrganisation: platformAdmin,
+    platformAdmin,
+    ownedCompanyIds,
+    internalCompanyIds: [...internalCompanies].sort(),
     siteScope,
     unaffiliated,
     anonymous,
+    noAccess,
     authenticated: !!session,
     session,
   };
 }
+
+/*
+ * `roleInOrganisation`, `companyOfOrganisation` and `administersCompany` — the
+ * per-workspace questions every route asks of a resolved access — live in
+ * `access-scope.ts`, which imports nothing that needs a request, so the unit
+ * tests can load them. They are re-exported here, where callers look.
+ */
+export { administersCompany, companyOfOrganisation, roleInOrganisation } from "./access-scope";
+import { reachableOrganisationIds } from "./access-scope";
 
 /** True when `organisationId` is one this access grant may read. */
 export function canReadOrganisation(

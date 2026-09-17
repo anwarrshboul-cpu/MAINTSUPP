@@ -240,10 +240,23 @@ test("W2C-QA restoring a section writes to exactly three tables", async () => {
  */
 test("W2C-QA bin=1 needs settings.edit while delete-for-good needs data.delete", async () => {
   const route = codeOnly(await source(SECTIONS));
+  /*
+   * The reversible half is guarded on the SECTION-ADMINISTRATION capability.
+   * That was `settings.edit` until the roles-and-access batch reserved menu
+   * administration for Super Admin (`navigation.edit`, named once in the route
+   * as `SECTION_ADMIN`). The property this test protects is unchanged: binning
+   * is gated on something OTHER than `data.delete`, and deleting for good is
+   * still `data.delete`.
+   */
   assert.match(
     route,
-    /scopedDbWithCapability\(request,\s*"settings\.edit"\)/,
-    "DELETE /api/workspace-sections is guarded on settings.edit",
+    /const SECTION_ADMIN: Capability = "navigation\.edit"/,
+    "section administration is navigation.edit",
+  );
+  assert.match(
+    route,
+    /export async function DELETE[\s\S]{0,200}scopedDbWithCapability\(request,\s*SECTION_ADMIN\)/,
+    "DELETE /api/workspace-sections is guarded on the section-administration capability",
   );
   assert.match(
     route,
