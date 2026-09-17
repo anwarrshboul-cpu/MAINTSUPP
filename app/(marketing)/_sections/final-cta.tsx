@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { track } from "./analytics";
-import { BOOKING_URL } from "./content";
+import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
 
 /**
  * SECTION 10 — Trust strip, then the final CTA.
@@ -382,7 +382,8 @@ export function FinalCta() {
             This panel had no booking affordance at all: its only action was the
             form's submit, which was labelled "Book My Portfolio Review" and did
             not book anything — it sent an enquiry and somebody replied. Two
-            things follow. This button books, on Cal.com, in a new tab; and the
+            things follow. This button goes to `BOOKING_URL` — a real calendar
+            in a new tab once one is configured, this panel otherwise; and the
             submit button now says what it actually does, "Send My Enquiry".
 
             The form is untouched otherwise. Someone who would rather write than
@@ -393,8 +394,8 @@ export function FinalCta() {
             <a
               className="btn btn--primary btn--lg"
               href={BOOKING_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              target={BOOKING_IS_EXTERNAL ? "_blank" : undefined}
+              rel={BOOKING_IS_EXTERNAL ? "noopener noreferrer" : undefined}
             >
               Book a Portfolio Review
             </a>

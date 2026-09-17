@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BOOKING_URL } from "./content";
+import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
 import { PhotoSlot } from "./photo";
 
 /* ================================================== 1. HERO BANNER
@@ -227,11 +227,12 @@ export function Hero() {
               THE PRIMARY CTA BOOKS, IT NO LONGER SCROLLS.
 
               It used to jump to the enquiry form at `#review`, which asks
-              somebody ready to talk to write instead. It now opens the Cal.com
-              page, where they pick a slot and are done. `target="_blank"` so
-              the page they were reading is still behind them if they change
-              their mind, and `rel="noopener noreferrer"` because a new tab
-              without it hands the opener to the other origin.
+              somebody ready to talk to write instead. It now opens
+              `BOOKING_URL`. When that is an external calendar it opens in a new
+              tab — so the page they were reading is still behind them if they
+              change their mind — with `rel="noopener noreferrer"`, because a
+              new tab without it hands the opener to the other origin. When it
+              is the on-page enquiry panel, it stays in this tab.
 
               The on-page form stays exactly where it is, as the fallback for
               anyone who would rather write than book — see `final-cta.tsx`.
@@ -239,8 +240,8 @@ export function Hero() {
             <a
               className="btn btn--primary btn--lg"
               href={BOOKING_URL}
-              target="_blank"
-              rel="noopener noreferrer"
+              target={BOOKING_IS_EXTERNAL ? "_blank" : undefined}
+              rel={BOOKING_IS_EXTERNAL ? "noopener noreferrer" : undefined}
             >
               Book a Portfolio Review
               <svg

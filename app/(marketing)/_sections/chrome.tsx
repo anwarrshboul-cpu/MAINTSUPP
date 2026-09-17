@@ -20,6 +20,7 @@
  */
 
 import Link from "next/link";
+import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
 import { usePathname } from "next/navigation";
 import {
   useEffect,
@@ -405,9 +406,24 @@ export function SiteHeader() {
               both spans from assistive tech means the name can only come from
               there. The visual swap is untouched.
             */}
+            {/*
+              IT BOOKS, RATHER THAN SCROLLING TO A FORM.
+
+              This button said "Book a Portfolio Review" and jumped to
+              `#review`, the enquiry panel — so the one CTA in the chrome, on
+              every page, asked somebody who had decided to book a slot to
+              write a message instead. It now goes where the hero and the final
+              CTA go, `BOOKING_URL`, and opens in a new tab when that leaves
+              the site.
+
+              The form is untouched and still sits at `#review` for anyone who
+              would rather write; it is simply no longer what this button does.
+            */}
             <SectionLink
               className="btn btn--primary btn--sm hdr__cta"
-              href="#review"
+              href={BOOKING_URL}
+              target={BOOKING_IS_EXTERNAL ? "_blank" : undefined}
+              rel={BOOKING_IS_EXTERNAL ? "noopener noreferrer" : undefined}
               aria-label="Book a Portfolio Review"
             >
               <span className="cta-long" aria-hidden="true">
@@ -483,9 +499,12 @@ export function SiteHeader() {
                 ))}
               </ul>
             </nav>
+            {/* The drawer's copy of the same button, and the same reason. */}
             <SectionLink
               className="btn btn--primary btn--block"
-              href="#review"
+              href={BOOKING_URL}
+              target={BOOKING_IS_EXTERNAL ? "_blank" : undefined}
+              rel={BOOKING_IS_EXTERNAL ? "noopener noreferrer" : undefined}
               onAnchorClick={onDrawerLink}
               onNavigate={() => setOpen(false)}
             >

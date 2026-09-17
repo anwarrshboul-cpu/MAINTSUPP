@@ -61,10 +61,13 @@ export const photoAlt: Record<string, string> = {
   "workflow-6-verify": "Completed work being checked against the job record",
   "workflow-7-report": "A monthly maintenance report open on a laptop",
 
-  "dashboard-overview": "The client portal overview screen, shown with sample data",
-  "dashboard-jobs": "The client portal jobs list, shown with sample data",
-  "dashboard-compliance": "The client portal compliance screen, shown with sample data",
-  "dashboard-spend": "The client portal spend breakdown, shown with sample data",
+  /* The four portal tabs, as v2 stems: the drawn mock-ups were replaced by
+     captures of the real portal, and the new bytes needed URLs no browser had
+     cached. `portal.tsx` passes a fuller alt per tab; these stand behind it. */
+  "dashboard-overview-v2": "The client portal job intelligence overview, shown with sample data",
+  "dashboard-jobs-v2": "The client portal live job list and maintenance board, shown with sample data",
+  "dashboard-compliance-v2": "The client portal compliance overview, shown with sample data",
+  "dashboard-spend-v2": "The client portal spend and reporting screen, shown with sample data",
 };
 
 export function altFor(name: string) {
