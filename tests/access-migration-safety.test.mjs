@@ -14,6 +14,8 @@
  *   3. THE DEMONSTRATION COMPANY IS INTERNAL, marked by its workspace id.
  *   4. THE LAST OWNER STAYS. Removing or switching off a company's last active
  *      Owner is refused inside the write itself.
+ *   5. A ROSTER OF ANY SIZE RESOLVES. Who on a People screen is a Platform
+ *      Super Admin is read in chunks under D1's bound-variable ceiling.
  *
  * The copy lives in a temp directory and is deleted afterwards; the local
  * database the dev server uses is only ever read.
@@ -353,6 +355,35 @@ test("the last active Owner cannot be removed or switched off — enforced insid
   assert.equal(read("SELECT active FROM users WHERE id = ?", owners[1].id)[0].active, 0);
   // …and an Owner whose account is off does not count as the other Owner.
   assert.equal(await removeOwnerGuarded(modules.d1, companyId, owners[0].id), "last_owner");
+});
+
+test("a roster past D1's bound-variable ceiling still resolves its Platform Super Admins", { skip: !source }, async () => {
+  const promoted = read("SELECT user_id FROM platform_admins WHERE status = 'active' ORDER BY user_id LIMIT 1")[0];
+  assert.ok(promoted, "the copied database holds an active Platform Super Admin to find");
+  // The admin sits past the first chunk, so every chunk has to be read.
+  const roster = [...Array.from({ length: 240 }, (_, index) => `user-${TAG}-roster-${index}`), promoted.user_id];
+  process.env["D1_STUB_MAX_BOUND_PARAMETERS"] = "100";
+  try {
+    // The ceiling is real here: one IN list for the whole roster is refused,
+    // which is what turned a 102-person People screen into a 503.
+    await assert.rejects(
+      modules.d1
+        .prepare(`SELECT user_id FROM platform_admins WHERE user_id IN (${roster.map(() => "?").join(", ")})`)
+        .bind(...roster)
+        .all(),
+      /too many SQL variables/,
+    );
+    const found = await modules.authority.platformAdminIds(modules.db, roster);
+    assert.deepEqual([...found], [promoted.user_id]);
+  } finally {
+    delete process.env["D1_STUB_MAX_BOUND_PARAMETERS"];
+  }
+  // The People screen's other per-person reads use the same helper.
+  const route = fs.readFileSync(path.join(root, "app/api/admin/users/route.ts"), "utf8");
+  assert.match(route, /await selectInChunks\(userIds, \(chunk\) =>/);
+  assert.match(route, /await selectInChunks\(inviterIds, \(chunk\) =>/);
+  const authority = fs.readFileSync(path.join(root, "app/lib/company-authority.ts"), "utf8");
+  assert.match(authority, /await selectInChunks\(userIds, \(chunk\) =>/);
 });
 
 test("the guard's SQL reaches Postgres as boolean comparisons", async () => {

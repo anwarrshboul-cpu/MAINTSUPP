@@ -383,15 +383,16 @@ async function pendingInvitations(context: AdminContext) {
    * email here; the id itself no longer leaves the server.
    */
   const inviterIds = [...new Set(rows.map((row) => row.invitedBy).filter(Boolean))] as string[];
+  /* Up to a hundred invitations, so up to a hundred inviters: chunked like the roster. */
   const inviters = new Map(
-    inviterIds.length
-      ? (
-          await context.db
-            .select({ id: users.id, email: users.email, fullName: users.fullName })
-            .from(users)
-            .where(inArray(users.id, inviterIds))
-        ).map((row) => [row.id, row.fullName?.trim() || row.email])
-      : [],
+    (
+      await selectInChunks(inviterIds, (chunk) =>
+        context.db
+          .select({ id: users.id, email: users.email, fullName: users.fullName })
+          .from(users)
+          .where(inArray(users.id, chunk)),
+      )
+    ).map((row) => [row.id, row.fullName?.trim() || row.email]),
   );
 
   const now = Date.now();

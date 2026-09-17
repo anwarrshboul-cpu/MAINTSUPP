@@ -20,6 +20,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { clientCompanies, clientCompanyMembers, platformAdmins, users } from "../../db/schema";
+import { selectInChunks } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -116,13 +117,21 @@ export async function loadInternalCompanyIds(db: Database): Promise<Set<string>>
   return new Set(rows.map((row) => row.id));
 }
 
-/** The active Platform Super Admins among `userIds`. */
+/**
+ * The active Platform Super Admins among `userIds`.
+ *
+ * Chunked: `userIds` is a whole workspace roster, and one `IN (...)` per person
+ * passed D1's bound-variable ceiling at about a hundred members — the People
+ * screen of any workspace that size answered 503.
+ */
 export async function platformAdminIds(db: Database, userIds: string[]): Promise<Set<string>> {
   if (!userIds.length) return new Set();
-  const rows = await db
-    .select({ userId: platformAdmins.userId })
-    .from(platformAdmins)
-    .where(and(inArray(platformAdmins.userId, userIds), eq(platformAdmins.status, "active")));
+  const rows = await selectInChunks(userIds, (chunk) =>
+    db
+      .select({ userId: platformAdmins.userId })
+      .from(platformAdmins)
+      .where(and(inArray(platformAdmins.userId, chunk), eq(platformAdmins.status, "active"))),
+  );
   return new Set(rows.map((row) => row.userId));
 }
 
