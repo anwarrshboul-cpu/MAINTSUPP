@@ -307,8 +307,8 @@ test("the lead form protects a part-completed draft", async () => {
   assert.doesNotMatch(rendered, /Book My Portfolio Review/, "and the old one is not rendered");
   assert.match(
     rendered,
-    /href=\{BOOKING_URL\}[\s\S]{0,140}?target="_blank"/,
-    "booking is the Cal.com link above it, in a new tab",
+    /href=\{BOOKING_URL\}[\s\S]{0,160}?target=\{BOOKING_IS_EXTERNAL \? "_blank" : undefined\}/,
+    "booking is BOOKING_URL above it, in a new tab when it leaves the site",
   );
 
   /* The draft must carry the fields that exist and only those. A key for a
