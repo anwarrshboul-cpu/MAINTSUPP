@@ -43,9 +43,9 @@ const TABS: readonly Tab[] = [
         <path d="M3.5 18a9 9 0 1 1 17 0" />
       </svg>
     ),
-    slot: "dashboard-overview",
-    desc: "Client portal — Dashboard Overview",
-    alt: "The client portal overview screen, showing sample counts for open, overdue and completed jobs",
+    slot: "dashboard-overview-v2",
+    desc: "Client portal — Job intelligence overview",
+    alt: "The client portal's job intelligence overview, showing sample open and completed job counts, completion rate and SLA performance, with open jobs broken down by status, priority, tier and trade",
   },
   {
     view: "jobs",
@@ -66,9 +66,9 @@ const TABS: readonly Tab[] = [
         <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
       </svg>
     ),
-    slot: "dashboard-jobs",
+    slot: "dashboard-jobs-v2",
     desc: "Client portal — Live job list",
-    alt: "The client portal job list, showing sample jobs with status, site and priority",
+    alt: "The client portal live job list, showing sample counts of open, critical and awaiting-approval jobs above a maintenance board listing each job's location, description, tier and priority",
   },
   {
     view: "compliance",
@@ -89,9 +89,9 @@ const TABS: readonly Tab[] = [
         <path d="m9 12 2 2 4-4" />
       </svg>
     ),
-    slot: "dashboard-compliance",
+    slot: "dashboard-compliance-v2",
     desc: "Client portal — Compliance overview",
-    alt: "The client portal compliance screen, showing sample certificates and expiry dates by site",
+    alt: "The client portal compliance overview, showing a sample compliance score, completion by certificate type, renewals due in the next 90 days and the share of sites fully compliant",
   },
   {
     view: "spend",
@@ -111,9 +111,9 @@ const TABS: readonly Tab[] = [
         <path d="M7 21h10M8 12h6M9 21V9a4 4 0 0 1 7-2.6" />
       </svg>
     ),
-    slot: "dashboard-spend",
+    slot: "dashboard-spend-v2",
     desc: "Client portal — Spend and reporting",
-    alt: "The client portal spend screen, showing sample cost by site and trade",
+    alt: "The client portal spend and reporting screen, showing sample monthly spend by job type, a six-month spend trend, top sites by spend and the cost of repeat jobs",
   },
 ];
 
@@ -181,7 +181,14 @@ export function Portal() {
           </div>
           <div className="dashshot__stage">
             {/* All four stay mounted: a screenshot already decoded should not be
-                torn down and refetched when the visitor tabs back to it. */}
+                torn down and refetched when the visitor tabs back to it.
+
+                `sizes` is the stage's real width. Without it PhotoSlot's default
+                (620px, written for the section tiles) applied, and a 1x desktop
+                picked the 960 rung and stretched it across a stage up to 1240px
+                wide — soft text on the one image that is all text. The three
+                clauses are `.wrap`'s own arithmetic: 1320 less 40px padding a
+                side, then 100vw less that padding, then 4vw a side below 1000. */}
             {TABS.map((tab) => (
               <PhotoSlot
                 key={tab.view}
@@ -190,6 +197,7 @@ export function Portal() {
                 h={941}
                 alt={tab.alt}
                 desc={tab.desc}
+                sizes="(min-width: 1320px) 1240px, (min-width: 1000px) calc(100vw - 80px), 92vw"
                 className={`dashshot__img${tab.view === view ? " is-on" : ""}`}
               />
             ))}

@@ -6,25 +6,29 @@
  * srcset would make the browser request a file that is not there.
  */
 export const photoWidths: Record<string, number[]> = {
-  "dashboard-compliance": [
+  "dashboard-compliance-v2": [
     480,
     960,
-    1600
+    1600,
+    1672
   ],
-  "dashboard-jobs": [
+  "dashboard-jobs-v2": [
     480,
     960,
-    1600
+    1600,
+    1672
   ],
-  "dashboard-overview": [
+  "dashboard-overview-v2": [
     480,
     960,
-    1600
+    1600,
+    1672
   ],
-  "dashboard-spend": [
+  "dashboard-spend-v2": [
     480,
     960,
-    1600
+    1600,
+    1672
   ],
   "evidence-closeout": [
     480,
