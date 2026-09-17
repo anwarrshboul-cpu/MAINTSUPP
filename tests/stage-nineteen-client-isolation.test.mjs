@@ -102,9 +102,25 @@ test("tenancy is decided in one place, from memberships rather than cookies", as
   // set before it can select anything.
   assert.match(access, /allowed\.has\(requestedId\)/);
 
-  // Only a super admin is ever given more than one organisation.
-  assert.match(access, /role === "super_admin"/);
-  assert.match(access, /crossOrganisation: role === "super_admin"/);
+  /*
+   * Only a super admin is ever given more than one organisation.
+   *
+   * This read `role === "super_admin"`, when one variable held both "the
+   * strongest role anywhere" and "the role this request acts with". The
+   * roles-and-access batch split them, because using the first as the second
+   * was a cross-workspace escalation (an Admin of A standing in B, where they
+   * are a Client, acted as an Admin). The super-admin test is now on
+   * `strongest`, and the acting role is read from the membership in the
+   * SELECTED organisation — both pinned here.
+   */
+  assert.match(access, /const superAdmin = strongest === "super_admin"/);
+  assert.match(access, /if \(superAdmin\) \{\s*organisationIds = activeOrganisations/);
+  assert.match(access, /crossOrganisation: superAdmin/);
+  assert.match(
+    access,
+    /const role: WorkspaceRole = superAdmin\s*\?\s*"super_admin"\s*:\s*\(grants\.find\(\(grant\) => grant\.organisationId === organisation\.id\)\?\.role/,
+    "the acting role is the membership in the selected organisation",
+  );
 
   const db = await source("app/lib/tenant-db.ts");
   assert.match(db, /resolveTenantAccess\(db, request\)/);

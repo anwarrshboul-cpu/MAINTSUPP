@@ -46,6 +46,12 @@ export type ScopedDatabase = {
    */
   authenticated: boolean;
   session: TenantAccess["session"];
+  /**
+   * Every active membership, per organisation. `actor.role` is the role in
+   * `orgId`; a route acting on a DIFFERENT organisation asks
+   * `roleInOrganisation` rather than reusing it.
+   */
+  grants: TenantAccess["grants"];
 };
 
 /**
@@ -185,6 +191,7 @@ export async function scopedDb(
     unaffiliated: access.unaffiliated,
     authenticated: access.authenticated,
     session: access.session,
+    grants: access.grants,
   };
 }
 

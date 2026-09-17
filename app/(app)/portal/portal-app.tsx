@@ -162,6 +162,7 @@ import { SidebarNav, type SidebarNavEntry } from "./sidebar-nav";
 import { useDrillStatusMap } from "./use-drill-status-map";
 import { SectionManager } from "./section-manager";
 import { uploadEvidenceFile } from "../../lib/client-upload";
+import { ROLE_RANK, roleLabel, type WorkspaceRole } from "../../lib/roles";
 import {
   LiveMaintenanceBoard,
   type MaintenanceBoardSnapshot,
@@ -315,7 +316,7 @@ type ViewMode = "board" | "list";
 
 type NotificationState = "read" | "dismissed";
 
-type DemoRole = "super_admin" | "admin" | "client";
+type DemoRole = WorkspaceRole;
 
 type OrganisationSummary = {
   id: string;
@@ -395,12 +396,11 @@ type NotificationStateEntry = {
   updatedAt: string;
 };
 
-/** How a stored role reads to a person. */
-function roleLabel(role: string) {
-  if (role === "super_admin") return "Super Admin";
-  if (role === "admin") return "Admin";
-  return "Client";
-}
+/*
+ * How a stored role reads to a person: `roleLabel` from `lib/roles.ts`, the one
+ * list of roles. This file used to spell out three of them, and a Manager would
+ * have been labelled "Client" in the sidebar.
+ */
 
 const sectionMeta: Record<
   Section,
@@ -1318,8 +1318,32 @@ export default function PortalApp({
     }
   };
 
+  /*
+   * WHO SEES THE WHOLE PLATFORM, decided by the server.
+   *
+   * These gates used to read `demoRole`, the testing selector's state — which
+   * STARTS as "super_admin" and only learns the real role when /api/context
+   * answers. So every account, clients included, was drawn the Super Admin
+   * workspace picker and its "Add client workspace" button for the first
+   * moments of every page load. The resolved role is unknown (false) until the
+   * server says otherwise, so nothing privileged is drawn early.
+   */
+  const isSuperAdmin = runtimeContext?.actor.role === "super_admin";
+  /*
+   * A workspace picker is for choosing between workspaces you BELONG to. A
+   * Super Admin belongs to all of them; anyone else sees exactly the ones
+   * `/api/context` returned, which are their memberships. With one membership
+   * there is nothing to choose, and the name is shown instead of a picker.
+   */
+  const switchableOrganisations = runtimeContext?.organisations ?? [];
+  const canSwitchWorkspace = isSuperAdmin || switchableOrganisations.length > 1;
+
   const changeOrganisation = async (organisationId: string) => {
-    if (demoRole !== "super_admin") return;
+    // The server refuses a workspace that is not one of the caller's; this
+    // only saves a round trip for one that plainly is not on the list.
+    if (!switchableOrganisations.some((organisation) => organisation.id === organisationId)) {
+      return;
+    }
     setContextBusy(true);
     try {
       const response = await fetch("/api/context", {
@@ -1337,7 +1361,7 @@ export default function PortalApp({
   };
 
   const createOrganisation = async () => {
-    if (demoRole !== "super_admin") return;
+    if (!isSuperAdmin) return;
     const name = window.prompt("Enter the client or organisation name:")?.trim();
     if (!name) return;
     setContextBusy(true);
@@ -1985,6 +2009,38 @@ export default function PortalApp({
            * is actually FOR.
            */
           return runtimeContext?.capabilities?.["board.edit"] === true;
+        }
+        /*
+         * THE ADMINISTRATION SCREENS ARE NOW LISTED ONLY FOR WHOEVER CAN OPEN
+         * THEM. The note above called listing Users and Roles for everybody
+         * "merely tidy"; the owner's rule since the roles-and-access batch is
+         * that a role is not shown administration it cannot use. Each gate is
+         * the capability the screen's own route enforces — `users.view` for
+         * /api/admin/users, `roles.edit` for /api/admin/roles and
+         * `clients.view_all` for /api/admin/clients (both reserved for Super
+         * Admin) — so the entry and the answer cannot disagree. The screens
+         * still refuse on their own for anyone who reaches them by URL.
+         */
+        if (entry.key === "admin-users") {
+          return runtimeContext?.capabilities?.["users.view"] === true;
+        }
+        if (entry.key === "admin-roles") {
+          return runtimeContext?.capabilities?.["roles.edit"] === true;
+        }
+        if (entry.key === "admin-clients") {
+          return runtimeContext?.capabilities?.["clients.view_all"] === true;
+        }
+        if (entry.key === "invoice-tracker") {
+          /*
+           * The finance module refuses every role below Admin — a rank rule in
+           * `lib/finance/access.ts`, not a capability, because `board.view`
+           * cannot tell an internal operator from an external contact. The
+           * entry follows the same rule, so a Manager or Client is not offered
+           * a screen whose every request answers 403.
+           */
+          return runtimeContext
+            ? ROLE_RANK[runtimeContext.actor.role] >= ROLE_RANK.admin
+            : false;
         }
         if (entry.key === "reconcile") {
           /*
@@ -2779,24 +2835,24 @@ export default function PortalApp({
           </span>
           <span className="workspace-switcher__copy">
             <small>Workspace</small>
-            {demoRole === "super_admin" ? (
+            {canSwitchWorkspace && runtimeContext ? (
               <select
                 aria-label="Client workspace"
-                value={runtimeContext?.currentOrganisation.id ?? ""}
-                disabled={contextBusy || !runtimeContext}
+                value={runtimeContext.currentOrganisation.id}
+                disabled={contextBusy}
                 onChange={(event) => void changeOrganisation(event.target.value)}
               >
-                {(runtimeContext?.organisations ?? []).map((organisation) => (
+                {switchableOrganisations.map((organisation) => (
                   <option key={organisation.id} value={organisation.id}>
                     {organisation.name}
                   </option>
                 ))}
               </select>
             ) : (
-              <strong>{runtimeContext?.currentOrganisation.name ?? "Client workspace"}</strong>
+              <strong>{runtimeContext?.currentOrganisation.name ?? "Workspace"}</strong>
             )}
           </span>
-          {demoRole === "super_admin" && (
+          {isSuperAdmin && (
             <button
               className="workspace-switcher__add"
               type="button"
@@ -2827,7 +2883,9 @@ export default function PortalApp({
             <span className="workspace-identity__scope">
               {runtimeContext.identity.crossOrganisation
                 ? `Every workspace · ${runtimeContext.identity.organisationIds.length}`
-                : "This workspace only"}
+                : runtimeContext.identity.organisationIds.length > 1
+                  ? `Your workspaces · ${runtimeContext.identity.organisationIds.length}`
+                  : "This workspace only"}
             </span>
           </div>
         )}
@@ -2838,7 +2896,7 @@ export default function PortalApp({
           says is a super admin; a client gets `tenantSummary: null` and this
           does not render, so it cannot leak another client's row counts.
         */}
-        {runtimeContext?.tenantSummary && runtimeContext.tenantSummary.length > 1 && (
+        {isSuperAdmin && runtimeContext?.tenantSummary && runtimeContext.tenantSummary.length > 1 && (
           <div className="workspace-tenants">
             <span className="nav-label">All clients</span>
             {runtimeContext.tenantSummary.map((tenant) => (
@@ -2944,6 +3002,7 @@ export default function PortalApp({
                 >
                   <option value="super_admin">Super Admin</option>
                   <option value="admin">Admin</option>
+                  <option value="manager">Manager</option>
                   <option value="client">Client</option>
                 </select>
               </label>

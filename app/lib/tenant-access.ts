@@ -32,6 +32,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { memberships, organisations, users } from "../../db/schema";
 import { getSession, type AuthenticatedSession } from "./auth-session";
+import { normaliseRole, strongerRole } from "./roles";
 import {
   getWorkspaceActor,
   workspaceCookieValue,
@@ -104,11 +105,12 @@ export function sampleSeedingAllowed() {
   return process.env.NODE_ENV !== "production";
 }
 
-const ROLE_RANK: Record<WorkspaceRole, number> = {
-  client: 0,
-  admin: 1,
-  super_admin: 2,
-};
+/*
+ * `ROLE_RANK` and `normaliseRole` used to be private copies here. Both come from
+ * `roles.ts` now, which is the one list of roles a membership may hold — a
+ * membership naming anything else is still discarded by `loadGrants`, exactly
+ * as before.
+ */
 
 /** The seeded demo identity that backs each sidebar test role. */
 export function roleIdentityEmail(role: WorkspaceRole) {
@@ -118,13 +120,6 @@ export function roleIdentityEmail(role: WorkspaceRole) {
 /** The seeded per-organisation demo identity for a role, from the org slug. */
 export function organisationIdentityEmail(slug: string, role: WorkspaceRole) {
   return `${role.replaceAll("_", "-")}@${slug}.test.maintsupp.com`;
-}
-
-function normaliseRole(value: string | null | undefined): WorkspaceRole | null {
-  if (value === "super_admin" || value === "admin" || value === "client") {
-    return value;
-  }
-  return null;
 }
 
 function parseSiteScope(value: string | null): string[] | null {
@@ -146,8 +141,18 @@ export type MembershipGrant = {
 };
 
 export type TenantAccess = {
-  /** The actor, with `role` replaced by the role the database grants. */
+  /**
+   * The actor, with `role` replaced by the role the database grants IN THE
+   * SELECTED ORGANISATION (`orgId`) — or `super_admin` for a super admin of
+   * any organisation. See the note where `role` is computed.
+   */
   actor: WorkspaceActor;
+  /**
+   * Every active membership the identity holds, one per organisation. What
+   * `roleInOrganisation` reads when a route acts on a workspace other than the
+   * selected one.
+   */
+  grants: MembershipGrant[];
   /** The email the membership lookup was answered against. */
   identityEmail: string;
   /** The organisation this request reads and writes. */
@@ -362,14 +367,12 @@ export async function resolveTenantAccess(
    * account that had not yet been given a membership straight to super admin.
    * A real account with no grants gets the least privilege there is.
    */
-  const role: WorkspaceRole = grants.length
-    ? grants.reduce<WorkspaceRole>(
-        (best, grant) => (ROLE_RANK[grant.role] > ROLE_RANK[best] ? grant.role : best),
-        "client",
-      )
+  const strongest: WorkspaceRole = grants.length
+    ? grants.reduce<WorkspaceRole>((best, grant) => strongerRole(best, grant.role), "client")
     : session
       ? "client"
       : actor.role;
+  const superAdmin = strongest === "super_admin";
 
   const activeIds = new Set(activeOrganisations.map((item) => item.id));
   const primary =
@@ -382,7 +385,7 @@ export async function resolveTenantAccess(
   let unaffiliated = false;
   /** No session, no membership, not a development environment. Refuse. */
   let anonymous = false;
-  if (role === "super_admin") {
+  if (superAdmin) {
     organisationIds = activeOrganisations.map((item) => item.id);
   } else {
     organisationIds = grants
@@ -447,6 +450,30 @@ export async function resolveTenantAccess(
     grants.find((grant) => grant.organisationId === organisation.id)?.siteScope ??
     null;
 
+  /*
+   * THE ROLE IS THE ONE HELD IN THE SELECTED ORGANISATION.
+   *
+   * This used to be `strongest` — the strongest role held ANYWHERE — applied to
+   * whichever organisation the request stood in. For a super admin that is
+   * right and stays right: a super admin of one organisation is a super admin
+   * everywhere. For everyone else it was a cross-workspace escalation. An
+   * account that was an Admin of one client and a Client of another could
+   * select the second (the membership allows it) and arrive there as an Admin:
+   * `scopedDbWithCapability`, `/api/context`, `/api/navigation` and every
+   * other route that resolves permissions from `actor.role` then applied
+   * Admin's capabilities to a workspace where the database said Client.
+   * `adminContext` had already corrected this for the `/api/admin/*` routes by
+   * re-reading the membership; fixing it here corrects every route at once.
+   *
+   * With no membership in the selected organisation the answer is the weakest
+   * role — never the ambient one — except for the unaffiliated fallback, which
+   * has no memberships anywhere and keeps its documented behaviour.
+   */
+  const role: WorkspaceRole = superAdmin
+    ? "super_admin"
+    : (grants.find((grant) => grant.organisationId === organisation.id)?.role ??
+      (grants.length ? "client" : strongest));
+
   return {
     /*
      * Stage 20 — a signed-in request reports the account that signed in.
@@ -464,18 +491,39 @@ export async function resolveTenantAccess(
           role,
         }
       : { ...actor, role },
+    grants: grants.filter((grant) => activeIds.has(grant.organisationId)),
     identityEmail,
     organisation,
     orgId: organisation.id,
     organisationIds,
     activeOrganisations,
-    crossOrganisation: role === "super_admin",
+    crossOrganisation: superAdmin,
     siteScope,
     unaffiliated,
     anonymous,
     authenticated: !!session,
     session,
   };
+}
+
+/**
+ * The role this access holds in one named organisation.
+ *
+ * A super admin is a super admin everywhere. Anyone else holds whatever their
+ * membership in THAT organisation says, and the weakest role when they have
+ * none — the ambient role is never borrowed from another workspace. The
+ * unaffiliated fallback (no memberships at all) is confined to its one
+ * organisation and keeps the role it was resolved with there.
+ */
+export function roleInOrganisation(
+  access: Pick<TenantAccess, "crossOrganisation" | "grants" | "unaffiliated" | "orgId" | "actor">,
+  organisationId: string,
+): WorkspaceRole {
+  if (access.crossOrganisation) return "super_admin";
+  const grant = access.grants.find((item) => item.organisationId === organisationId);
+  if (grant) return grant.role;
+  if (access.unaffiliated && organisationId === access.orgId) return access.actor.role;
+  return "client";
 }
 
 /** True when `organisationId` is one this access grant may read. */

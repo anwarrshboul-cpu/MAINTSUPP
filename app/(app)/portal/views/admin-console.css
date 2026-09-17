@@ -332,6 +332,11 @@
   color: var(--amber-600);
 }
 
+.admin-role-chip--manager {
+  background: var(--blue-100);
+  color: var(--blue-600);
+}
+
 .admin-workspaces {
   display: flex;
   flex-wrap: wrap;

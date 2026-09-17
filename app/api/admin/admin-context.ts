@@ -20,14 +20,18 @@ import { and, eq } from "drizzle-orm";
 
 import { auditEvents, memberships, organisations } from "../../../db/schema";
 import {
+  can,
+  canManageRole,
+  loadRoleOverridesForOrganisations,
   resolvePermissions,
+  type Capability,
   type PermissionSubject,
 } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
+import { roleInOrganisation as grantedRoleIn } from "../../lib/tenant-access";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
-// The same three-role normaliser the invitation path uses; it is the only
-// exported one, and using a second would be a second definition of "admin".
-import { normaliseRole } from "../auth/invitations/invitation-tokens";
+// The one role normaliser, from the module that defines the role set.
+import { normaliseRole } from "../../lib/roles";
 
 export type AdminContext = ScopedDatabase & {
   /** The workspace this request acts on — validated, never merely requested. */
@@ -103,7 +107,10 @@ export async function adminContext(
     access.db,
     access.session?.user.id ?? null,
     targetOrganisationId,
-    access.actor.role,
+    // No session (a development demo identity): the grants the tenancy
+    // resolver already loaded, asked about THIS organisation — not the role
+    // held in whichever organisation the request happens to stand in.
+    grantedRoleIn(access, targetOrganisationId),
   );
 
   const subject = await resolvePermissions(
@@ -173,6 +180,115 @@ async function roleInOrganisation(
   // No membership in the target workspace is the weakest role, never the
   // ambient one — that fallback is exactly what let a viewer act as an admin.
   return normaliseRole(here[0]?.role) ?? "client";
+}
+
+/**
+ * Where the person being acted on stands, across every active workspace.
+ *
+ * `loadTarget` answers "is this person in the workspace I administer". It does
+ * not answer "who else is this person", and two changes the admin screen makes
+ * are not about one workspace at all: a password reset and a deactivation act
+ * on the ACCOUNT (`users`), and a profile edit rewrites the name every other
+ * workspace shows. So they need this second question answered.
+ */
+async function targetStanding(context: AdminContext, targetUserId: string) {
+  const rows = await context.db
+    .select({
+      organisationId: memberships.organisationId,
+      role: memberships.role,
+      status: memberships.status,
+    })
+    .from(memberships)
+    .innerJoin(organisations, eq(organisations.id, memberships.organisationId))
+    .where(and(eq(memberships.userId, targetUserId), eq(organisations.status, "active")));
+  return {
+    superAdminAnywhere: rows.some(
+      (row) => row.role === "super_admin" && row.status === "active",
+    ),
+    memberships: rows,
+  };
+}
+
+/**
+ * The role that decides "no acting upwards" for a target.
+ *
+ * The membership in THIS workspace, unless the person is a Super Admin of any
+ * workspace — in which case they are a Super Admin here too, because
+ * `resolveTenantAccess` says so. Comparing against the local membership alone
+ * let a workspace admin act on a Super Admin whose row in that workspace
+ * happened to read `client`: `db/init.ts` widens super admins to every
+ * workspace with `INSERT OR IGNORE`, so an older, weaker row survives it.
+ */
+export async function effectiveTargetRole(
+  context: AdminContext,
+  targetUserId: string,
+  localRole: string,
+): Promise<WorkspaceRole> {
+  const standing = await targetStanding(context, targetUserId);
+  if (standing.superAdminAnywhere) return "super_admin";
+  return normaliseRole(localRole) ?? "client";
+}
+
+/**
+ * Refuses an ACCOUNT-WIDE change the caller is not entitled to make, or null.
+ *
+ * Proven before this existed: an Admin of workspace A could reset the password
+ * of — and so take over — an account that was also an Admin of workspace B, or
+ * deactivate that account and lock it out of B. Each check passed because each
+ * looked only at A. The rule now: below Super Admin, you may change an account
+ * only if you hold `capability` in EVERY workspace it belongs to, and may act
+ * on its role there (`canManageRole`). Otherwise a Super Admin has to do it.
+ *
+ * The refusal does not name the other workspace. The caller may not be a
+ * member of it, and its name is exactly what strict isolation keeps from them.
+ */
+export async function accountWideRefusal(
+  context: AdminContext,
+  targetUserId: string,
+  capability: Capability,
+): Promise<Response | null> {
+  if (context.actor.role === "super_admin") return null;
+
+  const standing = await targetStanding(context, targetUserId);
+  if (standing.superAdminAnywhere) {
+    return Response.json(
+      {
+        error: "Only a Super Admin can change a Super Admin's account.",
+        denied: true,
+      },
+      { status: 403 },
+    );
+  }
+
+  const elsewhere = standing.memberships.filter(
+    (row) => row.organisationId !== context.targetOrganisationId,
+  );
+  if (!elsewhere.length) return null;
+
+  const overrides = await loadRoleOverridesForOrganisations(
+    context.db,
+    [...new Set(elsewhere.map((row) => row.organisationId))],
+  );
+  for (const row of elsewhere) {
+    const actorRole = grantedRoleIn(context, row.organisationId);
+    const targetRole = normaliseRole(row.role) ?? "client";
+    const subject = {
+      role: actorRole,
+      capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {},
+    };
+    if (!can(subject, capability) || !canManageRole(actorRole, targetRole)) {
+      return Response.json(
+        {
+          error:
+            "This person also belongs to a workspace you do not administer, so a change to their account has to be made by a Super Admin.",
+          denied: true,
+          guardRail: "other_workspace",
+        },
+        { status: 403 },
+      );
+    }
+  }
+  return null;
 }
 
 /** True when `adminContext` refused. */

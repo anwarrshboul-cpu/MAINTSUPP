@@ -74,11 +74,25 @@ test("the invitation link is shown, and not as a message that fades", async () =
     /readOnly\s+value=\{issued\.url\}/,
     "the link is selectable, so it can be copied by hand when the clipboard is blocked",
   );
-  // The screen must not claim to have sent an email. Nothing is sent.
-  assert.doesNotMatch(
+  /*
+   * The screen must not claim an email was sent unless the SERVER says so.
+   *
+   * This used to forbid "Send invitation" outright, because no mail server
+   * existed and a button promising delivery was a lie. Invitations are now
+   * emailed from admin@maintsupp.com through the same Resend path and kill
+   * switch as every other notification — but only where a deployment has it
+   * configured and switched on. So the rule is now: the button may say
+   * "Send", and what the screen reports afterwards is the server's own
+   * `delivery` sentence, with an explicit "No email was sent" fallback.
+   */
+  assert.match(source, /function deliveryOf\(/);
+  assert.match(source, /const delivery = deliveryOf\(result\.payload\);/);
+  assert.match(source, /delivery\?\.message \?\? "Send them the link below\."/);
+  assert.match(source, /"No email was sent — share this link with them directly\."/);
+  assert.match(
     source,
-    /"Send invitation"|Sending…/,
-    "no mail server exists — the button cannot promise delivery",
+    /const emailed = issued\.delivery\?\.status === "sent";/,
+    "only a delivery the server reports as sent is described as emailed",
   );
 });
 
@@ -86,7 +100,13 @@ test("the pending table treats expiry as a state, and offers both actions", asyn
   const source = await read("app/(app)/portal/views/admin-users.tsx");
 
   assert.match(source, /admin-status-chip--expired/, "an expired invitation reads as expired");
-  assert.match(source, /invitation\.expired \? "Send a new link" : "Get the link again"/);
+  assert.match(source, /invitation\.expired \? "Send a new invitation" : "Resend invitation"/);
+  // Resending names the invitation and nothing else: the address and role are
+  // read back from the stored row, so a resend cannot change what it grants.
+  assert.match(
+    source,
+    /adminWrite\("\/api\/admin\/users", "POST", \{\s*organisationId: data\?\.organisation\.id,\s*invitationId: invitation\.id,\s*\}\)/,
+  );
   assert.match(source, /async function revoke\(invitation: Invitation\)/);
   assert.match(
     source,
@@ -205,12 +225,46 @@ test("invite, reissue, withdraw — and the link dies each time it should", asyn
   assert.ok(pending, "and appears in the pending table");
   assert.equal(pending.expired, false);
 
-  // Reissue. The new link works; the old one is gone, not merely hidden.
-  const again = await json(cookie, "/api/admin/users", {
+  // The first invitation says what happened to its email — whatever this
+  // deployment's email mode is, the answer is a stated one.
+  assert.ok(created.body.delivery, "the reply says what happened to the email");
+  assert.equal(created.body.delivery.to, email);
+  assert.equal(created.body.delivery.from, "admin@maintsupp.com");
+  assert.ok(
+    // "disabled" is the default: invitation email is off until it is opted in.
+    ["disabled", "sent", "sink", "failed", "skipped", "suppressed"].includes(created.body.delivery.status),
+  );
+
+  /*
+   * A second ORDINARY invite is refused while the first is outstanding — that
+   * is what stops a double click sending two emails. This used to be the
+   * reissue path, answered 201; resending is now asked for by name.
+   */
+  const duplicate = await json(cookie, "/api/admin/users", {
     method: "POST",
     body: JSON.stringify({ email, role: "client" }),
   });
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.body.pendingInvitation, true);
+  assert.equal(
+    (await fetch(`${BASE_URL}/api/auth/invitations/${first}`)).status,
+    200,
+    "a refused duplicate leaves the first link working",
+  );
+
+  // Reissue, explicitly. The new link works; the old one is gone, not merely hidden.
+  const pendingRow = (await json(cookie, "/api/admin/users")).body.invitations.find(
+    (row) => row.email === email,
+  );
+  const again = await json(cookie, "/api/admin/users", {
+    method: "POST",
+    // A role in the body is ignored: a resend repeats the stored invitation.
+    body: JSON.stringify({ invitationId: pendingRow.id, role: "admin" }),
+  });
   assert.equal(again.status, 201);
+  assert.equal(again.body.resent, true);
+  assert.equal(again.body.invitation.role, "client", "a resend cannot change the role");
+  assert.ok(again.body.delivery, "and says what happened to its email");
   const second = tokenOf(again.body.inviteUrl);
   assert.notEqual(second, first);
   assert.equal((await fetch(`${BASE_URL}/api/auth/invitations/${first}`)).status, 410);

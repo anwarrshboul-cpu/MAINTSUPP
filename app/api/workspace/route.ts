@@ -497,7 +497,9 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
       ? "super_admin"
       : member.role.toLowerCase() === "admin"
         ? "admin"
-        : "client";
+        : member.role.toLowerCase() === "manager"
+          ? "manager"
+          : "client";
     await db.insert(memberships).values({
       id: `membership-${member.id}-${orgId}`,
       userId: member.id,

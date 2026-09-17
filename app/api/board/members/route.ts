@@ -19,6 +19,8 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { invitations, memberships, users } from "../../../../db/schema";
 import { can, resolvePermissions } from "../../../lib/permissions";
+import { invitationEmailEnabled } from "../../../lib/notifications";
+import { assignableRoles } from "../../../lib/roles";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import { invitingRole } from "../../auth/invitations/invitation-tokens";
 import { getD1 } from "../../../../db";
@@ -64,7 +66,11 @@ export async function GET(request: Request) {
     if (scope.session?.user.id) {
       inviteAs = await invitingRole(await getD1(), scope.session.user.id, orgId);
     }
-    const canInvite = Boolean(inviteAs && (inviteAs === "admin" || inviteAs === "super_admin")) && can(subject, "users.invite");
+    // The capability decides, as it does in `/api/auth/invitations` itself —
+    // a rank test here would disagree with that route the moment a Super
+    // Admin narrowed or widened `users.invite` for a role.
+    const canInvite =
+      Boolean(inviteAs) && can(subject, "users.invite") && assignableRoles(inviteAs).length > 0;
 
     const pending = canViewPeople
       ? await db
@@ -106,8 +112,10 @@ export async function GET(request: Request) {
         ? null
         : !scope.session
           ? "Sign in to invite people. The preview identity cannot issue invitations."
-          : "Only admins can invite people to this workspace.",
-      delivery: "No email is sent. Share the link with the person you are inviting.",
+          : "Your role cannot invite people to this workspace.",
+      delivery: invitationEmailEnabled()
+        ? "An invitation email is sent from admin@maintsupp.com, and the link is shown here too in case it does not arrive."
+        : "No email is sent yet. Share the link with the person you are inviting.",
     });
   } catch (error) {
     const refusal = anonymousRefusal(error);

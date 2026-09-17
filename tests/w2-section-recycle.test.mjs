@@ -486,13 +486,31 @@ async function signIn() {
  * vacuously if the cookie rides along. So the default here is cookie-free, and
  * the one endpoint that genuinely demands a proven session asks for it by name.
  */
+/*
+ * WHO ADMINISTERS SECTIONS — re-pointed in the roles-and-access batch.
+ *
+ * Adding, renaming, reordering, archiving and binning a workspace section is
+ * menu administration, which the owner reserved for Super Admin: the route is
+ * gated on `navigation.edit` (`SECTION_ADMIN` in the route), no longer on the
+ * `settings.edit` every Admin holds. This file created and managed its section
+ * fixtures as ADMIN, and nothing it tests is about WHO may do that — so those
+ * writes, and only those, are sent as SUPER. Every other request, and every
+ * section write made with an identity named explicitly, is unchanged.
+ */
+function asSectionAdmin(path, options, identity) {
+  const write = ["POST", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase());
+  return identity === ADMIN && write && /^\/api\/workspace-sections(\?|$)/.test(path)
+    ? SUPER
+    : identity;
+}
+
 function call(path, options = {}, identity = ADMIN) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "x-maintsupp-identity": identity,
+      "x-maintsupp-identity": asSectionAdmin(path, options, identity),
       ...(options.headers ?? {}),
     },
   });
@@ -1134,10 +1152,27 @@ test("live: nothing crosses an organisation boundary", async (t) => {
 
     /* The other tenant cannot see, restore or destroy it. Each query is scoped
        by the organisation the SESSION resolved, never by what was asked for. */
-    const theirs = await call(
+    /*
+     * Section administration is Super Admin's since the roles-and-access batch,
+     * so the other tenant's ADMIN is now refused before any lookup (403). That
+     * alone would prove nothing about scoping, so the lookup is exercised by a
+     * caller who passes the capability gate while STANDING IN the other
+     * workspace: a Super Admin whose workspace cookie selects Demo Client Ltd.
+     * The key belongs to the first workspace, so it must not be found there.
+     */
+    const refusedAdmin = await call(
       `/api/workspace-sections?key=${key}&bin=1`,
       { method: "DELETE" },
       OTHER_ORG,
+    );
+    assert.equal(refusedAdmin.status, 403, "another workspace's admin may not administer sections");
+    const theirs = await call(
+      `/api/workspace-sections?key=${key}&bin=1`,
+      {
+        method: "DELETE",
+        headers: { cookie: "maintsupp_demo_organisation=org_000000000000000000000002" },
+      },
+      SUPER,
     );
     assert.equal(theirs.status, 404, "another workspace has no such section");
 

@@ -8,6 +8,7 @@ import {
   setPassword,
 } from "../../../../lib/auth-session";
 import { passwordProblem } from "../../../../lib/password";
+import { ORGANISATION_COOKIE } from "../../../../lib/tenant-access";
 import {
   invitationProblem,
   resolveInvitation,
@@ -269,8 +270,26 @@ export async function POST(
     redirectTo: "/dashboard",
   };
 
+  /*
+   * Stand the person in the workspace they were just invited to.
+   *
+   * Without this, somebody who already belongs to another workspace and
+   * accepts while signed in lands on /dashboard in whichever workspace their
+   * browser last selected, and the invitation looks as though it did nothing.
+   * The cookie is only a REQUEST — `resolveTenantAccess` honours it only for a
+   * workspace the memberships allow — so it cannot widen anything; the
+   * membership written above is what makes it valid.
+   */
+  const workspaceCookie =
+    `${ORGANISATION_COOKIE}=${encodeURIComponent(invitation.organisation_id)}; ` +
+    "Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly";
+
   // An already-signed-in owner keeps the session they proved themselves with.
-  if (provenOwner) return Response.json(body);
+  if (provenOwner) {
+    const response = Response.json(body);
+    response.headers.append("Set-Cookie", workspaceCookie);
+    return response;
+  }
 
   const { token: sessionToken } = await createSession(d1, {
     userId,
@@ -281,5 +300,6 @@ export async function POST(
 
   const response = Response.json(body, { status: 201 });
   response.headers.append("Set-Cookie", sessionCookie(sessionToken, request));
+  response.headers.append("Set-Cookie", workspaceCookie);
   return response;
 }

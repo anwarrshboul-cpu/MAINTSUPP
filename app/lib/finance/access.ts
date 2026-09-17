@@ -28,6 +28,7 @@
  */
 
 import type { Capability } from "../permissions";
+import { ROLE_RANK } from "../roles";
 import { anonymousRefusal, busyRefusal, scopedDbWithCapability, type ScopedDatabase } from "../tenant-db";
 import { ensureDatabase } from "../../../db/init";
 
@@ -119,8 +120,17 @@ export async function guardFinance(
    * `board.view` and nothing narrower fits without inventing a capability. A
    * role check at the single door every finance route already passes through
    * is the smaller and more legible change.
+   *
+   * MANAGER IS ON THE SAME SIDE OF THIS LINE AS CLIENT. The roles-and-access
+   * batch added `manager` below `admin` and gave it `board.view`, so without
+   * this the payables ledger and §8's margin would have opened to every
+   * manager. Managers run operations; what the business pays its contractors
+   * and the margin on each job were not part of what they were asked to have,
+   * so the least-privileged reading applies: the tracker starts at Admin. The
+   * comparison is by rank rather than a list of role names, so a role added
+   * below Admin later starts on the closed side too.
    */
-  if (guard.scope.actor.role === "client") {
+  if (ROLE_RANK[guard.scope.actor.role] < ROLE_RANK.admin) {
     return {
       denied: Response.json(
         {

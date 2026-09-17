@@ -25,6 +25,8 @@
 import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
+// Resolves the extensionless imports inside app/lib/*.ts for the unit checks.
+import "./reports-ts-loader.mjs";
 
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:3000";
 const PRIMARY_ORGANISATION_ID = "org_000000000000000000000001";
@@ -249,7 +251,11 @@ test("the Stage 19 tenancy rules are untouched", async () => {
   // session's own organisation is a request on exactly the same terms.
   assert.match(text, /allowed\.has\(requestedId\)/);
   assert.match(text, /session\?\.organisationId/);
-  assert.match(text, /crossOrganisation: role === "super_admin"/);
+  // `role === "super_admin"` until the roles-and-access batch separated the
+  // strongest role held anywhere (which decides cross-organisation reach) from
+  // the role the request acts with (the membership in the selected workspace).
+  assert.match(text, /const superAdmin = strongest === "super_admin"/);
+  assert.match(text, /crossOrganisation: superAdmin/);
   assert.match(text, /eq\(memberships\.status, "active"\)/);
 });
 
@@ -347,12 +353,35 @@ test("only an admin may invite, and never above their own role", async () => {
 
   assert.match(create, /requireSession\(request\)/);
   assert.match(create, /invitingRole\(d1, current\.user\.id, organisationId\)/);
-  assert.match(create, /ROLE_RANK\[granting\] < ROLE_RANK\.admin/);
+  /*
+   * "Only an admin" is now the permission matrix's answer, not a rank test.
+   *
+   * This pinned `ROLE_RANK[granting] < ROLE_RANK.admin`, which ignored the
+   * matrix: an admin whose `users.invite` had been withdrawn could still invite
+   * by calling this route directly. The route now resolves the caller's
+   * permissions IN THE TARGET WORKSPACE and asks `can(…, "users.invite")`, and
+   * the built-in defaults are what keep it to admins — checked below.
+   */
   assert.match(
     create,
-    /ROLE_RANK\[role\] > ROLE_RANK\[granting\]/,
-    "an inviter must not be able to grant a role above their own",
+    /const subject = await resolvePermissions\(await getDb\(\), organisationId, granting\);\s*if \(!can\(subject, "users\.invite"\)\)/,
   );
+  const permissions = await import("../app/lib/permissions.ts");
+  assert.equal(permissions.defaultAllows("admin", "users.invite"), true);
+  assert.equal(permissions.defaultAllows("manager", "users.invite"), false);
+  assert.equal(permissions.defaultAllows("client", "users.invite"), false);
+  // `ROLE_RANK[role] > ROLE_RANK[granting]` until the owner's assignment
+  // decision: an Admin may no longer grant Admin (equal rank), and a Manager
+  // grants nothing although a Client ranks below them. The rule is the table
+  // in `canAssignRole`, and it is still applied before anything is written.
+  assert.match(
+    create,
+    /if \(!canAssignRole\(granting, role\)\) \{/,
+    "an inviter must not be able to grant a role their table does not allow",
+  );
+  const roles = await import("../app/lib/roles.ts");
+  assert.equal(roles.canAssignRole("admin", "super_admin"), false);
+  assert.equal(roles.canAssignRole("admin", "admin"), false);
 
   // The authority is memberships, not the display label on users.role.
   const helpers = await source("app/api/auth/invitations/invitation-tokens.ts");

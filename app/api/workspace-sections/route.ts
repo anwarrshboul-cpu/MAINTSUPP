@@ -22,11 +22,19 @@
  *
  * WHO MAY WRITE
  *
- * `settings.edit`, through `scopedDbWithCapability` — the established pattern,
- * and the same capability that guards the workspace default dashboard. Not a
- * role check: an admin whose `settings.edit` has been revoked in Roles must be
- * refused here too, and a role check would wave them through. Reading is open
- * to any member, because the sidebar has to be drawable by everybody.
+ * `navigation.edit` (`SECTION_ADMIN` below), through `scopedDbWithCapability` —
+ * the established pattern. Not a role check: the matrix stays the one answer.
+ * Reading is open to any member, because the sidebar has to be drawable by
+ * everybody.
+ *
+ * This was `settings.edit` — "the same capability that guards the workspace
+ * default dashboard" — until the roles-and-access batch. A section is an entry
+ * in the product's menu, and the owner reserved menu administration for Super
+ * Admin, so adding, renaming, reordering and archiving one now needs the
+ * capability `/api/navigation` uses for the same menu. Every reference below to
+ * "`settings.edit`" as the gate for these verbs predates that and now reads as
+ * `SECTION_ADMIN`; the reasoning about reversible versus irreversible acts is
+ * unchanged — `data.delete` still additionally guards a purge.
  */
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -60,7 +68,7 @@ import {
   type WorkspaceSection,
 } from "./catalogue";
 import { BUILT_IN_GROUPS, FALLBACK_GROUP } from "../navigation/layout";
-import { can, resolvePermissions } from "../../lib/permissions";
+import { can, resolvePermissions, type Capability } from "../../lib/permissions";
 import {
   boardBinCount,
   boardItemCount,
@@ -76,6 +84,9 @@ import {
   expiryFrom,
   sendSectionToBin,
 } from "../../lib/recycle-bin";
+
+/** The capability that administers the workspace's sidebar sections. */
+const SECTION_ADMIN: Capability = "navigation.edit";
 
 /** The headings a section may be filed under. `layout.ts` is the authority. */
 const GROUP_KEYS = BUILT_IN_GROUPS.map((group) => group.key);
@@ -217,7 +228,7 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const context = await scopedDb(request);
     const sections = await loadWorkspaceSections(context.db, context.orgId);
-    const guard = await scopedDbWithCapability(request, "settings.edit");
+    const guard = await scopedDbWithCapability(request, SECTION_ADMIN);
     return Response.json({
       sections: sections.sort((left, right) => left.position - right.position),
       /* What a section is allowed to be, so the editor does not need a second
@@ -234,8 +245,8 @@ export async function GET(request: Request) {
          about to press Delete, and a second copy of that figure in the browser
          is how it comes to disagree with the sweep. */
       retentionDays: RETENTION_DAYS,
-      /* Stated rather than inferred from the role, because a role whose
-         `settings.edit` was revoked in Roles is still called "Admin". */
+      /* Stated rather than inferred from the role: `SECTION_ADMIN` is what
+         decides, and the role name alone says nothing about it. */
       canEdit: !guard.denied,
       role: context.actor.role,
     });
@@ -253,7 +264,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "settings.edit");
+    const guard = await scopedDbWithCapability(request, SECTION_ADMIN);
     if (guard.denied) return guard.denied;
     const context = guard.scope;
 
@@ -569,7 +580,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "settings.edit");
+    const guard = await scopedDbWithCapability(request, SECTION_ADMIN);
     if (guard.denied) return guard.denied;
     const context = guard.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -1134,7 +1145,7 @@ async function abandonedBoardFor(
 export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "settings.edit");
+    const guard = await scopedDbWithCapability(request, SECTION_ADMIN);
     if (guard.denied) return guard.denied;
     const context = guard.scope;
 

@@ -27,6 +27,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+// Resolves the extensionless imports inside app/lib/*.ts for the unit checks.
+import "./reports-ts-loader.mjs";
 
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:3000";
 
@@ -84,10 +86,29 @@ test("the capability set is declared once, with a default for every role", async
     );
   }
 
-  // Exactly the three roles the rest of the system can represent. A fourth here
-  // would be a matrix column that no membership row could ever match.
-  assert.match(permissions, /ROLES: readonly WorkspaceRole\[\] = \["client", "admin", "super_admin"\]/);
-  for (const role of ["super_admin", "admin", "client"]) {
+  /*
+   * Exactly the roles the rest of the system can represent — FOUR since the
+   * roles-and-access batch added `manager`.
+   *
+   * This asserted the three-role list inside permissions.ts, with the warning
+   * that a fourth here "would be a matrix column that no membership row could
+   * ever match". That warning is why the list moved rather than grew in place:
+   * it is defined once in `roles.ts`, and permissions.ts, the tenancy resolver
+   * and the invitation service all import it (pinned by the next test), so a
+   * role in the matrix is a role a membership can hold.
+   */
+  const roles = await source("app/lib/roles.ts");
+  assert.match(
+    roles,
+    /ROLES: readonly WorkspaceRole\[\] = \["client", "manager", "admin", "super_admin"\]/,
+  );
+  assert.match(permissions, /from "\.\/roles"/, "permissions.ts takes the role list from roles.ts");
+  assert.doesNotMatch(
+    permissions,
+    /export const ROLES: readonly WorkspaceRole\[\] = \[/,
+    "and does not define a second one",
+  );
+  for (const role of ["super_admin", "admin", "manager", "client"]) {
     assert.match(
       permissions,
       new RegExp(`${role}: `),
@@ -102,26 +123,65 @@ test("the capability set is declared once, with a default for every role", async
 
   // And the recovery path: the top role is never decided by the table.
   assert.match(permissions, /if \(actor\.role === IMMUTABLE_ROLE\) return true;/);
+
+  // Reserved capabilities are refused below Super Admin BEFORE any override is
+  // read, so no row in the table can grant them.
+  // `isForbiddenForRole` covers both the reservations and the manager ceiling.
+  const reserved = permissions.indexOf("if (isForbiddenForRole(actor.role, capability)) return false;");
+  const override = permissions.indexOf("const override = actor.capabilities[capability];");
+  assert.ok(reserved > 0 && override > reserved, "the reservation is checked before overrides");
+  for (const capability of ["clients.view_all", "roles.edit", "navigation.edit"]) {
+    assert.match(
+      permissions.slice(permissions.indexOf("export const SUPER_ADMIN_ONLY")),
+      new RegExp(`"${capability.replace(".", "\\.")}"`),
+      `${capability} is reserved for Super Admin`,
+    );
+  }
 });
 
 test("the role list in permissions.ts matches the one tenancy grants", async () => {
   const access = await source("app/lib/tenant-access.ts");
   const permissions = await source("app/lib/permissions.ts");
+  const invitations = await source("app/api/auth/invitations/invitation-tokens.ts");
+  const actor = await source("app/lib/workspace-actor.ts");
 
-  // `normaliseRole` in tenant-access.ts is the authority on which membership
-  // roles survive. If the two lists drift, the matrix grows a column that can
-  // never apply to anybody.
-  const granted = [...access.matchAll(/value === "(super_admin|admin|client)"/g)].map(
-    (match) => match[1],
-  );
-  assert.deepEqual(
-    [...new Set(granted)].sort(),
-    ["admin", "client", "super_admin"],
-    "tenant-access.ts must still grant exactly these three roles",
-  );
-  for (const role of granted) {
-    assert.match(permissions, new RegExp(`"${role}"`));
+  /*
+   * `normaliseRole` is the authority on which membership roles survive. If the
+   * lists drift, the matrix grows a column that can never apply to anybody.
+   *
+   * This used to read the three `value === "…"` comparisons out of
+   * tenant-access.ts's private normaliser. There is no private normaliser any
+   * more: the tenancy resolver, the permission module, the invitation service
+   * and the actor type all import the ONE list in roles.ts. So the drift this
+   * test guards against is now pinned as "nobody keeps their own copy" — which
+   * is the stronger form of "the copies agree".
+   */
+  assert.match(access, /import \{ normaliseRole, strongerRole \} from "\.\/roles"/);
+  assert.match(permissions, /from "\.\/roles"/);
+  assert.match(invitations, /from "\.\.\/\.\.\/\.\.\/lib\/roles"/);
+  assert.match(actor, /export type \{ WorkspaceRole \} from "\.\/roles"/);
+  for (const [name, text] of [
+    ["tenant-access.ts", access],
+    ["permissions.ts", permissions],
+    ["invitation-tokens.ts", invitations],
+  ]) {
+    assert.doesNotMatch(
+      text,
+      /value === "super_admin" \|\| value === "admin"/,
+      `${name} must not carry its own role normaliser`,
+    );
+    assert.doesNotMatch(
+      text,
+      /client: 0,\s*admin: 1,/,
+      `${name} must not carry its own three-role rank table`,
+    );
   }
+
+  const roles = await import("../app/lib/roles.ts");
+  assert.deepEqual([...roles.ROLES], ["client", "manager", "admin", "super_admin"]);
+  for (const role of roles.ROLES) assert.equal(roles.normaliseRole(role), role);
+  assert.equal(roles.normaliseRole("owner"), null, "an unknown membership role is discarded");
+  assert.equal(roles.normaliseRole("Admin"), null, "labels are not roles");
 });
 
 test("every admin route resolves tenancy and capability, and neither by hand", async () => {
@@ -252,8 +312,16 @@ test("an admin runs their own workspace but not the platform", async (t) => {
   assert.equal(users.body.organisation.id, PRIMARY_ORGANISATION_ID);
   assert.ok(users.body.users.length > 0, "the seeded workspace has members");
 
+  /*
+   * The permission matrix is Super Admin's since the roles-and-access batch.
+   * This asserted 200: an admin could open and rewrite what every role means
+   * in their workspace — including handing `manager` any power admin held.
+   * `roles.edit` is now reserved (`SUPER_ADMIN_ONLY`), so an admin is refused
+   * by the server, with the capability named.
+   */
   const roles = await call(SUNNAMUSK_ADMIN, "/api/admin/roles");
-  assert.equal(roles.status, 200);
+  assert.equal(roles.status, 403);
+  assert.equal(roles.body.capability, "roles.edit");
 
   const clients = await call(SUNNAMUSK_ADMIN, "/api/admin/clients");
   assert.equal(clients.status, 403);
@@ -471,35 +539,51 @@ test("GUARD-RAIL: the Super Admin row of the matrix cannot be narrowed", async (
 });
 
 test("GUARD-RAIL: nobody can remove their own role's ability to edit roles", async (t) => {
+  /*
+   * The rule itself, as a pure function. It still holds and is still written
+   * the same way — but since the roles-and-access batch no live caller below
+   * Super Admin can reach it, because `roles.edit` is reserved: an admin is
+   * refused the matrix outright, and the Super Admin row is immutable.
+   */
+  const permissions = await import("../app/lib/permissions.ts");
+  // Writing the cell at all is refused first — the capability is reserved…
+  assert.match(
+    String(permissions.roleCapabilityWriteRefusal("admin", "admin", "roles.edit", false)),
+    /reserved for Super Admin/,
+  );
+  // …and a revert (`null`, which deletes a row and so is not a reserved write)
+  // still meets the lockout rule, exactly as before.
+  assert.match(
+    String(permissions.roleCapabilityWriteRefusal("client", "client", "roles.edit", null)),
+    /cannot remove your own role's ability/,
+    "reverting to a default that denies is still a lockout",
+  );
+
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
     return;
   }
 
+  // Live: this used to be answered with the self-lockout guard-rail. The
+  // stronger answer now is that an admin may not write the matrix at all.
   const direct = await putRoles(SUNNAMUSK_ADMIN, {
     changes: [{ role: "admin", capability: "roles.edit", allowed: false }],
   });
   assert.equal(direct.status, 403);
-  assert.equal(direct.body.guardRail, "self_lockout");
+  assert.equal(direct.body.capability, "roles.edit");
 
-  // The same rule has to hold for the sideways route out: reverting the cell to
-  // a built-in default that happens to deny is still a lockout.
+  // And the sideways route this test used to build — granting `client` the
+  // matrix so a client could then lock itself out — no longer exists: the
+  // grant itself is refused, because the capability is reserved.
   const grant = await putRoles(SUPER_ADMIN, {
     changes: [{ role: "client", capability: "roles.edit", allowed: true }],
   });
-  assert.equal(grant.status, 200);
-  try {
-    const revert = await putRoles(SUNNAMUSK_CLIENT, {
-      changes: [{ role: "client", capability: "roles.edit", allowed: null }],
-    });
-    assert.equal(revert.status, 403);
-    assert.equal(revert.body.guardRail, "self_lockout");
-  } finally {
-    const restore = await putRoles(SUPER_ADMIN, {
-      changes: [{ role: "client", capability: "roles.edit", allowed: null }],
-    });
-    assert.equal(restore.status, 200);
-  }
+  assert.equal(grant.status, 403);
+  assert.equal(grant.body.guardRail, "reserved_capability");
+  const clientTry = await putRoles(SUNNAMUSK_CLIENT, {
+    changes: [{ role: "client", capability: "roles.edit", allowed: null }],
+  });
+  assert.equal(clientTry.status, 403);
 });
 
 test("an invented role or capability is refused", async (t) => {
@@ -513,8 +597,13 @@ test("an invented role or capability is refused", async (t) => {
   });
   assert.equal(badCapability.status, 400);
 
+  /*
+   * `manager` was this test's invented role. It is a real one since the
+   * roles-and-access batch, so the invention is now `owner` — a word the owner
+   * uses, and exactly the kind of role somebody might try to write.
+   */
   const badRole = await putRoles(SUPER_ADMIN, {
-    changes: [{ role: "manager", capability: "board.edit", allowed: true }],
+    changes: [{ role: "owner", capability: "board.edit", allowed: true }],
   });
   assert.equal(badRole.status, 400);
 });

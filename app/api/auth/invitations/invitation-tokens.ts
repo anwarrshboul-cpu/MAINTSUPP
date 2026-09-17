@@ -27,33 +27,35 @@
 
 import type { getD1 } from "../../../../db";
 import { hashToken } from "../../../lib/auth-session";
+import {
+  ROLE_LABELS,
+  ROLE_RANK,
+  normaliseRole as normaliseWorkspaceRole,
+  type WorkspaceRole,
+} from "../../../lib/roles";
 
 type D1DatabaseLike = Awaited<ReturnType<typeof getD1>>;
 
-export type InvitableRole = "super_admin" | "admin" | "client";
+/*
+ * The role vocabulary is `roles.ts`'s. These names are kept because the
+ * invitation routes, the invite page and the admin context import them from
+ * here; they used to be a private three-role copy, which is exactly the kind
+ * of list a fourth role gets left out of.
+ */
+export type InvitableRole = WorkspaceRole;
 
 /** Ranked so an inviter can never grant more than they hold. */
-export const ROLE_RANK: Record<InvitableRole, number> = {
-  client: 0,
-  admin: 1,
-  super_admin: 2,
-};
+export { ROLE_RANK };
 
 /** The label written to `users.role`, which is display text, not authority. */
-export const ROLE_LABEL: Record<InvitableRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  client: "Client",
-};
+export const ROLE_LABEL: Record<InvitableRole, string> = ROLE_LABELS;
 
 /** Long enough to survive a weekend and a forwarded email, short enough to rot. */
 export const DEFAULT_EXPIRY_DAYS = 7;
 const MAX_EXPIRY_DAYS = 30;
 
 export function normaliseRole(value: unknown): InvitableRole | null {
-  return value === "super_admin" || value === "admin" || value === "client"
-    ? value
-    : null;
+  return normaliseWorkspaceRole(value);
 }
 
 export function normaliseEmail(value: unknown) {
@@ -170,6 +172,43 @@ export function invitationProblem(state: InvitationState): string | null {
     default:
       return "This invitation link is not valid. Ask your administrator for a new one.";
   }
+}
+
+/**
+ * The outstanding, unexpired invitation for this person and workspace, if any.
+ *
+ * What stops a second click from sending a second email: an ordinary invite is
+ * refused while one of these exists, and "send it again" has to be asked for
+ * explicitly. An EXPIRED invitation does not count — the link in that inbox
+ * opens nothing, so a fresh invite is the right answer, and `createInvitation`
+ * retires the dead row as it always has.
+ */
+export async function findOutstandingInvitation(
+  d1: D1DatabaseLike,
+  organisationId: string,
+  email: string,
+): Promise<{ id: string; role: string; expires_at: string } | null> {
+  const result = await d1
+    .prepare(
+      `SELECT id, role, expires_at
+         FROM invitations
+        WHERE organisation_id = ?
+          AND lower(email) = ?
+          AND accepted_at IS NULL
+          AND revoked_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT 5`,
+    )
+    .bind(organisationId, email)
+    .all();
+  const rows = (result.results ?? []) as Array<{ id: string; role: string; expires_at: string }>;
+  const now = Date.now();
+  return (
+    rows.find((row) => {
+      const expires = timestampMs(row.expires_at);
+      return expires !== null && expires > now;
+    }) ?? null
+  );
 }
 
 /**

@@ -435,9 +435,11 @@ test("W02-10 every structural write is gated on a capability, never on a role na
     assert.ok(from > 0, `${verb} must exist`);
     const next = route.indexOf("export async function", from + 1);
     const handler = next === -1 ? route.slice(from) : route.slice(from, next);
+    // `SECTION_ADMIN` (navigation.edit) since the roles-and-access batch; it was
+    // "settings.edit" until menu administration was reserved for Super Admin.
     assert.match(
       handler,
-      /scopedDbWithCapability\(request, "settings\.edit"\)/,
+      /scopedDbWithCapability\(request, SECTION_ADMIN\)/,
       `${verb} must be gated on the capability`,
     );
     const guardAt = handler.indexOf("scopedDbWithCapability");
@@ -447,10 +449,11 @@ test("W02-10 every structural write is gated on a capability, never on a role na
       assert.ok(writeAt > guardAt, `${verb} reaches ${write} before its capability check`);
     }
   }
+  assert.match(route, /const SECTION_ADMIN: Capability = "navigation\.edit"/);
   assert.doesNotMatch(
     route,
     /role === "(admin|super_admin)"/,
-    "a role whose settings.edit was revoked in Roles is still called Admin",
+    "a role whose capability was revoked in Roles is still called Admin",
   );
 });
 
@@ -488,13 +491,26 @@ test("W02-10 an expired session is told to sign in, not told it made a bad reque
 /* Against a running server                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Section ADMINISTRATION is Super Admin's since the roles-and-access batch
+ * (`navigation.edit`). The fixture writes below were made as ADMIN; those, and
+ * only those, now go as SUPER. Explicit identities are untouched, and the one
+ * assertion about what an admin may do sends its header directly.
+ */
+function asSectionAdmin(path, options, identity) {
+  const write = ["POST", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase());
+  return identity === ADMIN && write && /^\/api\/workspace-sections(\?|$)/.test(path)
+    ? SUPER
+    : identity;
+}
+
 function call(path, options = {}, identity = ADMIN) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "x-maintsupp-identity": identity,
+      "x-maintsupp-identity": asSectionAdmin(path, options, identity),
       ...(options.headers ?? {}),
     },
   });
@@ -587,11 +603,25 @@ test("live: a purge refuses a live section, and needs data.delete", async (t) =>
     const row = midway.sections.find((entry) => entry.key === KEY);
     assert.ok(row && row.archived === false, "the refusal must not have changed anything");
 
-    // Archive it. Now an admin may not purge it, because admin has no data.delete.
+    // Archive it (as the section administrator).
     assert.equal((await call(`/api/workspace-sections?key=${KEY}`, { method: "DELETE" })).status, 200);
-    const asAdmin = await call(`/api/workspace-sections?key=${KEY}&purge=1`, { method: "DELETE" });
-    assert.equal(asAdmin.status, 403, "settings.edit must not be able to destroy a section");
-    assert.match((await asAdmin.json()).error, /data\.delete/);
+
+    /*
+     * An admin may not purge it. This used to be refused on `data.delete`,
+     * because an admin could archive (settings.edit) but not destroy. Since the
+     * roles-and-access batch an admin cannot administer sections at all, so
+     * the refusal arrives one gate earlier, on `navigation.edit` — and no
+     * built-in role now holds that without also holding `data.delete`. The
+     * purge's own `data.delete` check is still in the route, pinned below.
+     */
+    const asAdmin = await fetch(`${BASE_URL}/api/workspace-sections?key=${KEY}&purge=1`, {
+      method: "DELETE",
+      headers: { Accept: "application/json", "x-maintsupp-identity": ADMIN },
+    });
+    assert.equal(asAdmin.status, 403, "an admin must not be able to destroy a section");
+    assert.match((await asAdmin.json()).error, /navigation\.edit/);
+    const route = codeOnly(await source("app/api/workspace-sections/route.ts"));
+    assert.match(route, /can\(subject,\s*"data\.delete"\)/, "a purge still needs data.delete");
 
     // And the refusal offers the reversible route rather than only saying no.
     const stillThere = await (await call("/api/workspace-sections")).json();

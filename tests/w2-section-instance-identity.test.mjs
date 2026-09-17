@@ -370,13 +370,31 @@ test("W2 §29 a purge finds the register a detached section created", async () =
 /* Against a running server — the owner's reproduction                */
 /* ------------------------------------------------------------------ */
 
+/*
+ * WHO ADMINISTERS SECTIONS — re-pointed in the roles-and-access batch.
+ *
+ * Adding, renaming, reordering, archiving and binning a workspace section is
+ * menu administration, which the owner reserved for Super Admin: the route is
+ * gated on `navigation.edit` (`SECTION_ADMIN` in the route), no longer on the
+ * `settings.edit` every Admin holds. This file created and managed its section
+ * fixtures as ADMIN, and nothing it tests is about WHO may do that — so those
+ * writes, and only those, are sent as SUPER. Every other request, and every
+ * section write made with an identity named explicitly, is unchanged.
+ */
+function asSectionAdmin(path, options, identity) {
+  const write = ["POST", "PATCH", "DELETE"].includes(String(options.method ?? "GET").toUpperCase());
+  return identity === ADMIN && write && /^\/api\/workspace-sections(\?|$)/.test(path)
+    ? SUPER
+    : identity;
+}
+
 function call(path, options = {}, identity = ADMIN) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "x-maintsupp-identity": identity,
+      "x-maintsupp-identity": asSectionAdmin(path, options, identity),
       ...(options.headers ?? {}),
     },
   });

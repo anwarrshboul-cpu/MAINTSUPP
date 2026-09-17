@@ -7,14 +7,17 @@
  * it — so the list is the workspace roster from `/api/board/members`, and
  * the note "Anyone at <org> can access this board" is the literal truth.
  * Inviting goes through `POST /api/auth/invitations`, the one writer of
- * invitations; the link it returns is shown once with Copy, and the dialog
- * says in words that no email was sent, because none is.
+ * invitations. That route now emails the invitation from admin@maintsupp.com
+ * where email is configured, and answers with `delivery` saying whether it
+ * did; the dialog repeats that sentence rather than assuming, and shows the
+ * link once with Copy either way.
  *
  * All state lives in `InviteBody`, which the modal mounts only while open,
  * so each opening starts clean without an effect resetting anything.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ROLE_LABELS, assignableRoles, roleLabel } from "../../../lib/roles";
 import { copyBoardText } from "../board-export";
 import { ActionIcon } from "./board-icons";
 import { BoardModal } from "./board-modal";
@@ -41,13 +44,16 @@ type MembersPayload = {
   delivery: string;
 };
 
-const ROLE_RANK: Record<string, number> = { client: 1, admin: 2, super_admin: 3 };
-const ROLE_LABEL: Record<string, string> = { client: "Client", admin: "Admin", super_admin: "Super admin" };
+/*
+ * The labels and the ordering are `roles.ts`'s. This file used to carry its own
+ * three-role rank table, which is the kind of copy a fourth role is left out
+ * of: `manager` would have been ranked 0 and never offered.
+ */
+const ROLE_LABEL: Record<string, string> = ROLE_LABELS;
 
-/** The roles a caller of rank `granting` may hand out — never above their own. */
+/** The roles a caller holding `granting` may hand out — never above their own. */
 export function grantableRoles(granting: string | null): string[] {
-  const rank = granting ? ROLE_RANK[granting] ?? 0 : 0;
-  return Object.keys(ROLE_RANK).filter((role) => ROLE_RANK[role] <= rank);
+  return assignableRoles(granting);
 }
 
 function initials(name: string) {
@@ -63,7 +69,12 @@ function InviteBody({ onMembersChanged }: { onMembersChanged: () => void }) {
   const [chosenRole, setChosenRole] = useState("client");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [issued, setIssued] = useState<{ email: string; role: string; url: string } | null>(null);
+  const [issued, setIssued] = useState<{
+    email: string;
+    role: string;
+    url: string;
+    delivery: { status: string; message: string } | null;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
@@ -95,17 +106,26 @@ function InviteBody({ onMembersChanged }: { onMembersChanged: () => void }) {
   const pending = (payload?.pending ?? []).filter((entry) => !needle || entry.email.toLowerCase().includes(needle));
 
   const invite = async () => {
+    // One request per press; the server also refuses a duplicate invitation.
+    if (busy) return;
     setBusy(true);
     setFormError(null);
     try {
       const response = await fetch("/api/auth/invitations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), role }),
+        /* The workspace this dialog is showing, named explicitly — the board
+           lists `payload.organisation`, so that is where the person is being
+           invited, whatever the session last selected. */
+        body: JSON.stringify({ email: email.trim(), role, organisationId: payload?.organisation.id }),
       });
-      const body = (await response.json().catch(() => ({}))) as { error?: string; inviteUrl?: string };
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        inviteUrl?: string;
+        delivery?: { status: string; message: string };
+      };
       if (!response.ok || !body.inviteUrl) throw new Error(body.error || "The invitation could not be issued.");
-      setIssued({ email: email.trim(), role, url: body.inviteUrl });
+      setIssued({ email: email.trim(), role, url: body.inviteUrl, delivery: body.delivery ?? null });
       setEmail("");
       await load();
       onMembersChanged();
@@ -201,16 +221,22 @@ function InviteBody({ onMembersChanged }: { onMembersChanged: () => void }) {
       {issued && (
         <div className="ba-invite__link" role="status">
           <p>
-            Invitation for <strong>{issued.email}</strong> as {ROLE_LABEL[issued.role] ?? issued.role}.
+            Invitation for <strong>{issued.email}</strong> as {roleLabel(issued.role)}.
           </p>
           <code>{issued.url}</code>
           <div className="ba-invite__linkrow">
             <button type="button" className="ba-btn ba-btn--small" onClick={() => void copy()}>
               <ActionIcon name={copied ? "check" : "copy"} size={14} /> {copied ? "Copied" : "Copy link"}
             </button>
-            <p>
-              <strong>No email was sent.</strong> Share this link.
-            </p>
+            {issued.delivery?.status === "sent" ? (
+              <p>
+                <strong>Emailed from admin@maintsupp.com.</strong> The link is here too.
+              </p>
+            ) : (
+              <p>
+                <strong>No email was sent.</strong> {issued.delivery?.message ?? "Share this link."}
+              </p>
+            )}
           </div>
         </div>
       )}

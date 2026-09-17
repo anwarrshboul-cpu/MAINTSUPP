@@ -39,19 +39,42 @@
  *
  * WHICH ROLES EXIST
  * -----------------
- * Exactly three: `super_admin`, `admin`, `client`. That is not a shortlist — it
- * is the whole set the rest of the system can represent. `WorkspaceRole` in
- * `workspace-actor.ts` names those three, `normaliseRole` in `tenant-access.ts`
- * discards a membership whose role is anything else, and every `memberships`
- * row in the database is one of them. Inventing a `manager` or `contractor`
- * role here would create capability rows that no actor could ever match, and a
- * matrix column that looked editable and did nothing.
+ * Four: `super_admin`, `admin`, `manager`, `client`, defined ONCE in `roles.ts`.
+ *
+ * This paragraph used to say "exactly three", and warned that inventing a
+ * `manager` here would create capability rows no actor could ever match. That
+ * warning was the reason `manager` was added to `roles.ts` rather than here:
+ * `WorkspaceRole`, the tenancy resolver's `normaliseRole`, the invitation
+ * service and this module all read the same list now, so a role this module
+ * knows is a role a membership row can actually hold. Adding a fifth means
+ * editing `roles.ts` and giving it a default set below — nothing else.
+ *
+ * RESERVED CAPABILITIES
+ * ---------------------
+ * A few capabilities are not workspace powers at all; they reach across the
+ * platform or change what every role means. `SUPER_ADMIN_ONLY` lists them, and
+ * `can()` refuses them to every other role before it reads an override. The
+ * matrix cannot grant them either — see `roleCapabilityWriteRefusal`. Without
+ * that, "only a Super Admin sees every client" would be one checkbox away from
+ * false, and strict workspace isolation would depend on nobody ticking it.
  */
 
 import { eq, inArray } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { roleCapabilities } from "../../db/schema";
-import type { WorkspaceRole } from "./workspace-actor";
+import {
+  ROLE_LABELS,
+  ROLE_RANK,
+  ROLES,
+  canAssignRole,
+  canManageRole,
+  isWorkspaceRole,
+  type WorkspaceRole,
+} from "./roles";
+
+// Re-exported so the admin routes keep importing the role vocabulary from the
+// module that decides permissions. The definitions themselves live in roles.ts.
+export { ROLE_LABELS, ROLE_RANK, ROLES, canAssignRole, canManageRole, isWorkspaceRole };
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -159,7 +182,8 @@ export const CAPABILITY_CATALOGUE = [
     key: "roles.edit",
     label: "Edit roles and permissions",
     group: "Administration",
-    description: "Change what each role in this workspace is allowed to do.",
+    description:
+      "Change what each role in this workspace is allowed to do. Reserved for Super Admin.",
   },
   {
     key: "audit.read",
@@ -178,7 +202,37 @@ export const CAPABILITY_CATALOGUE = [
     label: "See every client workspace",
     group: "Owner",
     description:
-      "Open the cross-client console listing every workspace on the platform.",
+      "Open the cross-client console listing every workspace on the platform. Reserved for Super Admin.",
+  },
+  {
+    key: "navigation.edit",
+    label: "Customise the sidebar",
+    group: "Owner",
+    /*
+     * The sidebar is the product's menu. Rearranging it, locking items, and
+     * adding or archiving a workspace section change what everybody sees, so
+     * this used to ride on `settings.edit` — which every admin holds. The owner
+     * asked for menu administration to be a Super Admin act, and a capability
+     * of its own is what lets the three routes that write the menu
+     * (`/api/navigation`, `/api/workspace-sections`) say so in one word.
+     */
+    description:
+      "Rearrange, lock, add and archive the sidebar's sections for everyone. Reserved for Super Admin.",
+  },
+  {
+    key: "navigation.personalise",
+    label: "Arrange your own sidebar",
+    group: "Personal",
+    /*
+     * The other half of the owner's sidebar decision: the workspace's menu is
+     * Super Admin's, but a person may still arrange their OWN sidebar. That is
+     * a separate row (`navigation_layouts.user_id` = them), it can never touch
+     * the workspace default or its locks, and locked items stay locked in it.
+     * A capability rather than "anyone signed in" so a Super Admin can close it
+     * for a role in one workspace without a deploy.
+     */
+    description:
+      "Reorder, rename and hide items in your own sidebar only. Never changes what anybody else sees, and cannot unlock a locked item.",
   },
   {
     key: "billing.manage",
@@ -219,32 +273,67 @@ export function isCapability(value: unknown): value is Capability {
 /* Roles                                                               */
 /* ------------------------------------------------------------------ */
 
-/** Every role the system can represent, strongest last. */
-export const ROLES: readonly WorkspaceRole[] = ["client", "admin", "super_admin"];
+/*
+ * `ROLES`, `ROLE_RANK`, `ROLE_LABELS` and `isWorkspaceRole` used to be defined
+ * here, with a comment explaining why the rank table was a deliberate duplicate
+ * of the one in `tenant-access.ts`. Both now come from `roles.ts` (imported and
+ * re-exported above), so there is no second copy left to drift.
+ */
 
 /**
- * Ordering, used for the escalation guard-rail.
+ * Capabilities no role below Super Admin may hold, whatever the matrix says.
  *
- * Deliberately the same shape as `ROLE_RANK` in `tenant-access.ts`. It is not
- * imported from there because that module is owned by the tenancy contract and
- * does not export it; duplicating three integers is cheaper than widening that
- * module's surface, and `rolesAreExhaustive` in the Stage 20 test pins the two
- * lists together so they cannot drift apart unnoticed.
+ * - `clients.view_all` — the cross-client console. Strict workspace isolation
+ *   means nobody but a Super Admin can discover another client exists.
+ * - `roles.edit` — the matrix itself. Changing what "Admin" or "Manager" means
+ *   is role administration, which the owner reserved for Super Admin. It used
+ *   to be in the admin defaults; an admin who could edit the matrix could also
+ *   hand `manager` any power admin held.
+ * - `navigation.edit` — the sidebar, which is the product's menu.
  */
-export const ROLE_RANK: Record<WorkspaceRole, number> = {
-  client: 0,
-  admin: 1,
-  super_admin: 2,
+export const SUPER_ADMIN_ONLY: ReadonlySet<Capability> = new Set<Capability>([
+  "clients.view_all",
+  "roles.edit",
+  "navigation.edit",
+]);
+
+export function isReservedCapability(capability: Capability) {
+  return SUPER_ADMIN_ONLY.has(capability);
+}
+
+/**
+ * Capabilities a role can NEVER hold, on top of the Super Admin reservations.
+ *
+ * The owner's Manager decision, as a hard ceiling rather than a default: a
+ * Manager does operational work and has no user, role, workspace, import,
+ * team, audit or billing administration. A default alone would let a Super
+ * Admin tick any of these on for `manager` in one workspace, and the decision
+ * says a Manager must not have them — so `can()` refuses them whatever a row
+ * says, and the matrix refuses to store them.
+ *
+ * `client` has no ceiling beyond the reservations: the product has always let
+ * a Super Admin widen a client per workspace (the Stage 20 tests do exactly
+ * that with `users.view`), and nothing in the decision withdrew it. A client
+ * still cannot assign any role — that is `canAssignRole`'s table.
+ */
+const ROLE_CEILINGS: Partial<Record<WorkspaceRole, ReadonlySet<Capability>>> = {
+  manager: new Set<Capability>([
+    "users.view",
+    "users.invite",
+    "users.edit",
+    "users.deactivate",
+    "teams.manage",
+    "settings.edit",
+    "data.import",
+    "audit.read",
+    "billing.manage",
+  ]),
 };
 
-export const ROLE_LABELS: Record<WorkspaceRole, string> = {
-  super_admin: "Super Admin",
-  admin: "Admin",
-  client: "Client",
-};
-
-export function isWorkspaceRole(value: unknown): value is WorkspaceRole {
-  return value === "super_admin" || value === "admin" || value === "client";
+/** True when `role` may never hold `capability`, whatever the matrix says. */
+export function isForbiddenForRole(role: WorkspaceRole, capability: Capability) {
+  if (role === IMMUTABLE_ROLE) return false;
+  return isReservedCapability(capability) || (ROLE_CEILINGS[role]?.has(capability) ?? false);
 }
 
 /**
@@ -266,11 +355,19 @@ export const IMMUTABLE_ROLE: WorkspaceRole = "super_admin";
  * `super_admin` is listed for completeness and for the matrix to render; `can()`
  * never consults it.
  *
- * `admin` runs one workspace end to end but does not reach across the platform:
- * no `clients.view_all`, no `billing.manage`. `data.delete` is withheld too —
- * archiving is reversible and deletion is not, so the destructive verb starts
- * closed and an owner can open it per workspace rather than everyone having it
- * by default.
+ * `admin` runs the workspaces they are a member of but does not reach across
+ * the platform: no `clients.view_all`, no `billing.manage`, and — since the
+ * roles-and-access batch — no `roles.edit` and no `navigation.edit`, which are
+ * reserved (see `SUPER_ADMIN_ONLY`). `data.delete` is withheld too — archiving
+ * is reversible and deletion is not, so the destructive verb starts closed and
+ * an owner can open it per workspace rather than everyone having it by default.
+ *
+ * `manager` does the operational work inside their workspaces — boards, sites,
+ * assets, exports — and holds no People or Administration capability at all.
+ * The set is deliberately the least that "use the operational product" needs;
+ * `data.import`, `teams.manage` and `settings.edit` were each arguable and each
+ * left closed, so a Super Admin opens them per workspace if a manager needs
+ * them rather than every manager holding them by default.
  *
  * `client` is an external contact reading their own operational data. They can
  * see and export their boards and nothing else; every People and Administration
@@ -290,16 +387,24 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "users.edit",
     "users.deactivate",
     "teams.manage",
-    "roles.edit",
     "audit.read",
     "settings.edit",
+    "navigation.personalise",
   ],
-  client: ["board.view", "data.export"],
+  manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],
+  /*
+   * `navigation.personalise` for clients too: arranging your OWN sidebar was
+   * open to every signed-in person before the roles-and-access batch, it is
+   * self-scoped and lock-bound, and the owner's decision keeps an existing safe
+   * personal-preference path. A Super Admin can close it per workspace.
+   */
+  client: ["board.view", "data.export", "navigation.personalise"],
 };
 
 const DEFAULT_SETS: Record<WorkspaceRole, ReadonlySet<Capability>> = {
   super_admin: new Set(BUILT_IN_DEFAULTS.super_admin),
   admin: new Set(BUILT_IN_DEFAULTS.admin),
+  manager: new Set(BUILT_IN_DEFAULTS.manager),
   client: new Set(BUILT_IN_DEFAULTS.client),
 };
 
@@ -318,7 +423,7 @@ export type CapabilityOverrides = Partial<Record<Capability, boolean>>;
 export type RoleOverrides = Record<WorkspaceRole, CapabilityOverrides>;
 
 export function emptyRoleOverrides(): RoleOverrides {
-  return { super_admin: {}, admin: {}, client: {} };
+  return { super_admin: {}, admin: {}, manager: {}, client: {} };
 }
 
 /**
@@ -403,6 +508,11 @@ export type PermissionSubject = {
 export function can(actor: PermissionSubject, capability: Capability): boolean {
   // No recovery path without this. See the module header.
   if (actor.role === IMMUTABLE_ROLE) return true;
+
+  // Reserved or above this role's ceiling, whatever an override row says. A
+  // row granting one of these — written before the rule, or by hand — is
+  // ignored here, which is what makes the rule a boundary rather than a default.
+  if (isForbiddenForRole(actor.role, capability)) return false;
 
   const override = actor.capabilities[capability];
   if (typeof override === "boolean") return override;
@@ -525,6 +635,19 @@ export function roleCapabilityWriteRefusal(
     return "The Super Admin role always holds every permission; it cannot be narrowed. This is what stops a workspace being locked out of its own permission editor.";
   }
 
+  /*
+   * A reserved capability cannot be stored against any other role, granted or
+   * denied: `can()` refuses it regardless, so a row would be a claim the
+   * enforcer ignores. `null` is still accepted — it DELETES a row, which is how
+   * a stale grant written before the reservation is cleaned out of the table.
+   */
+  if (isReservedCapability(capability) && allowed !== null) {
+    return `"${capability}" is reserved for Super Admin and cannot be given to any other role.`;
+  }
+  if (isForbiddenForRole(targetRole, capability) && allowed !== null) {
+    return `The ${ROLE_LABELS[targetRole]} role can never hold "${capability}".`;
+  }
+
   // `allowed === null` reverts the cell to its built-in default, so it is only
   // a lockout if the default itself is a denial.
   const wouldDeny =
@@ -564,13 +687,8 @@ export function roleCapabilityWriteRefusal(
   return null;
 }
 
-/**
- * Whether `actorRole` may hand out `targetRole`.
- *
- * Escalation guard: an admin inviting or promoting somebody to super admin would
- * be granting powers they do not hold, which makes every other limit on `admin`
- * decorative. Equal rank is allowed — an admin may appoint another admin.
+/*
+ * `canAssignRole` — whether `actorRole` may hand out `targetRole` — lives in
+ * `roles.ts` beside the rank it compares, so the browser's role pickers use the
+ * same rule. Re-exported at the top of this file.
  */
-export function canAssignRole(actorRole: WorkspaceRole, targetRole: WorkspaceRole) {
-  return ROLE_RANK[actorRole] >= ROLE_RANK[targetRole];
-}

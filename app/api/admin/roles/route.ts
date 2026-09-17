@@ -32,6 +32,8 @@ import {
   defaultAllows,
   effectiveCapabilities,
   isCapability,
+  isForbiddenForRole,
+  isReservedCapability,
   isWorkspaceRole,
   loadRoleOverrides,
   requireCapability,
@@ -230,7 +232,13 @@ export async function PUT(request: Request) {
             error: refusal,
             denied: true,
             guardRail:
-              change.role === IMMUTABLE_ROLE ? "immutable_role" : "self_lockout",
+              change.role === IMMUTABLE_ROLE
+                ? "immutable_role"
+                : isReservedCapability(change.capability)
+                  ? "reserved_capability"
+                  : isForbiddenForRole(change.role, change.capability)
+                    ? "role_ceiling"
+                    : "self_lockout",
             role: change.role,
             capability: change.capability,
           },

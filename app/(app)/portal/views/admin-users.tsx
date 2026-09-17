@@ -56,12 +56,16 @@ type AdminUser = {
   membershipStatus: string;
   memberships: MembershipSummary[];
   isSelf: boolean;
+  /** The server's answer to "does the caller outrank-or-equal this person". */
+  manageable?: boolean;
 };
 
 type Invitation = {
   id: string;
   email: string;
   role: string;
+  roleLabel?: string;
+  /** The inviter's name or email — never their internal id. */
   invitedBy: string | null;
   expiresAt: string;
   createdAt: string;
@@ -80,6 +84,17 @@ type UsersPayload = {
 
 type Flash = { ok: boolean; message: string } | null;
 
+/** What `/api/auth/invitations` says happened to the email. */
+type Delivery = {
+  status: "sent" | "sink" | "failed" | "skipped" | "suppressed" | "disabled";
+  message: string;
+};
+
+function deliveryOf(payload: Record<string, unknown> | null | undefined): Delivery | null {
+  const delivery = payload?.delivery as Delivery | undefined;
+  return delivery && typeof delivery.message === "string" ? delivery : null;
+}
+
 export function AdminUsersView() {
   const [organisationId, setOrganisationId] = useState<string | null>(null);
   const url = organisationId
@@ -92,22 +107,29 @@ export function AdminUsersView() {
   const [inviting, setInviting] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   /*
-   * The link, held until the admin has actually copied it.
+   * The link, held until the admin has dismissed it.
    *
-   * There is no mail server in this product, so the invitation link IS the
-   * delivery mechanism, and it exists exactly once — the row stores only its
-   * hash, by design, so nothing can hand it back afterwards. Losing it means
-   * the invitation cannot be accepted by anybody. So it stays on screen until
+   * Invitation emails from admin@maintsupp.com exist in the code but are
+   * switched off until real delivery is set up (`INVITATION_EMAIL_MODE`) — and
+   * even when they are on, the link exists
+   * exactly once either way: the row stores only its hash, so nothing can hand
+   * it back afterwards. So the link is still shown, with the server's own
+   * sentence about whether an email actually left, and it stays on screen until
    * dismissed rather than vanishing with the dialog.
    */
   const [issued, setIssued] = useState<{
     email: string;
     url: string;
     kind: "invitation" | "reset";
+    delivery?: Delivery | null;
   } | null>(null);
   const [search, setSearch] = useState("");
 
   const can = (capability: string) => Boolean(data?.actor.capabilities?.[capability]);
+  const assignable = useMemo(
+    () => (data?.roles ?? []).filter((role) => role.assignable),
+    [data],
+  );
 
   const visible = useMemo(() => {
     if (!data) return [];
@@ -133,26 +155,29 @@ export function AdminUsersView() {
   }, [data]);
 
   /**
-   * Mint a fresh link for somebody already invited.
+   * Resend an invitation — explicitly, by naming it.
    *
-   * `createInvitation` revokes any outstanding invitation for that address
-   * before writing the new one, so this cannot leave two live links to the same
+   * Only the invitation's id is sent: the address, the role and the message
+   * are read back from the stored row, so a resend repeats the invitation and
+   * cannot change it. `createInvitation` revokes the outstanding link before
+   * writing the new one, so this cannot leave two live links to the same
    * workspace — the old one stops working the moment the new one is issued.
-   * That is what makes this safe to offer as "send again" when a link was lost
-   * or has expired.
    */
   async function reissue(invitation: Invitation) {
     setBusy(invitation.id);
     const result = await adminWrite("/api/admin/users", "POST", {
       organisationId: data?.organisation.id,
-      email: invitation.email,
-      role: invitation.role,
+      invitationId: invitation.id,
     });
     setBusy(null);
     const url = result.payload?.inviteUrl;
     if (result.ok && typeof url === "string") {
-      setIssued({ email: invitation.email, url, kind: "invitation" });
-      setFlash({ ok: true, message: `A new link for ${invitation.email}. The previous one no longer works.` });
+      const delivery = deliveryOf(result.payload);
+      setIssued({ email: invitation.email, url, kind: "invitation", delivery });
+      setFlash({
+        ok: true,
+        message: `A new invitation for ${invitation.email}; the previous link no longer works. ${delivery?.message ?? ""}`.trim(),
+      });
       await reload();
       return;
     }
@@ -233,11 +258,11 @@ export function AdminUsersView() {
           <h1>Users</h1>
           <p>
             Everyone with a membership of this workspace, the role that membership
-            grants and the other workspaces they belong to. Deactivating somebody
-            suspends their access without deleting them or their history.
+            grants and the other workspaces of yours they belong to. Deactivating
+            somebody suspends their access without deleting them or their history.
           </p>
         </div>
-        {can("users.invite") ? (
+        {can("users.invite") && assignable.length > 0 ? (
           <button className="primary-button" type="button" onClick={() => setInviting(true)}>
             <Icon name="plus" size={17} />
             Invite person
@@ -367,9 +392,22 @@ export function AdminUsersView() {
                           </span>
                         </td>
                         <td>
-                          {can("users.edit") && !user.isSelf ? (
+                          {/*
+                            A picker only where a change could be accepted: the
+                            caller may edit people, this is not them, the person
+                            does not outrank them, and their current role is one
+                            the caller could grant. The options are ONLY the
+                            assignable roles — a role the caller cannot grant is
+                            not offered at all rather than shown disabled. The
+                            API refuses every one of these cases on its own.
+                          */}
+                          {can("users.edit") &&
+                          !user.isSelf &&
+                          user.manageable !== false &&
+                          assignable.some((role) => role.key === user.role) ? (
                             <select
                               className="admin-role-select"
+                              aria-label={`Role for ${user.fullName ?? user.email}`}
                               value={user.role}
                               disabled={busy === user.id}
                               onChange={(event) =>
@@ -379,15 +417,8 @@ export function AdminUsersView() {
                                 )
                               }
                             >
-                              {data.roles.map((role) => (
-                                <option
-                                  key={role.key}
-                                  value={role.key}
-                                  /* An admin cannot grant Super Admin; the API
-                                     refuses it too, so this only saves a round
-                                     trip. */
-                                  disabled={!role.assignable}
-                                >
+                              {assignable.map((role) => (
+                                <option key={role.key} value={role.key}>
                                   {role.label}
                                 </option>
                               ))}
@@ -426,7 +457,7 @@ export function AdminUsersView() {
                         <td>{relativeTime(user.lastLoginAt)}</td>
                         <td>
                           <span className="admin-actions">
-                            {can("users.edit") ? (
+                            {can("users.edit") && user.manageable !== false ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
@@ -435,7 +466,10 @@ export function AdminUsersView() {
                                 Edit
                               </button>
                             ) : null}
-                            {can("users.edit") && !user.isSelf && user.active ? (
+                            {can("users.edit") &&
+                            user.manageable !== false &&
+                            !user.isSelf &&
+                            user.active ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
@@ -446,7 +480,7 @@ export function AdminUsersView() {
                                 Reset password
                               </button>
                             ) : null}
-                            {can("users.deactivate") ? (
+                            {can("users.deactivate") && user.manageable !== false ? (
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
@@ -512,7 +546,7 @@ export function AdminUsersView() {
                         <td>{invitation.email}</td>
                         <td>
                           <span className={`admin-role-chip admin-role-chip--${invitation.role}`}>
-                            {invitation.role}
+                            {invitation.roleLabel ?? invitation.role}
                           </span>
                         </td>
                         <td>{invitation.invitedBy ?? "—"}</td>
@@ -528,6 +562,10 @@ export function AdminUsersView() {
                         </td>
                         {can("users.invite") ? (
                           <td>
+                            {/* Only for an invitation the caller could have
+                                issued: the API refuses resending or withdrawing
+                                one above their own role. */}
+                            {assignable.some((role) => role.key === invitation.role) ? (
                             <span className="admin-actions">
                             <button
                               type="button"
@@ -535,7 +573,7 @@ export function AdminUsersView() {
                               disabled={busy === invitation.id}
                               onClick={() => reissue(invitation)}
                             >
-                              {invitation.expired ? "Send a new link" : "Get the link again"}
+                              {invitation.expired ? "Send a new invitation" : "Resend invitation"}
                             </button>
                             <button
                               type="button"
@@ -546,6 +584,7 @@ export function AdminUsersView() {
                               Withdraw
                             </button>
                             </span>
+                            ) : null}
                           </td>
                         ) : null}
                       </tr>
@@ -708,10 +747,12 @@ function ProfileDialog({
 /**
  * The invitation link, and the only chance to copy it.
  *
- * Stated plainly rather than dressed up as a sent email, because no email is
- * sent — this product has no mail server, and a screen that says "invitation
- * sent" while nothing leaves the building is the kind of lie that has somebody
- * waiting a week for a message that was never going to arrive.
+ * Invitations are emailed now — but only where the deployment has email
+ * configured and switched on, and only if the provider accepted the message.
+ * So this panel repeats the SERVER's sentence about what happened rather than
+ * assuming: a screen that says "invitation sent" while nothing left the
+ * building is the kind of lie that has somebody waiting a week for a message
+ * that was never going to arrive.
  *
  * Not dismissed on a timer or by clicking elsewhere: losing this link means the
  * invitation cannot be accepted by anyone, and it cannot be fetched again.
@@ -720,17 +761,18 @@ function IssuedLink({
   issued,
   onDismiss,
 }: {
-  issued: { email: string; url: string; kind: "invitation" | "reset" };
+  issued: { email: string; url: string; kind: "invitation" | "reset"; delivery?: Delivery | null };
   onDismiss: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   const reset = issued.kind === "reset";
+  const emailed = issued.delivery?.status === "sent";
 
   return (
     <section className="panel admin-panel admin-invite-link">
       <div className="panel-heading">
         <div>
-          <span>Send this to {issued.email}</span>
+          <span>{emailed ? `Emailed to ${issued.email}` : `Send this to ${issued.email}`}</span>
           <h2>{reset ? "Their password reset link" : "Their invitation link"}</h2>
         </div>
         <button type="button" className="secondary-button admin-mini" onClick={onDismiss}>
@@ -740,7 +782,7 @@ function IssuedLink({
       <p className="admin-invite-link__note">
         {reset
           ? "Shown once, and it expires in 24 hours. Give it to them directly — it opens their account, so treat it like a password. Using it signs out every device they are signed in on."
-          : "Shown once. Only a hash of it is stored, so it cannot be looked up again — if it is lost, use “Send a new link” to issue a replacement, which retires this one."}
+          : `${issued.delivery?.message ?? "No email was sent — share this link with them directly."} Shown once. Only a hash of it is stored, so it cannot be looked up again — if it is lost, use “Resend invitation”, which retires this one.`}
       </p>
       <div className="admin-invite-link__row">
         <input
@@ -786,7 +828,7 @@ function InviteDialog({
   onClose: () => void;
   onSent: (
     result: { ok: boolean; message: string },
-    link: { email: string; url: string } | null,
+    link: { email: string; url: string; delivery: Delivery | null } | null,
   ) => void | Promise<void>;
 }) {
   const assignable = roles.filter((role) => role.assignable);
@@ -801,6 +843,9 @@ function InviteDialog({
         className="admin-form"
         onSubmit={async (event) => {
           event.preventDefault();
+          // One request per invitation: a second press while the first is in
+          // flight is ignored here, and the server refuses a duplicate anyway.
+          if (sending) return;
           setSending(true);
           const result = await adminWrite("/api/admin/users", "POST", {
             organisationId,
@@ -810,11 +855,15 @@ function InviteDialog({
           });
           setSending(false);
           const url = result.payload?.inviteUrl;
+          const delivery = deliveryOf(result.payload);
           await onSent(
             result.ok
-              ? { ok: true, message: `${email} has been invited. Send them the link below.` }
+              ? {
+                  ok: true,
+                  message: `${email} has been invited. ${delivery?.message ?? "Send them the link below."}`,
+                }
               : result,
-            result.ok && typeof url === "string" ? { email, url } : null,
+            result.ok && typeof url === "string" ? { email, url, delivery } : null,
           );
         }}
       >
@@ -838,8 +887,9 @@ function InviteDialog({
             ))}
           </select>
           <small>
-            You can only invite at or below your own role. The role is written onto the
-            invitation, so accepting it cannot grant anything more.
+            Only the roles you are allowed to grant are listed. The role is written onto
+            the invitation, so accepting it cannot grant anything more. You will get a link
+            to share; invitation emails are not switched on yet.
           </small>
         </label>
         <label className="admin-field">
@@ -855,7 +905,7 @@ function InviteDialog({
             Cancel
           </button>
           <button type="submit" className="primary-button" disabled={sending}>
-            {sending ? "Creating…" : "Create invitation"}
+            {sending ? "Sending…" : "Send invitation"}
           </button>
         </div>
       </form>

@@ -23,6 +23,7 @@ import {
 import { listOptionValues } from "../../lib/options-repository";
 import { effectiveCapabilities, resolvePermissions } from "../../lib/permissions";
 import { type WorkspaceRole } from "../../lib/workspace-actor";
+import { isWorkspaceRole } from "../../lib/roles";
 
 function clean(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -231,7 +232,7 @@ export async function POST(request: Request) {
         );
       }
       const role = clean(payload.role, 40) as WorkspaceRole;
-      if (role !== "super_admin" && role !== "admin" && role !== "client") {
+      if (!isWorkspaceRole(role)) {
         return Response.json({ error: "Choose a valid testing role." }, { status: 400 });
       }
 
@@ -284,16 +285,19 @@ export async function POST(request: Request) {
       return response;
     }
 
-    // Everything below manages client workspaces, which only a super admin may
-    // do — and `context.actor.role` is the role the database granted, not the
-    // one the role cookie claimed.
-    if (context.actor.role !== "super_admin") {
-      return Response.json(
-        { error: "Only the Super Admin test role can manage client workspaces." },
-        { status: 403 },
-      );
-    }
-
+    /*
+     * Switching workspace is open to anybody with more than one membership —
+     * but only between THOSE memberships.
+     *
+     * It used to be Super Admin only, which left `Account → Workspaces` offering
+     * a "Switch" button to people with two memberships that the server then
+     * refused. The rule that matters was never the role: it is the check
+     * below, that the workspace is one `organisationIds` names — every active
+     * workspace for a Super Admin, and exactly the caller's memberships for
+     * anyone else. A workspace the caller does not belong to answers the same
+     * 404 as one that does not exist, so this cannot be used to discover
+     * another client.
+     */
     if (action === "select_organisation") {
       const organisationId = clean(payload.organisationId, 100);
       const [organisation] = await context.db
@@ -301,16 +305,15 @@ export async function POST(request: Request) {
         .from(organisations)
         .where(eq(organisations.id, organisationId))
         .limit(1);
-      if (!organisation || organisation.status !== "active") {
-        return Response.json({ error: "That client workspace is unavailable." }, { status: 404 });
-      }
-      // Belt and braces: `scopedDb` ignores an organisation the actor may not
-      // read, so this only turns a silent no-op into a legible error.
-      if (!context.organisationIds.includes(organisation.id)) {
-        return Response.json(
-          { error: "That client workspace is not one you have access to." },
-          { status: 403 },
-        );
+      // `scopedDb` would ignore an organisation the actor may not read anyway;
+      // refusing here turns a silent no-op into a legible error — the same
+      // error, whether the workspace is someone else's or does not exist.
+      if (
+        !organisation ||
+        organisation.status !== "active" ||
+        !context.organisationIds.includes(organisation.id)
+      ) {
+        return Response.json({ error: "That workspace is unavailable." }, { status: 404 });
       }
       const response = Response.json({ ok: true, organisation });
       response.headers.append(
@@ -318,6 +321,16 @@ export async function POST(request: Request) {
         cookie(ORGANISATION_COOKIE, organisation.id),
       );
       return response;
+    }
+
+    // Everything below manages client workspaces, which only a super admin may
+    // do — and `context.actor.role` is the role the database granted, not the
+    // one the role cookie claimed.
+    if (context.actor.role !== "super_admin") {
+      return Response.json(
+        { error: "Only a Super Admin can manage client workspaces." },
+        { status: 403 },
+      );
     }
 
     if (action === "create_organisation") {

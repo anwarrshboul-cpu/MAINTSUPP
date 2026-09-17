@@ -35,16 +35,13 @@ import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
 import { getD1 } from "../../../../../db";
 import { memberships, users } from "../../../../../db/schema";
+import { canManageRole, requireCapability } from "../../../../lib/permissions";
+import { withArticle } from "../../../../lib/roles";
 import {
-  ROLE_LABELS,
-  ROLE_RANK,
-  isWorkspaceRole,
-  requireCapability,
-} from "../../../../lib/permissions";
-import type { WorkspaceRole } from "../../../../lib/workspace-actor";
-import {
+  accountWideRefusal,
   adminContext,
   adminError,
+  effectiveTargetRole,
   isRefusal,
   readJson,
   recordAudit,
@@ -112,20 +109,28 @@ export async function POST(request: Request) {
       );
     }
 
-    const targetRole: WorkspaceRole = isWorkspaceRole(target.role)
-      ? target.role
-      : "client";
-    if (ROLE_RANK[targetRole] > ROLE_RANK[context.actor.role]) {
+    // The effective role: a Super Admin of any workspace is one here too, even
+    // when their row in this workspace reads something weaker.
+    // Not for a role the caller may not manage — for an Admin that means
+    // another Admin as well as a Super Admin (`canManageRole`).
+    const targetRole = await effectiveTargetRole(context, target.id, target.role);
+    if (!canManageRole(context.actor.role, targetRole)) {
       return Response.json(
         {
-          // No article in front of either label: "A Admin" is what the obvious
-          // phrasing produces, and the roles read as proper nouns here anyway.
-          error: `${ROLE_LABELS[context.actor.role]} cannot reset the password of ${ROLE_LABELS[targetRole]} — that would hand over the account.`,
+          error: `As ${withArticle(context.actor.role)} you cannot reset the password of ${withArticle(targetRole)} — that would hand over the account.`,
           denied: true,
         },
         { status: 403 },
       );
     }
+
+    /*
+     * A reset link opens the ACCOUNT, and so every workspace it belongs to.
+     * Issuing one for somebody who is also an admin elsewhere would hand this
+     * workspace's administrator that other workspace. See `accountWideRefusal`.
+     */
+    const elsewhere = await accountWideRefusal(context, target.id, "users.edit");
+    if (elsewhere) return elsewhere;
 
     if (!target.active) {
       return Response.json(

@@ -53,6 +53,8 @@ type NavigationResponse = {
   locked?: unknown;
   canEditDefault?: boolean;
   canEditOwn?: boolean;
+  /** Whether "Customise sidebar" is offered at all — `navigation.edit`. */
+  canCustomise?: boolean;
 };
 
 const EMPTY: Arrangement = { workspace: [], user: null };
@@ -123,6 +125,13 @@ export function SidebarNav({
   const [locked, setLocked] = useState<string[]>([]);
   const [canEditDefault, setCanEditDefault] = useState(false);
   const [canEditOwn, setCanEditOwn] = useState(true);
+  /*
+   * Starts FALSE and is only switched on by the server, which answers true for
+   * anyone who may arrange their OWN sidebar (`navigation.personalise`) or the
+   * workspace default (`navigation.edit`, Super Admin). Absent until the answer
+   * arrives, rather than drawn and then taken away.
+   */
+  const [canCustomise, setCanCustomise] = useState(false);
   const [editing, setEditing] = useState(false);
   const [scope, setScope] = useState<Scope>("user");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -188,6 +197,7 @@ export function SidebarNav({
     setLocked(Array.isArray(payload.locked) ? (payload.locked as string[]) : []);
     setCanEditDefault(payload.canEditDefault === true);
     setCanEditOwn(payload.canEditOwn !== false);
+    setCanCustomise(payload.canCustomise === true);
   }, [catalogueKeys]);
 
   /* Deferred by a zero-delay timer, matching every other loader in the portal:
@@ -909,7 +919,9 @@ export function SidebarNav({
                 second. Both sit under "Customise sidebar" so the resting
                 sidebar stays a list of places rather than a workbench.
               */}
-              {onManageSections && (
+              {/* Sections are the workspace's menu — Super Admin's. A person
+                  arranging their OWN sidebar is not offered them. */}
+              {onManageSections && canEditDefault && (
                 <button
                   type="button"
                   className="nav-editor__tool"
@@ -964,6 +976,7 @@ export function SidebarNav({
           </div>
         )}
 
+        {(canCustomise || editing) && (
         <button
           type="button"
           className={`nav-customise${editing ? " is-active" : ""}`}
@@ -984,6 +997,7 @@ export function SidebarNav({
           </span>
           <span>{editing ? "Done" : "Customise sidebar"}</span>
         </button>
+        )}
 
         {/* Every reorder, rename, hide and restore is announced here — the
             keyboard path is only equivalent to dragging if its result is
