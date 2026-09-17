@@ -349,8 +349,11 @@ test("Contact Us is in both navs, and both send you to the section the footer al
     chrome,
     /<nav aria-label="Mobile">[\s\S]*?NAV\.map[\s\S]*?<SectionLink[\s\S]*?onAnchorClick=\{onDrawerLink\}/,
   );
+  /* RE-POINTED: the drawer's CTA now carries `href={BOOKING_URL}` rather than
+     `href="#review"` — it books instead of scrolling to the enquiry form. The
+     claim here is unchanged: the section links come before it. */
   assert.ok(
-    chrome.indexOf('aria-label="Mobile"') < chrome.lastIndexOf('href="#review"'),
+    chrome.indexOf('aria-label="Mobile"') < chrome.lastIndexOf("href={BOOKING_URL}"),
     "the section links precede the CTA in the drawer",
   );
 

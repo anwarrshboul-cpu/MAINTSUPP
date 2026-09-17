@@ -1029,9 +1029,19 @@ test("every nav anchor names a section that exists", async () => {
   /* RE-POINTED at `SectionLink` — same destination, same position in the
      footer, now resolved against the page it is rendered on. */
   assert.match(chromeSrc, /<li><SectionLink href="#contact">Contact<\/SectionLink><\/li>/);
+  /* RE-POINTED: those two buttons book. They jumped to the enquiry panel while
+     the hero and the final CTA opened the calendar, so the chrome's only CTA —
+     the one on every page — asked a visitor who had decided to book a slot to
+     write a message instead. `#review` is still a real section, asserted just
+     above, and still reachable; it is no longer what these two do. */
   assert.ok(
-    (chromeSrc.match(/href="#review"/g) ?? []).length >= 2,
-    "the header and drawer Book a Portfolio Review buttons still point at #review",
+    (chromeSrc.match(/href=\{BOOKING_URL\}/g) ?? []).length >= 2,
+    "the header and drawer Book a Portfolio Review buttons open the booking link",
+  );
+  assert.match(
+    chromeSrc,
+    /import \{ BOOKING_IS_EXTERNAL, BOOKING_URL \} from "\.\/content";/,
+    "from the one constant, not a second typed copy",
   );
 });
 
