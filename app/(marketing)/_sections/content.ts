@@ -19,7 +19,25 @@
  */
 import { ENTRY_BAND, INCLUDED_JOBS, MINIMUM_SITES, inWords } from "./rates";
 
-export const BOOKING_URL = "https://cal.com/maintsupp/portfolio-review";
+/*
+ * THE BOOKING DESTINATION, WITH THE SLUG THAT ACTUALLY EXISTS.
+ *
+ * This was `https://cal.com/maintsupp/portfolio-review`, which 404s: the real
+ * event on the maintsupp Cal.com account is
+ * `portfolio-review-30-minutes` — "Portfolio Review — 30 minutes", 30m, Cal
+ * Video, Europe/London, booking into anwar@maintsupp.com. Every CTA on the
+ * site sent a visitor who had already decided to talk to a dead Cal.com page,
+ * because the slug was typed here from memory and nothing checked it.
+ *
+ * It is read from `NEXT_PUBLIC_BOOKING_URL` when that is set, so renaming the
+ * event or moving to another calendar is a deployment variable rather than a
+ * release — the failure above is exactly what a hard-coded URL costs.
+ */
+export const BOOKING_URL =
+  process.env.NEXT_PUBLIC_BOOKING_URL?.trim() ||
+  "https://cal.com/maintsupp/portfolio-review-30-minutes";
+
+export const BOOKING_IS_EXTERNAL = /^https?:\/\//i.test(BOOKING_URL);
 
 export const trades = [
   {

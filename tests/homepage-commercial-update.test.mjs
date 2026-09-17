@@ -296,21 +296,36 @@ test("every footnote the brief lists is on the page, and none of the old ones", 
 /* §2, §3, §9 — booking, the form, the nav                             */
 /* ------------------------------------------------------------------ */
 
-test("the booking link is one constant, opened in a new tab from both places", async () => {
+test("the booking link is one constant, and never a dead calendar", async () => {
   /* §10.7. Two typed copies of a booking URL is one that can be changed and one
-     that cannot, and the one left behind sends people to a dead calendar. */
+     that cannot, and the one left behind sends people to a dead calendar.
+
+     The constant was pinned to `https://cal.com/maintsupp/portfolio-review`,
+     which 404s — the pin held the typo in place, because it asserted that the
+     string had not changed and nothing about whether it could be booked. The
+     slug on the account is `portfolio-review-30-minutes`; that is what is
+     pinned now, and the deployment can override it without a release. */
   const content = await read(`${SECTIONS}/content.ts`);
   assert.match(
     content,
-    /export const BOOKING_URL = "https:\/\/cal\.com\/maintsupp\/portfolio-review";/,
+    /export const BOOKING_URL =\s*process\.env\.NEXT_PUBLIC_BOOKING_URL\?\.trim\(\) \|\|\s*"https:\/\/cal\.com\/maintsupp\/portfolio-review-30-minutes";/,
+    "the verified event, overridable by the deployment",
+  );
+  assert.ok(
+    !code(content).includes("cal.com/maintsupp/portfolio-review\""),
+    "not the slug that 404s",
   );
   for (const file of ["hero.tsx", "final-cta.tsx"]) {
     const source = await read(`${SECTIONS}/${file}`);
-    assert.match(source, /import \{ BOOKING_URL \} from "\.\/content";/, `${file} imports it`);
+    assert.match(
+      source,
+      /import \{ BOOKING_IS_EXTERNAL, BOOKING_URL \} from "\.\/content";/,
+      `${file} imports it`,
+    );
     assert.match(
       code(source),
-      /href=\{BOOKING_URL\}[\s\S]{0,140}?target="_blank"[\s\S]{0,80}?rel="noopener noreferrer"/,
-      `${file} opens it in a new tab, safely`,
+      /href=\{BOOKING_URL\}[\s\S]{0,160}?target=\{BOOKING_IS_EXTERNAL \? "_blank" : undefined\}[\s\S]{0,120}?rel=\{BOOKING_IS_EXTERNAL \? "noopener noreferrer" : undefined\}/,
+      `${file} opens an external calendar in a new tab, safely, and an anchor in this one`,
     );
     assert.ok(
       !code(source).includes("https://cal.com"),
