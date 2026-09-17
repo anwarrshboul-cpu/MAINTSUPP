@@ -327,6 +327,12 @@
   color: var(--teal-600);
 }
 
+/* An Owner: the client company's level, between the platform and a workspace. */
+.admin-role-chip--owner {
+  background: var(--teal-100);
+  color: var(--ink);
+}
+
 .admin-role-chip--admin {
   background: var(--amber-100);
   color: var(--amber-600);
@@ -932,5 +938,245 @@
   .admin-plan,
   .admin-subtle {
     font-size: 12px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Client companies                                                    */
+/* ------------------------------------------------------------------ */
+
+.admin-company-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.admin-panel > .admin-company-note {
+  padding: 0 20px 12px;
+}
+
+.admin-workspace-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.admin-workspace-picker legend {
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.admin-workspace-picker small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 32px;
+  color: var(--ink);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-check input {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--teal-600);
+}
+
+.admin-access-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-access-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.admin-access-list__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-access-list__name small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.admin-access-list__grant {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-access-list__grant select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.admin-company-workspaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0 20px 14px;
+  list-style: none;
+}
+
+.admin-company-workspaces li {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-company-workspaces li.is-current {
+  border-color: var(--teal-500);
+}
+
+.admin-company-workspaces em {
+  font-style: normal;
+}
+
+.admin-company-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 0 20px 20px;
+}
+
+.admin-company-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+}
+
+.admin-company-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-company-card dl {
+  display: grid;
+  grid-template-columns: minmax(84px, max-content) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.admin-company-card dt {
+  color: var(--muted);
+}
+
+.admin-company-card dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-company-card .admin-chip {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.admin-company-card form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.admin-company-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 14px;
+  padding: 0 20px 20px;
+}
+
+.admin-company-lede {
+  padding: 0 20px 12px;
+}
+
+.admin-chip__remove {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px -4px 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.admin-chip__remove:hover:not(:disabled) {
+  background: var(--red-100);
+  color: var(--red-600);
+}
+
+@media (max-width: 640px) {
+  .admin-company-lede,
+  .admin-company-add,
+  .admin-company-grid,
+  .admin-company-workspaces {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .admin-company-card dl {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

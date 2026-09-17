@@ -51,9 +51,13 @@ type MembersPayload = {
  */
 const ROLE_LABEL: Record<string, string> = ROLE_LABELS;
 
-/** The roles a caller holding `granting` may hand out — never above their own. */
+/**
+ * The roles a caller holding `granting` may hand out here — never above their
+ * own, and never Owner: this dialog invites into THIS workspace, and an Owner
+ * is appointed to a whole client company from Users & access.
+ */
 export function grantableRoles(granting: string | null): string[] {
-  return assignableRoles(granting);
+  return assignableRoles(granting).filter((role) => role !== "owner");
 }
 
 function initials(name: string) {

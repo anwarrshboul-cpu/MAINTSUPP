@@ -493,13 +493,16 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
     .from(users)
     .where(eq(users.organisationId, orgId));
   for (const member of memberRows) {
-    const role = member.role.toLowerCase() === "super admin"
-      ? "super_admin"
-      : member.role.toLowerCase() === "admin"
-        ? "admin"
-        : member.role.toLowerCase() === "manager"
-          ? "manager"
-          : "client";
+    const label = member.role.toLowerCase();
+    // Platform and company authority never come from a display label: a
+    // Super Admin is a `platform_admins` row and an Owner a company
+    // relationship, and neither is a workspace membership.
+    if (label === "super admin" || label === "owner") continue;
+    const role = label === "admin"
+      ? "admin"
+      : label === "manager"
+        ? "manager"
+        : "client";
     await db.insert(memberships).values({
       id: `membership-${member.id}-${orgId}`,
       userId: member.id,

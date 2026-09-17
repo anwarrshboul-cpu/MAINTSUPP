@@ -114,11 +114,20 @@ test("the refusal is a 401 that a client can branch on", async () => {
   assert.match(source, /if \(!isAnonymousAccess\(error\)\) return null/);
   assert.match(source, /signIn: true/, "a flag beats parsing prose");
   assert.match(source, /\{ status: 401 \}/);
-  // 403 is a different screen: signed in, and not allowed.
-  assert.doesNotMatch(
-    source.slice(source.indexOf("export function anonymousRefusal")),
-    /status: 403/,
+  /*
+   * 403 is a different screen: signed in, and not allowed. Since the
+   * three-level batch the helper answers that case too — a signed-in account
+   * with no workspace at all (`NoWorkspaceAccessError`), flagged
+   * `noWorkspace` — and it is the ONLY 403 in it; the signed-out answer is
+   * still the 401 above, never a 403.
+   */
+  const helper = source.slice(
+    source.indexOf("export function anonymousRefusal"),
+    source.indexOf("export function anonymousRefusal") + 900,
   );
+  assert.equal((helper.match(/status: 403/g) ?? []).length, 1);
+  assert.match(helper, /if \(error instanceof NoWorkspaceAccessError\) \{[\s\S]{0,160}noWorkspace: true[\s\S]{0,60}status: 403/);
+  assert.match(helper, /if \(!isAnonymousAccess\(error\)\) return null;\s*return Response\.json\(\s*\{ error: "Your session has ended\. Sign in to continue\.", signIn: true \},\s*\{ status: 401 \},/);
 });
 
 test("every route that answers 503 asks first whether it is a sign-out", async () => {
@@ -196,7 +205,12 @@ test("the production branch is what makes any of this reachable", async () => {
   // anonymous. Both must stay, or the refusal is unreachable and every test
   // above passes while production quietly hands out the live tenant.
   const access = await read("app/lib/tenant-access.ts");
-  assert.match(access, /if \(session \|\| demoIdentityAllowed\(\)\) \{/);
+  // Re-pointed: with no access anywhere, a session is refused (`noAccess`),
+  // development falls back to the demo, and anything else is anonymous.
+  assert.match(
+    access,
+    /if \(session\) \{\s*organisationIds = \[\];\s*noAccess = true;\s*\} else if \(demoIdentityAllowed\(\)\) \{/,
+  );
   assert.match(access, /anonymous = true;/);
 
   const actor = await read("app/lib/workspace-actor.ts");

@@ -148,10 +148,12 @@ test("reissuing cannot leave two live links to one workspace", async () => {
   const source = await read("app/api/auth/invitations/invitation-tokens.ts");
 
   // "Send a new link" is a second POST. It is only safe because minting one
-  // revokes any outstanding invitation to the same address first.
+  // revokes any outstanding invitation to the same address first — since the
+  // three-level batch, any in the same client company as well as any landing
+  // in the same workspace.
   assert.match(
     source,
-    /UPDATE invitations\s+SET revoked_at = \?\s+WHERE organisation_id = \?\s+AND lower\(email\) = \?\s+AND accepted_at IS NULL\s+AND revoked_at IS NULL/,
+    /UPDATE invitations\s+SET revoked_at = \?\s+WHERE \(organisation_id = \? OR client_company_id = \?\)\s+AND lower\(email\) = \?\s+AND accepted_at IS NULL\s+AND revoked_at IS NULL/,
   );
 });
 

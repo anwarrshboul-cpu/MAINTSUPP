@@ -93,14 +93,19 @@ test("every data route takes its organisation from scopedDb and nowhere else", a
 test("tenancy is decided in one place, from memberships rather than cookies", async () => {
   const access = await source("app/lib/tenant-access.ts");
 
-  // The organisation is only ever taken from a membership row.
+  // The organisation is only ever taken from a membership row — or, since the
+  // three-level batch, from company ownership or platform authority, both read
+  // from their own tables (`loadCompanyAuthority`), never from a cookie.
   assert.match(access, /from\(memberships\)/);
   assert.match(access, /innerJoin\(users/);
   assert.match(access, /eq\(memberships\.status, "active"\)/);
+  assert.match(access, /loadCompanyAuthority\(db, candidates\)/);
 
   // The cookie is a request, not a grant: it is filtered through the allowed
-  // set before it can select anything.
-  assert.match(access, /allowed\.has\(requestedId\)/);
+  // set before it can select anything. (Re-pointed: `isAllowed` is that
+  // filter, applied to the cookie and to the session's workspace alike.)
+  assert.match(access, /const isAllowed = \(id: string \| null \| undefined\): id is string => Boolean\(id && allowed\.has\(id\)\);/);
+  assert.match(access, /isAllowed\(cookieChoice\) \? cookieChoice : undefined/);
 
   /*
    * Only a super admin is ever given more than one organisation.
@@ -109,17 +114,19 @@ test("tenancy is decided in one place, from memberships rather than cookies", as
    * strongest role anywhere" and "the role this request acts with". The
    * roles-and-access batch split them, because using the first as the second
    * was a cross-workspace escalation (an Admin of A standing in B, where they
-   * are a Client, acted as an Admin). The super-admin test is now on
-   * `strongest`, and the acting role is read from the membership in the
-   * SELECTED organisation — both pinned here.
+   * are a Client, acted as an Admin). The three-level batch then moved
+   * platform reach out of memberships altogether: it is `platformAdmin`, read
+   * from `platform_admins`, and a legacy super_admin membership row grants
+   * nothing. The acting role is still the one held in the SELECTED
+   * organisation — both pinned here.
    */
-  assert.match(access, /const superAdmin = strongest === "super_admin"/);
-  assert.match(access, /if \(superAdmin\) \{\s*organisationIds = activeOrganisations/);
-  assert.match(access, /crossOrganisation: superAdmin/);
+  assert.match(access, /const platformAdmin = authority\?\.platformAdmin \?\? false;/);
+  assert.match(access, /if \(platformAdmin\) \{\s*organisationIds = activeOrganisations/);
+  assert.match(access, /crossOrganisation: platformAdmin/);
   assert.match(
     access,
-    /const role: WorkspaceRole = superAdmin\s*\?\s*"super_admin"\s*:\s*\(grants\.find\(\(grant\) => grant\.organisationId === organisation\.id\)\?\.role/,
-    "the acting role is the membership in the selected organisation",
+    /const role: WorkspaceRole = platformAdmin\s*\?\s*"super_admin"\s*:\s*ownerHere\s*\?\s*"owner"\s*:\s*\(grantHere\?\.role/,
+    "the acting role is the one held in the selected organisation",
   );
 
   const db = await source("app/lib/tenant-db.ts");

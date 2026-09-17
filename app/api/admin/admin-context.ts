@@ -18,7 +18,13 @@ import { and, eq } from "drizzle-orm";
  * beside them as a plain module.
  */
 
-import { auditEvents, memberships, organisations } from "../../../db/schema";
+import {
+  auditEvents,
+  clientCompanyMembers,
+  memberships,
+  organisations,
+  platformAdmins,
+} from "../../../db/schema";
 import {
   can,
   canManageRole,
@@ -28,14 +34,19 @@ import {
   type PermissionSubject,
 } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
-import { roleInOrganisation as grantedRoleIn } from "../../lib/tenant-access";
+import {
+  companyOfOrganisation,
+  roleInOrganisation as grantedRoleIn,
+} from "../../lib/tenant-access";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
-// The one role normaliser, from the module that defines the role set.
-import { normaliseRole } from "../../lib/roles";
+// The role vocabulary, from the module that defines it.
+import { isMembershipRole, normaliseMembershipRole } from "../../lib/roles";
 
 export type AdminContext = ScopedDatabase & {
   /** The workspace this request acts on — validated, never merely requested. */
   targetOrganisationId: string;
+  /** The client company that workspace belongs to. */
+  targetClientCompanyId: string | null;
   /** The actor's role plus that workspace's capability overrides. */
   subject: PermissionSubject;
   /** Kept so an audit line can record where the change came from. */
@@ -84,34 +95,17 @@ export async function adminContext(
   /*
    * The role is resolved IN THE WORKSPACE BEING ACTED ON.
    *
-   * `access.actor.role` is the strongest role held ANYWHERE — that is what
-   * `resolveTenantAccess` computes, deliberately, so a super admin of one
-   * organisation is a super admin everywhere. Applying it to a *named* target
-   * organisation was the bug: someone who is an admin of one client and merely
-   * a viewer of another arrived here as an admin of both.
-   *
-   * Proven before this change. An account that was admin of Sunnamusk UK and
-   * client of Demo Client Ltd could, against Demo Client Ltd: list all 71
-   * members and their emails, read and REWRITE the permission matrix, read the
-   * audit trail, promote someone to admin, and deactivate someone — killing
-   * their sessions. For a product that runs a workspace per retail client that
-   * is one client administering another.
-   *
-   * `roleInOrganisation` mirrors `invitingRole`, which is the one route that
-   * already did this correctly and was the only one that refused the attack: a
-   * super admin anywhere stays a super admin, and everyone else is whatever
-   * their membership in THIS organisation says. Read from `memberships`,
-   * because `users.role` is a display label and has never been the authority.
+   * Applying the role held somewhere else to a *named* target workspace was a
+   * real bug: someone who was an admin of one client and merely a viewer of
+   * another arrived here as an admin of both, and could list, re-role and
+   * deactivate the other client's people. `roleInOrganisation` answers for the
+   * target alone — Platform Super Admin everywhere, Owner in their own
+   * company's workspaces, otherwise the membership there — from the access the
+   * tenancy resolver already loaded for this request. The target is in
+   * `organisationIds` (checked above), so there is always an answer; the
+   * weakest role is only a type-level fallback.
    */
-  const effectiveRole = await roleInOrganisation(
-    access.db,
-    access.session?.user.id ?? null,
-    targetOrganisationId,
-    // No session (a development demo identity): the grants the tenancy
-    // resolver already loaded, asked about THIS organisation — not the role
-    // held in whichever organisation the request happens to stand in.
-    grantedRoleIn(access, targetOrganisationId),
-  );
+  const effectiveRole = grantedRoleIn(access, targetOrganisationId) ?? "client";
 
   const subject = await resolvePermissions(
     access.db,
@@ -126,98 +120,66 @@ export async function adminContext(
     // role that actually applies here, not the one held elsewhere.
     actor: { ...access.actor, role: effectiveRole },
     targetOrganisationId,
+    targetClientCompanyId: companyOfOrganisation(access, targetOrganisationId),
     subject,
     request,
   };
 }
 
 /**
- * The role a user holds in one specific organisation.
- *
- * A super admin of any active workspace is a super admin everywhere — that is
- * the product's rule and `resolveTenantAccess` states it. Below that, a role is
- * local: being an admin of one client says nothing about another.
- *
- * Falls back to the caller's ambient role only when there is no session to
- * resolve a membership for, which in production means an anonymous request —
- * and those cannot reach an admin route at all.
- */
-async function roleInOrganisation(
-  db: Awaited<ReturnType<typeof scopedDb>>["db"],
-  userId: string | null,
-  organisationId: string,
-  fallback: WorkspaceRole,
-): Promise<WorkspaceRole> {
-  if (!userId) return fallback;
-
-  const superAnywhere = await db
-    .select({ id: memberships.id })
-    .from(memberships)
-    .innerJoin(organisations, eq(organisations.id, memberships.organisationId))
-    .where(
-      and(
-        eq(memberships.userId, userId),
-        eq(memberships.status, "active"),
-        eq(memberships.role, "super_admin"),
-        eq(organisations.status, "active"),
-      ),
-    )
-    .limit(1);
-  if (superAnywhere.length) return "super_admin";
-
-  const here = await db
-    .select({ role: memberships.role })
-    .from(memberships)
-    .where(
-      and(
-        eq(memberships.userId, userId),
-        eq(memberships.organisationId, organisationId),
-        eq(memberships.status, "active"),
-      ),
-    )
-    .limit(1);
-
-  // No membership in the target workspace is the weakest role, never the
-  // ambient one — that fallback is exactly what let a viewer act as an admin.
-  return normaliseRole(here[0]?.role) ?? "client";
-}
-
-/**
- * Where the person being acted on stands, across every active workspace.
+ * Where the person being acted on stands, across the whole platform.
  *
  * `loadTarget` answers "is this person in the workspace I administer". It does
- * not answer "who else is this person", and two changes the admin screen makes
- * are not about one workspace at all: a password reset and a deactivation act
- * on the ACCOUNT (`users`), and a profile edit rewrites the name every other
- * workspace shows. So they need this second question answered.
+ * not answer "who else is this person", and three changes the admin screen
+ * makes are not about one workspace at all: a password reset and a
+ * deactivation act on the ACCOUNT (`users`), and a profile edit rewrites the
+ * name every other workspace shows. So they need this second question
+ * answered: which workspaces, which companies, and whether they are MAINTSUPP
+ * staff.
+ *
+ * Legacy `super_admin` membership rows are ignored here as they are in the
+ * tenancy resolver; platform authority is `platform_admins`.
  */
 async function targetStanding(context: AdminContext, targetUserId: string) {
-  const rows = await context.db
-    .select({
-      organisationId: memberships.organisationId,
-      role: memberships.role,
-      status: memberships.status,
-    })
-    .from(memberships)
-    .innerJoin(organisations, eq(organisations.id, memberships.organisationId))
-    .where(and(eq(memberships.userId, targetUserId), eq(organisations.status, "active")));
+  const [membershipRows, ownerRows, platformRows] = await Promise.all([
+    context.db
+      .select({
+        organisationId: memberships.organisationId,
+        role: memberships.role,
+        status: memberships.status,
+      })
+      .from(memberships)
+      .innerJoin(organisations, eq(organisations.id, memberships.organisationId))
+      .where(and(eq(memberships.userId, targetUserId), eq(organisations.status, "active"))),
+    context.db
+      .select({ clientCompanyId: clientCompanyMembers.clientCompanyId })
+      .from(clientCompanyMembers)
+      .where(
+        and(
+          eq(clientCompanyMembers.userId, targetUserId),
+          eq(clientCompanyMembers.relationship, "owner"),
+          eq(clientCompanyMembers.status, "active"),
+        ),
+      ),
+    context.db
+      .select({ userId: platformAdmins.userId })
+      .from(platformAdmins)
+      .where(and(eq(platformAdmins.userId, targetUserId), eq(platformAdmins.status, "active"))),
+  ]);
   return {
-    superAdminAnywhere: rows.some(
-      (row) => row.role === "super_admin" && row.status === "active",
-    ),
-    memberships: rows,
+    platformAdmin: platformRows.length > 0,
+    ownedCompanyIds: ownerRows.map((row) => row.clientCompanyId),
+    memberships: membershipRows.filter((row) => isMembershipRole(row.role)),
   };
 }
 
 /**
  * The role that decides "no acting upwards" for a target.
  *
- * The membership in THIS workspace, unless the person is a Super Admin of any
- * workspace — in which case they are a Super Admin here too, because
- * `resolveTenantAccess` says so. Comparing against the local membership alone
- * let a workspace admin act on a Super Admin whose row in that workspace
- * happened to read `client`: `db/init.ts` widens super admins to every
- * workspace with `INSERT OR IGNORE`, so an older, weaker row survives it.
+ * A Platform Super Admin is one everywhere; an Owner of this workspace's
+ * company is its Owner; otherwise the membership in THIS workspace. Comparing
+ * against the local membership alone would let a workspace admin act on
+ * somebody whose authority comes from a higher level.
  */
 export async function effectiveTargetRole(
   context: AdminContext,
@@ -225,8 +187,14 @@ export async function effectiveTargetRole(
   localRole: string,
 ): Promise<WorkspaceRole> {
   const standing = await targetStanding(context, targetUserId);
-  if (standing.superAdminAnywhere) return "super_admin";
-  return normaliseRole(localRole) ?? "client";
+  if (standing.platformAdmin) return "super_admin";
+  if (
+    context.targetClientCompanyId &&
+    standing.ownedCompanyIds.includes(context.targetClientCompanyId)
+  ) {
+    return "owner";
+  }
+  return normaliseMembershipRole(localRole) ?? "client";
 }
 
 /**
@@ -236,11 +204,16 @@ export async function effectiveTargetRole(
  * of — and so take over — an account that was also an Admin of workspace B, or
  * deactivate that account and lock it out of B. Each check passed because each
  * looked only at A. The rule now: below Super Admin, you may change an account
- * only if you hold `capability` in EVERY workspace it belongs to, and may act
- * on its role there (`canManageRole`). Otherwise a Super Admin has to do it.
+ * only if
  *
- * The refusal does not name the other workspace. The caller may not be a
- * member of it, and its name is exactly what strict isolation keeps from them.
+ *   · it is not a Platform Super Admin and owns no client company (only a
+ *     Super Admin acts on those), and
+ *   · you hold `capability` in EVERY workspace it belongs to, and may act on
+ *     its role there (`canManageRole`) — which an Owner does across their own
+ *     company's workspaces and nobody does outside the ones they can reach.
+ *
+ * The refusal never names the other workspace or company. The caller may not
+ * be able to see it, and its name is exactly what isolation keeps from them.
  */
 export async function accountWideRefusal(
   context: AdminContext,
@@ -250,10 +223,19 @@ export async function accountWideRefusal(
   if (context.actor.role === "super_admin") return null;
 
   const standing = await targetStanding(context, targetUserId);
-  if (standing.superAdminAnywhere) {
+  if (standing.platformAdmin) {
     return Response.json(
       {
         error: "Only a Super Admin can change a Super Admin's account.",
+        denied: true,
+      },
+      { status: 403 },
+    );
+  }
+  if (standing.ownedCompanyIds.length) {
+    return Response.json(
+      {
+        error: "Only a Super Admin can change an Owner's account.",
         denied: true,
       },
       { status: 403 },
@@ -271,12 +253,15 @@ export async function accountWideRefusal(
   );
   for (const row of elsewhere) {
     const actorRole = grantedRoleIn(context, row.organisationId);
-    const targetRole = normaliseRole(row.role) ?? "client";
-    const subject = {
-      role: actorRole,
-      capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {},
-    };
-    if (!can(subject, capability) || !canManageRole(actorRole, targetRole)) {
+    const targetRole = normaliseMembershipRole(row.role) ?? "client";
+    const allowed =
+      actorRole !== null &&
+      can(
+        { role: actorRole, capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {} },
+        capability,
+      ) &&
+      canManageRole(actorRole, targetRole);
+    if (!allowed) {
       return Response.json(
         {
           error:

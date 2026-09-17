@@ -27,6 +27,10 @@
  *      Client assign nothing. A Manager has a hard capability ceiling.
  *   9. The workspace sidebar is Super Admin's; everyone may arrange their OWN
  *      sidebar, which never touches the workspace default.
+ *  10. Since the three-level batch, a fifth role — the client company's Owner —
+ *      sits between Admin and Super Admin, and Super Admin is platform
+ *      authority rather than a membership. `tests/client-companies.test.mjs`
+ *      holds that model; the pins below were re-pointed where it moved them.
  *
  * Three halves: behaviour of the pure modules (imported directly), the shape
  * of the decisions a passing request cannot show, and the real lifecycle
@@ -56,22 +60,28 @@ const permissions = await import("../app/lib/permissions.ts");
 /* 1. The role hierarchy                                               */
 /* ================================================================== */
 
-test("the hierarchy is Super Admin > Admin > Manager > Client, defined once", () => {
-  assert.deepEqual([...roles.ROLES], ["client", "manager", "admin", "super_admin"]);
+test("the hierarchy is Super Admin > Owner > Admin > Manager > Client, defined once", () => {
+  // Re-pointed for the three-level model: Owner (the client company's) sits
+  // between Admin and the platform's Super Admin.
+  assert.deepEqual([...roles.ROLES], ["client", "manager", "admin", "owner", "super_admin"]);
   const ranks = roles.ROLES.map((role) => roles.ROLE_RANK[role]);
   assert.deepEqual(ranks, [...ranks].sort((a, b) => a - b), "ROLES is weakest first");
-  assert.equal(new Set(ranks).size, 4, "no two roles share a rank");
+  assert.equal(new Set(ranks).size, 5, "no two roles share a rank");
   assert.equal(roles.ROLE_LABELS.manager, "Manager");
   assert.equal(roles.roleLabel("nonsense"), "Client", "an unknown value reads as the weakest");
 });
 
 test("a role picker offers exactly the roles the caller may grant", () => {
-  // The owner's table.
-  assert.deepEqual(roles.assignableRoles("super_admin"), ["client", "manager", "admin", "super_admin"]);
+  // The owner's table, as the three-level batch left it: a Super Admin
+  // appoints Owners and every workspace role but never another Super Admin
+  // (platform authority is not handed out through these flows); an Owner
+  // assigns Admin, Manager and Client.
+  assert.deepEqual(roles.assignableRoles("super_admin"), ["client", "manager", "admin", "owner"]);
+  assert.deepEqual(roles.assignableRoles("owner"), ["client", "manager", "admin"]);
   assert.deepEqual(roles.assignableRoles("admin"), ["client", "manager"]);
   assert.deepEqual(roles.assignableRoles("manager"), [], "a Manager assigns nothing");
   assert.deepEqual(roles.assignableRoles("client"), [], "a Client assigns nothing");
-  assert.deepEqual(roles.assignableRoles("owner"), [], "an unknown role grants nothing");
+  assert.deepEqual(roles.assignableRoles("director"), [], "an unknown role grants nothing");
   assert.deepEqual(roles.assignableRoles(null), []);
 
   for (const target of ["admin", "manager", "client"]) {
@@ -127,6 +137,9 @@ const EXPECTED = {
   manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],
   client: ["board.view", "data.export", "navigation.personalise"],
 };
+// An Owner holds exactly the Admin set; their extra authority is SCOPE (every
+// workspace of their company), not extra capabilities.
+EXPECTED.owner = EXPECTED.admin;
 
 test("each role's built-in capabilities are exactly the documented set", () => {
   for (const role of roles.ROLES) {
@@ -140,7 +153,7 @@ test("each role's built-in capabilities are exactly the documented set", () => {
 test("reserved capabilities cannot be held below Super Admin, whatever a row says", () => {
   for (const capability of ["clients.view_all", "roles.edit", "navigation.edit"]) {
     assert.equal(permissions.isReservedCapability(capability), true);
-    for (const role of ["admin", "manager", "client"]) {
+    for (const role of ["owner", "admin", "manager", "client"]) {
       assert.equal(
         permissions.can({ role, capabilities: { [capability]: true } }, capability),
         false,
@@ -152,7 +165,7 @@ test("reserved capabilities cannot be held below Super Admin, whatever a row say
 });
 
 test("the matrix refuses to store a reserved capability for any other role", () => {
-  for (const target of ["admin", "manager", "client"]) {
+  for (const target of ["owner", "admin", "manager", "client"]) {
     for (const allowed of [true, false]) {
       assert.match(
         String(permissions.roleCapabilityWriteRefusal("super_admin", target, "navigation.edit", allowed)),
@@ -448,8 +461,10 @@ test("the invitation service: capability in the target workspace, one live invit
     at("const invitation = await createInvitation(") < at("const delivery = await deliverInvitation("),
     "the invitation exists before the email is attempted",
   );
-  assert.match(route, /outstanding && resend && outstanding\.role !== role/, "a resend cannot change the role");
-  assert.match(route, /if \(!canAssignRole\(granting, role\)\) \{/, "the owner's assignment table decides");
+  // Re-pointed: a resend now repeats the role AND the workspace set, and the
+  // assignment table is asked with the role held in EACH target workspace.
+  assert.match(route, /if \(outstanding\.role !== role \|\| !sameWorkspaces\) \{/, "a resend cannot change the role");
+  assert.match(route, /if \(!canAssignRole\(actingRole, role\)\) \{/, "the owner's assignment table decides");
   assert.match(route, /const inviteUrl = publicUrl\(request, `\/invite\/\$\{token\}`\);/);
   assert.match(route, /inviteUrl,\s*delivery,/, "the link is returned whatever happened to the email");
 
@@ -462,17 +477,25 @@ test("the invitation service: capability in the target workspace, one live invit
 
 test("accepting an invitation takes the role and workspace from the row, and lands you there", async () => {
   const accept = await read("app/api/auth/invitations/[token]/route.ts");
-  assert.match(accept, /const role = normaliseRole\(invitation\.role\);/);
-  assert.doesNotMatch(accept, /payload\.(role|organisationId|organisation)/, "nothing in the body decides access");
+  // Re-pointed: what the row grants (role, company, workspaces, landing) is
+  // read by `invitationGrant`, from the database, before the token is used.
+  assert.match(accept, /const grant = await invitationGrant\(d1, invitation\);/);
+  assert.match(accept, /const role = grant\.role;/);
+  assert.doesNotMatch(accept, /payload\.(role|organisationId|organisation|workspace|company)/, "nothing in the body decides access");
   assert.match(accept, /WHERE id = \? AND accepted_at IS NULL AND revoked_at IS NULL/, "single use");
-  assert.match(accept, /`\$\{ORGANISATION_COOKIE\}=\$\{encodeURIComponent\(invitation\.organisation_id\)\}; `/);
+  assert.match(accept, /`\$\{ORGANISATION_COOKIE\}=\$\{encodeURIComponent\(landingId\)\}; `/);
   assert.equal((accept.match(/response\.headers\.append\("Set-Cookie", workspaceCookie\)/g) ?? []).length, 2);
 });
 
 test("the acting role is the role in the selected workspace", async () => {
-  const access = await read("app/lib/tenant-access.ts");
+  // Re-pointed: the per-workspace question moved to the pure `access-scope.ts`,
+  // which tenant-access.ts re-exports.
+  const resolver = await read("app/lib/tenant-access.ts");
+  assert.match(resolver, /export \{ administersCompany, companyOfOrganisation, roleInOrganisation \} from "\.\/access-scope";/);
+  const access = await read("app/lib/access-scope.ts");
   assert.match(access, /export function roleInOrganisation\(/);
-  assert.match(access, /if \(access\.crossOrganisation\) return "super_admin";/);
+  // Re-pointed: platform authority is `platformAdmin`, not a membership.
+  assert.match(access, /if \(access\.platformAdmin\) return "super_admin";/);
   assert.match(access, /if \(grant\) return grant\.role;/);
   const admin = await read("app/api/admin/admin-context.ts");
   assert.match(admin, /grantedRoleIn\(access, targetOrganisationId\)/);
@@ -481,7 +504,10 @@ test("the acting role is the role in the selected workspace", async () => {
 test("account-wide changes are refused unless the caller administers every workspace involved", async () => {
   const context = await read("app/api/admin/admin-context.ts");
   assert.match(context, /export async function accountWideRefusal\(/);
-  assert.match(context, /if \(standing\.superAdminAnywhere\) \{/);
+  // Re-pointed: a Platform Super Admin, and now also a company Owner, is only
+  // changed by a Super Admin.
+  assert.match(context, /if \(standing\.platformAdmin\) \{/);
+  assert.match(context, /if \(standing\.ownedCompanyIds\.length\) \{/);
   assert.match(context, /guardRail: "other_workspace"/);
 
   const users = await read("app/api/admin/users/route.ts");
@@ -497,9 +523,15 @@ test("account-wide changes are refused unless the caller administers every works
 test("switching workspace is open to members, creating one is not", async () => {
   const route = await read("app/api/context/route.ts");
   const select = route.indexOf('if (action === "select_organisation")');
-  const gate = route.indexOf('if (context.actor.role !== "super_admin")');
   const create = route.indexOf('if (action === "create_organisation")');
-  assert.ok(select > 0 && gate > select && create > gate, "select, then the super-admin gate, then create");
+  assert.ok(select > 0 && create > select, "select, then create");
+  // Re-pointed: creating is gated INSIDE create — a Platform Super Admin, or an
+  // Owner of the company it goes into — rather than by a rank gate before it.
+  const gate = route.indexOf("if (context.platformAdmin) {", create);
+  const ownerGate = route.indexOf("!context.ownedCompanyIds.includes(companyId)", create);
+  const write = route.indexOf("await createWorkspace(", create);
+  assert.ok(gate > create && ownerGate > gate && write > ownerGate, "the gate comes before the write");
+  assert.match(route, /Only a Super Admin or the company's Owner can create workspaces\./);
   assert.match(route, /!context\.organisationIds\.includes\(organisation\.id\)/);
 });
 
@@ -546,13 +578,16 @@ test("the invitation page can reveal a password without writing it into the DOM"
 test("the Users screen offers only assignable roles and no controls over people who outrank you", async () => {
   const view = await read("app/(app)/portal/views/admin-users.tsx");
   assert.match(view, /\(data\?\.roles \?\? \[\]\)\.filter\(\(role\) => role\.assignable\)/);
-  assert.match(view, /\{assignable\.map\(\(role\) => \(/);
+  // Re-pointed: a membership's role picker offers the assignable WORKSPACE
+  // roles (Owner and Super Admin are not membership roles).
+  assert.match(view, /const workspaceRoles = assignable\.filter\(/);
+  assert.match(view, /\{workspaceRoles\.map\(\(role\) => \(/);
   assert.doesNotMatch(view, /disabled=\{!role\.assignable\}/, "unassignable roles are not listed at all");
   assert.match(view, /user\.manageable !== false/);
   assert.match(view, /invitationId: invitation\.id/);
   assert.match(
     view,
-    /\{assignable\.some\(\(role\) => role\.key === invitation\.role\) \? \(\s*<span className="admin-actions">/,
+    /\{invitation\.manageable \?\? assignable\.some\(\(role\) => role\.key === invitation\.role\) \? \(\s*<span className="admin-actions">/,
     "resend and withdraw are offered only for invitations the caller could issue",
   );
   assert.doesNotMatch(view, /\{invitation\.role\}\s*<\/span>/, "the pending table shows a label, not the raw key");
@@ -565,14 +600,16 @@ test("the Users screen offers only assignable roles and no controls over people 
     "PATCH refuses acting on a role the caller may not manage",
   );
   assert.match(view, /\{can\("users\.invite"\) && assignable\.length > 0 \? \(/);
-  assert.match(route, /organisations: \(await administrableOrganisations\(context\)\)/);
-  assert.match(route, /invitedBy: invitedBy \? \(inviters\.get\(invitedBy\) \?\? null\) : null/);
+  assert.match(route, /const administrable = await administrableOrganisations\(context\);/);
+  assert.match(route, /organisations: administrable\.map\(/);
+  assert.match(route, /invitedBy: row\.invitedBy \? \(inviters\.get\(row\.invitedBy\) \?\? null\) : null/);
+  // Re-pointed: withdrawing is the power to issue, asked in every workspace
+  // the invitation grants (`mayGrantIn`), before anything is written.
   const withdraw = route.slice(route.indexOf("export async function DELETE"));
   assert.ok(
-    withdraw.indexOf("!canAssignRole(context.actor.role, target.role)") > 0 &&
-      withdraw.indexOf("!canAssignRole(context.actor.role, target.role)") <
-        withdraw.indexOf(".set({ revokedAt:"),
-    "withdrawing is refused above the caller's rank, before anything is written",
+    withdraw.indexOf("await mayGrantIn(") > 0 &&
+      withdraw.indexOf("await mayGrantIn(") < withdraw.indexOf(".set({ revokedAt:"),
+    "withdrawing is refused above the caller's authority, before anything is written",
   );
 });
 
@@ -580,7 +617,10 @@ test("the sidebar shows a non-Super-Admin only their own workspaces and no menu 
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(portal, /const isSuperAdmin = runtimeContext\?\.actor\.role === "super_admin";/);
   assert.match(portal, /const canSwitchWorkspace = isSuperAdmin \|\| switchableOrganisations\.length > 1;/);
-  assert.match(portal, /\{isSuperAdmin && \(\s*<button\s+className="workspace-switcher__add"/);
+  // Re-pointed: the add button is for a Super Admin, or an Owner adding to
+  // their own company — never for anybody else.
+  assert.match(portal, /const canAddWorkspace = isSuperAdmin \|\| \(ownsCurrentCompany && Boolean\(currentCompany\)\);/);
+  assert.match(portal, /\{canAddWorkspace && \(\s*<button\s+className="workspace-switcher__add"/);
   assert.match(portal, /\{isSuperAdmin && runtimeContext\?\.tenantSummary/);
   assert.doesNotMatch(portal, /demoRole === "super_admin"/, "the testing selector decides nothing");
   for (const [key, capability] of [
@@ -617,7 +657,8 @@ test("the sidebar shows a non-Super-Admin only their own workspaces and no menu 
   assert.match(menu, /item\.key !== "admin" \|\| canAdminister === true/);
 
   const explore = await read("app/(app)/portal/views/account-explore.tsx");
-  assert.match(explore, /const roles = assignableRoles\(snapshot\.role\);/);
+  // Re-pointed: Owner is appointed to a company, not from this form.
+  assert.match(explore, /const roles = assignableRoles\(snapshot\.role\)\.filter\(\(entry\) => entry !== "owner"\);/);
   assert.doesNotMatch(explore, /<option value="super_admin">/);
 
   const modal = await read("app/(app)/portal/board-actions/invite-modal.tsx");
@@ -931,9 +972,11 @@ test("live: menu and role administration are Super Admin's alone", { skip: !live
   // The Super Admin can read the matrix, which now has a Manager column.
   const ownerMatrix = await api(await owner(), `/api/admin/roles?organisationId=${DEMO}`);
   assert.equal(ownerMatrix.status, 200);
-  assert.deepEqual(ownerMatrix.body.roles.map((role) => role.key), ["client", "manager", "admin", "super_admin"]);
+  // Re-pointed: the matrix has an Owner column since the three-level batch,
+  // and the reservation locks it like every other role below Super Admin.
+  assert.deepEqual(ownerMatrix.body.roles.map((role) => role.key), ["client", "manager", "admin", "owner", "super_admin"]);
   const reserved = ownerMatrix.body.lockedCells.filter((cell) => cell.capability === "navigation.edit");
-  assert.deepEqual(reserved.map((cell) => cell.role).sort(), ["admin", "client", "manager", "super_admin"]);
+  assert.deepEqual(reserved.map((cell) => cell.role).sort(), ["admin", "client", "manager", "owner", "super_admin"]);
   const ceiling = ownerMatrix.body.lockedCells.filter(
     (cell) => cell.role === "manager" && cell.capability === "users.invite",
   );
@@ -1018,8 +1061,10 @@ test("live: every self-promotion and escalation attempt is refused", { skip: !li
   // Admin → Super Admin, for themselves and for somebody else.
   assert.equal((await patch(admin.cookie, { userId: idOf(admin.email), action: "role", role: "super_admin" })).status, 403);
   assert.equal((await patch(admin.cookie, { userId: idOf(manager.email), action: "role", role: "super_admin" })).status, 403);
+  // Owner is real since the three-level batch, and above an Admin's reach.
+  assert.equal((await patch(admin.cookie, { userId: idOf(manager.email), action: "role", role: "owner" })).status, 403);
   // An invented role in a manipulated payload.
-  assert.equal((await patch(admin.cookie, { userId: idOf(manager.email), action: "role", role: "owner" })).status, 400);
+  assert.equal((await patch(admin.cookie, { userId: idOf(manager.email), action: "role", role: "director" })).status, 400);
 
   // Acting on the Super Admin.
   if (ownerRow) {
@@ -1052,10 +1097,20 @@ test("live: every self-promotion and escalation attempt is refused", { skip: !li
     assert.equal((await api(person.cookie, "/api/admin/users")).status, 403, "and People is not theirs");
   }
 
-  // A pending Super Admin or Admin invitation is outside the admin's table
-  // too: it can be neither resent nor withdrawn by them. (Created and
-  // withdrawn by the owner.)
-  for (const role of ["super_admin", "admin"]) {
+  // Re-pointed for the three-level batch: nobody invites a Super Admin any
+  // more, the Super Admin included — platform authority is not handed out by
+  // link.
+  const noSuperAdmin = await api(await owner(), "/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify({ email: `rbac-lofty-sa-${STAMP}@rbac.test.maintsupp.com`, role: "super_admin", organisationId: DEMO }),
+  });
+  assert.equal(noSuperAdmin.status, 403, "Super Admin is not invited, by anybody");
+
+  // A pending Owner or Admin invitation is outside the admin's table: it can
+  // be neither resent nor withdrawn by them. An Owner invitation is company
+  // business and is not even listed to them. (Created and withdrawn by the
+  // Super Admin.)
+  for (const role of ["owner", "admin"]) {
     const address = `rbac-lofty-${role}-${STAMP}@rbac.test.maintsupp.com`;
     const lofty = await api(await owner(), "/api/admin/users", {
       method: "POST",
@@ -1063,10 +1118,17 @@ test("live: every self-promotion and escalation attempt is refused", { skip: !li
     });
     assert.equal(lofty.status, 201, "a Super Admin may invite this role");
     try {
-      const listed = (await api(admin.cookie, "/api/admin/users")).body.invitations.find(
+      const seenByAdmin = (await api(admin.cookie, "/api/admin/users")).body.invitations.find(
         (row) => row.email === address,
       );
-      assert.ok(listed, "the admin can see it is pending");
+      const listed =
+        role === "owner"
+          ? (await api(await owner(), `/api/admin/users?organisationId=${DEMO}`)).body.invitations.find(
+              (row) => row.email === address,
+            )
+          : seenByAdmin;
+      if (role === "owner") assert.equal(seenByAdmin, undefined, "an Admin is not shown an Owner invitation");
+      assert.ok(listed, "the invitation is pending");
       const resend = await api(admin.cookie, "/api/admin/users", {
         method: "POST",
         body: JSON.stringify({ invitationId: listed.id }),
@@ -1144,11 +1206,24 @@ test("live: a duplicate invite is refused, a resend is explicit, a withdrawal ki
 
   const described = await api(null, `/api/auth/invitations/${secondToken}`);
   assert.equal(described.status, 200);
+  // Re-pointed: the description now names the company and the workspaces it
+  // grants (names, never ids) and whether it is the whole company.
   assert.deepEqual(
     Object.keys(described.body.invitation).sort(),
-    ["email", "expiresAt", "message", "organisationName", "role", "roleLabel"],
+    [
+      "companyName",
+      "email",
+      "expiresAt",
+      "message",
+      "organisationName",
+      "role",
+      "roleLabel",
+      "wholeCompany",
+      "workspaceNames",
+    ],
     "the public description carries no ids",
   );
+  assert.doesNotMatch(described.text, /org_[0-9a-z]{6,}|company[-_]/i, "no workspace or company id");
 
   const listed = (await api(cookie, `/api/admin/users?organisationId=${DEMO}`)).body.invitations.find(
     (row) => row.email === email,

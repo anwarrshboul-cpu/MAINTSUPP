@@ -6,12 +6,20 @@
  * caller cannot use, but hiding is a courtesy: a client calling this route with
  * curl gets a 403 with a `denied` flag, not a quietly ignored request.
  *
- *   GET    — the roster for one workspace, plus each person's memberships in
- *            the *other* workspaces the caller can already see.
+ *   GET    — the roster for one workspace — its members and its client
+ *            company's Owners — plus each person's memberships in the *other*
+ *            workspaces the caller can already see.
  *   POST   — invite. Delegated to `/api/auth/invitations`; nothing here writes
  *            an invitation row itself.
- *   PATCH  — edit a profile, change a role, deactivate or reactivate.
+ *   PATCH  — edit a profile, change a role, give or take away access to one
+ *            of the company's workspaces, deactivate or reactivate.
  *   DELETE — revoke an invitation that has not been accepted yet.
+ *
+ * SCOPE, NOT RANK. What a caller may do depends on the level their authority
+ * comes from: a Platform Super Admin anywhere, an Owner across their own
+ * client company's workspaces, an Admin only in the workspaces they
+ * administer. Every per-workspace question below is asked of the role the
+ * caller holds IN THAT WORKSPACE (`roleInOrganisation`).
  *
  * DEACTIVATION IS NOT DELETION. `users.active` goes to 0 and `status` to
  * "deactivated"; the `users` row, the `memberships` rows and every audit line
@@ -25,7 +33,15 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { selectInChunks } from "../../../lib/sql-batching";
 import { ensureDatabase } from "../../../../db/init";
-import { invitations, memberships, users } from "../../../../db/schema";
+import {
+  clientCompanies,
+  clientCompanyMembers,
+  invitations,
+  memberships,
+  platformAdmins,
+  users,
+} from "../../../../db/schema";
+import { platformAdminIds } from "../../../lib/company-authority";
 import {
   CAPABILITY_CATALOGUE,
   ROLE_LABELS,
@@ -37,10 +53,17 @@ import {
   isWorkspaceRole,
   loadRoleOverridesForOrganisations,
   requireCapability,
+  type Capability,
 } from "../../../lib/permissions";
 import { roleInOrganisation } from "../../../lib/tenant-access";
 import type { WorkspaceRole } from "../../../lib/workspace-actor";
-import { withArticle } from "../../../lib/roles";
+import {
+  isMembershipRole,
+  MEMBERSHIP_ROLES,
+  normaliseMembershipRole,
+  withArticle,
+} from "../../../lib/roles";
+import { invitationWorkspaceIds } from "../../auth/invitations/invitation-tokens";
 import {
   accountWideRefusal,
   adminContext,
@@ -78,27 +101,117 @@ const profileColumns = {
   workingStatus: sql<string | null>`users.working_status`,
 };
 
+/**
+ * May the caller hand out `role` in EVERY one of `organisationIds`?
+ *
+ * Asked workspace by workspace, with the role the caller holds THERE: the
+ * capability (`users.invite` by default) under that workspace's matrix, and
+ * the role inside that role's assignment table. An Owner qualifies across
+ * their company; an Admin only where they administer; a workspace the caller
+ * cannot reach at all fails the whole question. Owner itself is a
+ * company-level appointment only a Platform Super Admin makes.
+ */
+async function mayGrantIn(
+  context: AdminContext,
+  organisationIds: string[],
+  role: WorkspaceRole,
+  capability: Capability = "users.invite",
+) {
+  if (role === "super_admin") return false;
+  if (role === "owner") return context.platformAdmin;
+  if (!organisationIds.length) return false;
+  if (organisationIds.some((id) => !context.organisationIds.includes(id))) return false;
+  const overrides = await loadRoleOverridesForOrganisations(context.db, organisationIds);
+  return organisationIds.every((id) => {
+    const actorRole = roleInOrganisation(context, id);
+    return (
+      actorRole !== null &&
+      can({ role: actorRole, capabilities: overrides.get(id)?.[actorRole] ?? {} }, capability) &&
+      canAssignRole(actorRole, role)
+    );
+  });
+}
+
+/** The active workspaces of the target's client company that the caller can reach. */
+function companyWorkspaces(context: AdminContext) {
+  if (!context.targetClientCompanyId) return [];
+  return context.activeOrganisations
+    .filter(
+      (item) =>
+        item.clientCompanyId === context.targetClientCompanyId &&
+        context.organisationIds.includes(item.id),
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
 async function roster(context: AdminContext) {
   const { db, targetOrganisationId, organisationIds, activeOrganisations } = context;
 
-  const rows = await db
+  const person = {
+    id: users.id,
+    email: users.email,
+    fullName: users.fullName,
+    active: users.active,
+    createdAt: users.createdAt,
+    ...profileColumns,
+  };
+
+  /*
+   * The members of this workspace, at the three membership roles. A legacy
+   * `super_admin` membership row is not a member: platform authority lives in
+   * `platform_admins`, and MAINTSUPP staff are not on a customer's roster
+   * because of an old row. A removed membership is gone from the roster too.
+   */
+  const memberRows = await db
     .select({
-      id: users.id,
-      email: users.email,
-      fullName: users.fullName,
-      active: users.active,
-      createdAt: users.createdAt,
+      ...person,
       membershipRole: memberships.role,
       membershipStatus: memberships.status,
       siteScope: memberships.siteScope,
       approvalLimitPence: memberships.approvalLimitPence,
       acceptedAt: memberships.acceptedAt,
-      ...profileColumns,
     })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
-    .where(eq(memberships.organisationId, targetOrganisationId))
+    .where(
+      and(
+        eq(memberships.organisationId, targetOrganisationId),
+        inArray(memberships.role, [...MEMBERSHIP_ROLES]),
+        sql`${memberships.status} <> 'removed'`,
+      ),
+    )
     .orderBy(asc(users.fullName), asc(users.email));
+
+  /*
+   * The client company's Owners. They reach this workspace without a
+   * membership, so they are listed from the company relationship — and an
+   * Owner who also has an old membership here is listed once, as Owner.
+   */
+  const ownerRows = context.targetClientCompanyId
+    ? await db
+        .select({ ...person, acceptedAt: clientCompanyMembers.acceptedAt })
+        .from(clientCompanyMembers)
+        .innerJoin(users, eq(users.id, clientCompanyMembers.userId))
+        .where(
+          and(
+            eq(clientCompanyMembers.clientCompanyId, context.targetClientCompanyId),
+            eq(clientCompanyMembers.relationship, "owner"),
+            eq(clientCompanyMembers.status, "active"),
+          ),
+        )
+        .orderBy(asc(users.fullName), asc(users.email))
+    : [];
+  const ownerIds = new Set(ownerRows.map((row) => row.id));
+  const rows = [
+    ...ownerRows.map((row) => ({
+      ...row,
+      membershipRole: "owner",
+      membershipStatus: "active",
+      siteScope: null as string | null,
+      approvalLimitPence: null as number | null,
+    })),
+    ...memberRows.filter((row) => !ownerIds.has(row.id)),
+  ];
 
   const userIds = rows.map((row) => row.id);
 
@@ -137,37 +250,21 @@ async function roster(context: AdminContext) {
             and(
               inArray(memberships.userId, chunk),
               inArray(memberships.organisationId, organisationIds),
+              inArray(memberships.role, [...MEMBERSHIP_ROLES]),
+              sql`${memberships.status} <> 'removed'`,
             ),
           ),
       )
     : [];
 
   /*
-   * Who on this roster is a Super Admin of ANY workspace.
+   * Who on this roster is a Platform Super Admin.
    *
-   * Read separately from `otherMemberships`, which is filtered to the
-   * workspaces the caller can see: a workspace admin must still learn that a
-   * person outranks them even when the super-admin membership sits somewhere
-   * they cannot. Only the boolean leaves the server — never which workspace.
+   * A workspace admin must learn that a person outranks them even though that
+   * authority sits outside any workspace they can see. Only the boolean leaves
+   * the server.
    */
-  const superAdminIds = new Set(
-    userIds.length
-      ? (
-          await selectInChunks(userIds, (chunk) =>
-            db
-              .select({ userId: memberships.userId })
-              .from(memberships)
-              .where(
-                and(
-                  inArray(memberships.userId, chunk),
-                  eq(memberships.role, "super_admin"),
-                  eq(memberships.status, "active"),
-                ),
-              ),
-          )
-        ).map((row) => row.userId)
-      : [],
-  );
+  const superAdminIds = await platformAdminIds(db, userIds);
 
   const organisationNames = new Map(
     activeOrganisations.map((organisation) => [organisation.id, organisation.name]),
@@ -190,9 +287,9 @@ async function roster(context: AdminContext) {
   return rows.map((row) => {
     const effectiveRole: WorkspaceRole = superAdminIds.has(row.id)
       ? "super_admin"
-      : isWorkspaceRole(row.membershipRole)
-        ? row.membershipRole
-        : "client";
+      : ownerIds.has(row.id)
+        ? "owner"
+        : (normaliseMembershipRole(row.membershipRole) ?? "client");
     return {
       id: row.id,
       email: row.email,
@@ -217,12 +314,16 @@ async function roster(context: AdminContext) {
       approvalLimitPence: row.approvalLimitPence,
       memberships: byUser.get(row.id) ?? [],
       isSelf: row.email.toLowerCase() === self,
+      /* An Owner's access is the whole company, not memberships. */
+      companyOwner: ownerIds.has(row.id),
+      platformAdmin: superAdminIds.has(row.id),
       /*
        * Whether the caller may act on this person at all — `canManageRole`,
        * the same rule PATCH and the password-reset route apply, computed from
-       * the same effective role. An Admin manages Managers and Clients; only a
-       * Super Admin manages Admins. The screen draws controls only where a
-       * change could be accepted. A control is a courtesy; PATCH still decides.
+       * the same effective role. An Admin manages Managers and Clients; an
+       * Owner also Admins; only a Super Admin manages Owners. The screen draws
+       * controls only where a change could be accepted. A control is a
+       * courtesy; PATCH still decides.
        */
       manageable: canManageRole(context.actor.role, effectiveRole),
     };
@@ -247,17 +348,29 @@ async function pendingInvitations(context: AdminContext) {
       invitedBy: invitations.invitedBy,
       expiresAt: invitations.expiresAt,
       createdAt: invitations.createdAt,
+      organisationId: invitations.organisationId,
+      clientCompanyId: invitations.clientCompanyId,
+      workspaceIds: invitations.workspaceIds,
     })
     .from(invitations)
     .where(
       and(
-        eq(invitations.organisationId, context.targetOrganisationId),
+        /*
+         * This workspace's invitations: the ones that land here, and the
+         * company's invitations that grant it — an Owner invitation grants
+         * every workspace of the company, a workspace invitation the ones
+         * listed on it (filtered below).
+         */
+        context.targetClientCompanyId
+          ? sql`(${invitations.organisationId} = ${context.targetOrganisationId}
+                 OR ${invitations.clientCompanyId} = ${context.targetClientCompanyId})`
+          : eq(invitations.organisationId, context.targetOrganisationId),
         isNull(invitations.acceptedAt),
         isNull(invitations.revokedAt),
       ),
     )
     .orderBy(desc(invitations.createdAt))
-    .limit(50);
+    .limit(100);
 
   /*
    * `invited_by` is a user id. The screen used to print it raw — an internal
@@ -277,12 +390,48 @@ async function pendingInvitations(context: AdminContext) {
   );
 
   const now = Date.now();
-  return rows.map(({ invitedBy, ...row }) => ({
-    ...row,
-    roleLabel: isWorkspaceRole(row.role) ? ROLE_LABELS[row.role] : row.role,
-    invitedBy: invitedBy ? (inviters.get(invitedBy) ?? null) : null,
-    expired: row.expiresAt ? Date.parse(row.expiresAt) <= now : false,
-  }));
+  const names = new Map(context.activeOrganisations.map((item) => [item.id, item.name]));
+  const listed = rows
+    .map((row) => ({
+      row,
+      companyWide: row.role === "owner",
+      grants: invitationWorkspaceIds({
+        workspace_ids: row.workspaceIds,
+        organisation_id: row.organisationId,
+      }),
+    }))
+    .filter(
+      ({ row, companyWide, grants }) =>
+        row.role !== "super_admin" &&
+        (companyWide || grants.includes(context.targetOrganisationId)) &&
+        /* Owner invitations are company business: Super Admins and Owners. */
+        (!companyWide || context.actor.role === "super_admin" || context.actor.role === "owner"),
+    );
+  const result = [];
+  for (const { row, companyWide, grants } of listed) {
+    const role = isWorkspaceRole(row.role) ? row.role : null;
+    result.push({
+      id: row.id,
+      email: row.email,
+      role: row.role,
+      expiresAt: row.expiresAt,
+      createdAt: row.createdAt,
+      clientCompanyId: row.clientCompanyId,
+      roleLabel: role ? ROLE_LABELS[role] : row.role,
+      invitedBy: row.invitedBy ? (inviters.get(row.invitedBy) ?? null) : null,
+      expired: row.expiresAt ? Date.parse(row.expiresAt) <= now : false,
+      companyWide,
+      /* Only the workspaces the caller can already see are named. */
+      workspaces: companyWide
+        ? []
+        : grants
+            .filter((id) => context.organisationIds.includes(id))
+            .map((id) => ({ id, name: names.get(id) ?? "Workspace" })),
+      /* Withdraw and resend are the power to issue, so the same test. */
+      manageable: role ? await mayGrantIn(context, companyWide ? [] : grants, role) : false,
+    });
+  }
+  return result;
 }
 
 /**
@@ -297,16 +446,16 @@ async function administrableOrganisations(context: AdminContext) {
   const visible = context.activeOrganisations.filter((item) =>
     context.organisationIds.includes(item.id),
   );
-  if (context.actor.role === "super_admin" && context.crossOrganisation) return visible;
+  if (context.platformAdmin) return visible;
   const overrides = await loadRoleOverridesForOrganisations(
     context.db,
     visible.map((item) => item.id),
   );
   return visible.filter((item) => {
     const role = roleInOrganisation(context, item.id);
-    return can(
-      { role, capabilities: overrides.get(item.id)?.[role] ?? {} },
-      "users.view",
+    return (
+      role !== null &&
+      can({ role, capabilities: overrides.get(item.id)?.[role] ?? {} }, "users.view")
     );
   });
 }
@@ -328,27 +477,107 @@ export async function GET(request: Request) {
         (item) => item.id === context.targetOrganisationId,
       ) ?? context.organisation;
 
+    const company = context.targetClientCompanyId
+      ? (
+          await context.db
+            .select({
+              id: clientCompanies.id,
+              name: clientCompanies.name,
+              defaultOrganisationId: clientCompanies.defaultOrganisationId,
+            })
+            .from(clientCompanies)
+            .where(eq(clientCompanies.id, context.targetClientCompanyId))
+            .limit(1)
+        )[0] ?? null
+      : null;
+    const companyNames = new Map<string, string>();
+    const administrable = await administrableOrganisations(context);
+    const namedCompanies = [
+      ...new Set(administrable.map((item) => item.clientCompanyId).filter(Boolean)),
+    ] as string[];
+    if (namedCompanies.length) {
+      for (const row of await context.db
+        .select({ id: clientCompanies.id, name: clientCompanies.name })
+        .from(clientCompanies)
+        .where(inArray(clientCompanies.id, namedCompanies))) {
+        companyNames.set(row.id, row.name);
+      }
+    }
+
+    /*
+     * The company's workspaces the caller can reach, each with the workspace
+     * roles the caller may give THERE — which is what the invite and access
+     * dialogs offer. An Admin of A1 sees A2 listed only if they can reach it,
+     * and can give nothing in a workspace they do not administer.
+     */
+    const siblings = companyWorkspaces(context);
+    const siblingOverrides = await loadRoleOverridesForOrganisations(
+      context.db,
+      siblings.map((item) => item.id),
+    );
+    const workspaceGrants = siblings.map((item) => {
+      const actorRole = roleInOrganisation(context, item.id);
+      const subject = {
+        role: actorRole ?? ("client" as const),
+        capabilities: actorRole ? (siblingOverrides.get(item.id)?.[actorRole] ?? {}) : {},
+      };
+      const grantable = (capability: Capability) =>
+        actorRole && can(subject, capability)
+          ? MEMBERSHIP_ROLES.filter((role) => canAssignRole(actorRole, role))
+          : [];
+      return {
+        id: item.id,
+        name: item.name,
+        isCurrent: item.id === context.targetOrganisationId,
+        isDefault: item.id === company?.defaultOrganisationId,
+        inviteRoles: grantable("users.invite"),
+        accessRoles: grantable("users.edit"),
+      };
+    });
+
     return Response.json({
       organisation: {
         id: organisation.id,
         name: organisation.name,
         slug: organisation.slug,
         planTier: organisation.planTier,
+        clientCompanyId: context.targetClientCompanyId,
       },
-      organisations: (await administrableOrganisations(context)).map((item) => ({
+      company: company
+        ? {
+            id: company.id,
+            name: company.name,
+            owned: context.ownedCompanyIds.includes(company.id),
+            defaultOrganisationId: company.defaultOrganisationId,
+          }
+        : null,
+      companyWorkspaces: workspaceGrants,
+      organisations: administrable.map((item) => ({
         id: item.id,
         name: item.name,
         slug: item.slug,
+        clientCompanyId: item.clientCompanyId ?? null,
+        companyName: item.clientCompanyId ? (companyNames.get(item.clientCompanyId) ?? null) : null,
       })),
       actor: {
         email: context.identityEmail,
         role: context.actor.role,
         roleLabel: ROLE_LABELS[context.actor.role],
+        platformAdmin: context.platformAdmin,
+        ownsCompany: Boolean(
+          context.targetClientCompanyId &&
+            context.ownedCompanyIds.includes(context.targetClientCompanyId),
+        ),
         capabilities: effectiveCapabilities(
           context.actor.role,
           context.subject.capabilities,
         ),
       },
+      /*
+       * Super Admin is listed and never assignable here: platform authority is
+       * not granted from a customer's People screen. Owner is assignable only
+       * by a Platform Super Admin, and only by invitation.
+       */
       roles: ROLES.map((role) => ({
         key: role,
         label: ROLE_LABELS[role],
@@ -388,6 +617,8 @@ export async function POST(request: Request) {
       email?: string;
       role?: string;
       organisationId?: string;
+      organisationIds?: unknown;
+      clientCompanyId?: string;
       message?: string;
       invitationId?: string;
     }>(request);
@@ -413,6 +644,8 @@ export async function POST(request: Request) {
     let email: string;
     let role: string;
     let message: string | null;
+    let workspaceIds: string[];
+    let clientCompanyId: string | null = context.targetClientCompanyId;
     if (invitationId) {
       const [pending] = await context.db
         .select({
@@ -421,14 +654,12 @@ export async function POST(request: Request) {
           message: invitations.message,
           acceptedAt: invitations.acceptedAt,
           revokedAt: invitations.revokedAt,
+          organisationId: invitations.organisationId,
+          clientCompanyId: invitations.clientCompanyId,
+          workspaceIds: invitations.workspaceIds,
         })
         .from(invitations)
-        .where(
-          and(
-            eq(invitations.id, invitationId),
-            eq(invitations.organisationId, context.targetOrganisationId),
-          ),
-        )
+        .where(invitationInScope(context, invitationId))
         .limit(1);
       if (!pending) {
         return Response.json(
@@ -449,10 +680,22 @@ export async function POST(request: Request) {
       email = pending.email.toLowerCase();
       role = pending.role;
       message = pending.message;
+      clientCompanyId = pending.clientCompanyId ?? clientCompanyId;
+      workspaceIds =
+        role === "owner"
+          ? []
+          : invitationWorkspaceIds({
+              workspace_ids: pending.workspaceIds,
+              organisation_id: pending.organisationId,
+            });
     } else {
       email = trimmed(body.email, 180).toLowerCase();
       role = trimmed(body.role, 40) || "client";
       message = optional(body.message, 500);
+      const named = Array.isArray(body.organisationIds)
+        ? body.organisationIds.filter((id): id is string => typeof id === "string" && Boolean(id))
+        : [];
+      workspaceIds = role === "owner" ? [] : named.length ? named : [context.targetOrganisationId];
     }
 
     if (!email.includes("@")) {
@@ -473,12 +716,21 @@ export async function POST(request: Request) {
      * GUARD-RAIL — no escalation by invitation. An admin who could invite a
      * super admin could hand themselves that account's credentials and hold
      * powers `admin` was never granted, which would make every other limit on
-     * the role decorative.
+     * the role decorative. Asked of EVERY workspace the invitation would
+     * grant, with the role the caller holds in each (`mayGrantIn`); the
+     * invitation service asks again.
      */
-    if (!canAssignRole(context.actor.role, role)) {
+    if (!(await mayGrantIn(context, workspaceIds, role))) {
       return Response.json(
         {
-          error: `As ${withArticle(context.actor.role)} you cannot invite somebody as ${withArticle(role)}.`,
+          error:
+            role === "owner"
+              ? "Only a Super Admin can appoint a company Owner."
+              : role === "super_admin"
+                ? "Platform Super Admins are not appointed from this screen."
+                : workspaceIds.length > 1
+                  ? `You cannot invite somebody as ${withArticle(role)} to every one of those workspaces.`
+                  : `As ${withArticle(context.actor.role)} you cannot invite somebody as ${withArticle(role)}.`,
           denied: true,
         },
         { status: 403 },
@@ -498,7 +750,8 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         email,
         role,
-        organisationId: context.targetOrganisationId,
+        organisationIds: role === "owner" ? [] : workspaceIds,
+        clientCompanyId,
         message,
         resend: Boolean(invitationId),
       }),
@@ -519,13 +772,34 @@ export async function POST(request: Request) {
       summary: `${invitationId ? "Resent the invitation to" : "Invited"} ${email} as ${ROLE_LABELS[role]}`,
       entityType: "invitation",
       entityId: email,
-      detail: { email, role, delivery: payload?.delivery?.status ?? null },
+      detail: {
+        email,
+        role,
+        workspaceIds,
+        clientCompanyId,
+        delivery: payload?.delivery?.status ?? null,
+      },
     });
 
     return Response.json(payload, { status: response.status });
   } catch (error) {
     return adminError(error, "The invitation could not be sent.");
   }
+}
+
+/**
+ * An invitation id, found only if it belongs to the workspace being
+ * administered — landing here, or issued for its client company. A bare id
+ * from another tenant matches nothing.
+ */
+function invitationInScope(context: AdminContext, invitationId: string) {
+  return and(
+    eq(invitations.id, invitationId),
+    context.targetClientCompanyId
+      ? sql`(${invitations.organisationId} = ${context.targetOrganisationId}
+             OR ${invitations.clientCompanyId} = ${context.targetClientCompanyId})`
+      : eq(invitations.organisationId, context.targetOrganisationId),
+  );
 }
 
 /**
@@ -576,14 +850,11 @@ export async function DELETE(request: Request) {
         role: invitations.role,
         acceptedAt: invitations.acceptedAt,
         revokedAt: invitations.revokedAt,
+        organisationId: invitations.organisationId,
+        workspaceIds: invitations.workspaceIds,
       })
       .from(invitations)
-      .where(
-        and(
-          eq(invitations.id, invitationId),
-          eq(invitations.organisationId, context.targetOrganisationId),
-        ),
-      )
+      .where(invitationInScope(context, invitationId))
       .limit(1);
 
     if (!target) {
@@ -593,11 +864,23 @@ export async function DELETE(request: Request) {
       );
     }
     /*
-     * The power to withdraw is the power to issue — including its ceiling. An
-     * admin cannot issue a Super Admin invitation, so they cannot withdraw one
-     * a Super Admin issued either.
+     * The power to withdraw is the power to issue — including its ceiling, and
+     * in every workspace the invitation grants. An admin cannot issue an Owner
+     * invitation, so they cannot withdraw one a Super Admin issued either.
      */
-    if (isWorkspaceRole(target.role) && !canAssignRole(context.actor.role, target.role)) {
+    const withdrawable =
+      isWorkspaceRole(target.role) &&
+      (await mayGrantIn(
+        context,
+        target.role === "owner"
+          ? []
+          : invitationWorkspaceIds({
+              workspace_ids: target.workspaceIds,
+              organisation_id: target.organisationId,
+            }),
+        target.role,
+      ));
+    if (isWorkspaceRole(target.role) && !withdrawable && !context.platformAdmin) {
       return Response.json(
         {
           error: `As ${withArticle(context.actor.role)} you cannot withdraw an invitation for ${withArticle(target.role)}.`,
@@ -651,25 +934,47 @@ type TargetMember = {
   role: string;
 };
 
-/** The target, resolved through the workspace rather than by bare id. */
+/**
+ * The target, resolved through the workspace rather than by bare id: a member
+ * of this workspace, or an Owner of its client company (whose `role` is then
+ * "owner" whatever else they hold here).
+ */
 async function loadTarget(
   context: AdminContext,
   userId: string,
 ): Promise<TargetMember | null> {
+  const person = {
+    id: users.id,
+    email: users.email,
+    fullName: users.fullName,
+    active: users.active,
+  };
+  if (context.targetClientCompanyId) {
+    const [owner] = await context.db
+      .select(person)
+      .from(clientCompanyMembers)
+      .innerJoin(users, eq(users.id, clientCompanyMembers.userId))
+      .where(
+        and(
+          eq(clientCompanyMembers.clientCompanyId, context.targetClientCompanyId),
+          eq(clientCompanyMembers.userId, userId),
+          eq(clientCompanyMembers.relationship, "owner"),
+          eq(clientCompanyMembers.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (owner) return { ...owner, active: Boolean(owner.active), role: "owner" };
+  }
   const [row] = await context.db
-    .select({
-      id: users.id,
-      email: users.email,
-      fullName: users.fullName,
-      active: users.active,
-      role: memberships.role,
-    })
+    .select({ ...person, role: memberships.role })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(
       and(
         eq(memberships.organisationId, context.targetOrganisationId),
         eq(memberships.userId, userId),
+        inArray(memberships.role, [...MEMBERSHIP_ROLES]),
+        sql`${memberships.status} <> 'removed'`,
       ),
     )
     .limit(1);
@@ -677,70 +982,31 @@ async function loadTarget(
 }
 
 /**
- * The organisations that would be left with no active super admin.
+ * Whether deactivating `targetUserId` would leave the platform with no active
+ * Super Admin.
  *
- * GUARD-RAIL — the last super admin. Demoting or deactivating the only person
- * who can administer a workspace leaves it with no way back: nobody can edit
- * roles, nobody can reactivate the account that was just switched off, and the
- * only repair is a hand-written database row. So the question is asked as
- * "after this change, how many active super admins would this workspace still
- * have?" and the change is refused when the answer is zero.
- *
- * Counted from `memberships` joined to `users`, with both the membership and the
- * user required to be active — the same two conditions `tenant-access.ts` uses
- * when it decides whether a grant is real, so the count cannot disagree with who
- * can actually sign in.
+ * GUARD-RAIL — the last Super Admin. Switching off the only person who can
+ * administer the platform leaves no way back: nobody can reactivate the
+ * account, appoint an Owner or create a company, and the only repair is a
+ * hand-written database row. Platform authority is `platform_admins` now, so
+ * that is what is counted — active rows whose account is active, the same
+ * two conditions the tenancy resolver requires.
  */
-async function workspacesLosingTheirLastSuperAdmin(
-  context: AdminContext,
-  targetUserId: string,
-  scope: "all" | { organisationId: string },
-) {
-  const held = await context.db
-    .select({ organisationId: memberships.organisationId })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
+async function isLastPlatformAdmin(context: AdminContext, targetUserId: string) {
+  const admins = await platformAdminIds(context.db, [targetUserId]);
+  if (!admins.has(targetUserId)) return false;
+  const [survivors] = await context.db
+    .select({ remaining: sql<number>`count(*)` })
+    .from(platformAdmins)
+    .innerJoin(users, eq(users.id, platformAdmins.userId))
     .where(
       and(
-        eq(memberships.userId, targetUserId),
-        eq(memberships.role, "super_admin"),
-        eq(memberships.status, "active"),
+        eq(platformAdmins.status, "active"),
         eq(users.active, true),
+        sql`${platformAdmins.userId} <> ${targetUserId}`,
       ),
     );
-
-  const affected = held
-    .map((row) => row.organisationId)
-    .filter((id) => scope === "all" || id === scope.organisationId);
-  if (!affected.length) return [];
-
-  const survivors = await context.db
-    .select({
-      organisationId: memberships.organisationId,
-      remaining: sql<number>`count(*)`,
-    })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
-    .where(
-      and(
-        inArray(memberships.organisationId, affected),
-        eq(memberships.role, "super_admin"),
-        eq(memberships.status, "active"),
-        eq(users.active, true),
-        sql`${memberships.userId} <> ${targetUserId}`,
-      ),
-    )
-    .groupBy(memberships.organisationId);
-
-  const remaining = new Map(
-    survivors.map((row) => [row.organisationId, Number(row.remaining)]),
-  );
-  const names = new Map(
-    context.activeOrganisations.map((item) => [item.id, item.name]),
-  );
-  return affected
-    .filter((id) => (remaining.get(id) ?? 0) === 0)
-    .map((id) => names.get(id) ?? id);
+  return Number(survivors?.remaining ?? 0) === 0;
 }
 
 export async function PATCH(request: Request) {
@@ -751,6 +1017,8 @@ export async function PATCH(request: Request) {
       action?: string;
       organisationId?: string;
       role?: string;
+      workspaceId?: string;
+      access?: string;
       fullName?: string;
       jobTitle?: string;
       phone?: string;
@@ -852,10 +1120,40 @@ export async function PATCH(request: Request) {
       if (denied) return denied;
 
       const role = trimmed(body.role, 40);
-      if (!isWorkspaceRole(role)) {
+      /*
+       * A workspace role is one of the three membership roles. Owner is a
+       * company appointment (by invitation, from a Super Admin) and Super
+       * Admin a platform one; neither is set by editing a membership.
+       */
+      if (!isMembershipRole(role)) {
+        /* Asking for a role above your reach is an escalation attempt, and is
+           answered as one; a role you could give, but not as a membership, is
+           a malformed request. */
+        if (isWorkspaceRole(role) && !canAssignRole(context.actor.role, role)) {
+          return Response.json(
+            {
+              error: `As ${withArticle(context.actor.role)} you cannot grant the ${ROLE_LABELS[role]} role.`,
+              denied: true,
+            },
+            { status: 403 },
+          );
+        }
         return Response.json(
-          { error: `"${role}" is not a role this workspace has.` },
+          {
+            error: isWorkspaceRole(role)
+              ? `${ROLE_LABELS[role]} is not a workspace role. Choose Admin, Manager or Client.`
+              : `"${role}" is not a role this workspace has.`,
+          },
           { status: 400 },
+        );
+      }
+      if (target.role === "owner") {
+        return Response.json(
+          {
+            error:
+              "An Owner's access comes from the company, not from a workspace role. Remove them as Owner first.",
+          },
+          { status: 409 },
         );
       }
 
@@ -885,22 +1183,6 @@ export async function PATCH(request: Request) {
         );
       }
 
-      if (role !== "super_admin") {
-        const stranded = await workspacesLosingTheirLastSuperAdmin(context, target.id, {
-          organisationId: context.targetOrganisationId,
-        });
-        if (stranded.length) {
-          return Response.json(
-            {
-              error: `${target.email} is the last active Super Admin in ${stranded.join(", ")}. Appoint another Super Admin first.`,
-              denied: true,
-              guardRail: "last_super_admin",
-            },
-            { status: 409 },
-          );
-        }
-      }
-
       await context.db
         .update(memberships)
         .set({ role, updatedAt: new Date().toISOString() })
@@ -919,6 +1201,160 @@ export async function PATCH(request: Request) {
         detail: { from: target.role, to: role },
       });
       return Response.json({ ok: true, userId: target.id, role });
+    }
+
+    /*
+     * WORKSPACE ACCESS — give this person a role in another workspace of the
+     * same client company, or take one away.
+     *
+     * Nothing is inherited downwards: an Admin of A1 reaches A2 only once
+     * somebody who may grant it there does. The caller needs `users.edit` in
+     * the workspace being changed, and the role inside their assignment table
+     * THERE (granting) or the existing role inside what they manage there
+     * (removing). The person must already be on this workspace's roster, and
+     * the other workspace must belong to the same company — access never
+     * crosses a company boundary from this screen.
+     */
+    if (action === "workspace_access") {
+      const workspaceId = trimmed(body.workspaceId, 100);
+      const access = trimmed(body.access, 20);
+      const workspace = context.activeOrganisations.find((item) => item.id === workspaceId);
+      if (
+        !workspace ||
+        !context.organisationIds.includes(workspace.id) ||
+        !context.targetClientCompanyId ||
+        workspace.clientCompanyId !== context.targetClientCompanyId
+      ) {
+        return Response.json(
+          { error: "That workspace is not one of this company's workspaces you can manage.", denied: true },
+          { status: 403 },
+        );
+      }
+      if (access !== "grant" && access !== "remove") {
+        return Response.json({ error: "Choose to grant or remove access." }, { status: 400 });
+      }
+      if (isSelf) {
+        return Response.json(
+          { error: "You cannot change your own workspace access. Ask another administrator.", denied: true },
+          { status: 403 },
+        );
+      }
+      if (target.role === "owner" || targetRole === "super_admin") {
+        return Response.json(
+          {
+            error:
+              target.role === "owner"
+                ? "An Owner already reaches every workspace of the company."
+                : "A Super Admin already reaches every workspace.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const [existing] = await context.db
+        .select({ role: memberships.role, status: memberships.status })
+        .from(memberships)
+        .where(and(eq(memberships.userId, target.id), eq(memberships.organisationId, workspace.id)))
+        .limit(1);
+      const existingRole =
+        existing && existing.status !== "removed" ? normaliseMembershipRole(existing.role) : null;
+      const now = new Date().toISOString();
+
+      if (access === "grant") {
+        const role = trimmed(body.role, 40);
+        if (!isMembershipRole(role)) {
+          return Response.json(
+            { error: "Choose Admin, Manager or Client for that workspace." },
+            { status: 400 },
+          );
+        }
+        if (existingRole) {
+          return Response.json(
+            { error: `${target.email} already has access to ${workspace.name}. Change their role there instead.` },
+            { status: 409 },
+          );
+        }
+        if (!(await mayGrantIn(context, [workspace.id], role, "users.edit"))) {
+          return Response.json(
+            { error: `You cannot give somebody ${withArticle(role)} role in ${workspace.name}.`, denied: true },
+            { status: 403 },
+          );
+        }
+        await context.db
+          .insert(memberships)
+          .values({
+            id: `membership-${target.id}-${workspace.id}`,
+            userId: target.id,
+            organisationId: workspace.id,
+            role,
+            status: "active",
+            invitedBy: context.session?.user.id ?? null,
+            acceptedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: [memberships.userId, memberships.organisationId],
+            set: { role, status: "active", acceptedAt: now, updatedAt: now },
+          });
+        await recordAudit(context, {
+          action: "user.workspace_granted",
+          summary: `Gave ${target.email} ${withArticle(role)} role in ${workspace.name}`,
+          entityType: "user",
+          entityId: target.id,
+          detail: { workspaceId: workspace.id, role },
+        });
+        return Response.json({ ok: true, userId: target.id, workspaceId: workspace.id, role });
+      }
+
+      if (!existingRole) {
+        return Response.json({ ok: true, alreadyRemoved: true });
+      }
+      const removerRole = roleInOrganisation(context, workspace.id);
+      const overrides = await loadRoleOverridesForOrganisations(context.db, [workspace.id]);
+      const mayRemove =
+        removerRole !== null &&
+        can(
+          { role: removerRole, capabilities: overrides.get(workspace.id)?.[removerRole] ?? {} },
+          "users.edit",
+        ) &&
+        canManageRole(removerRole, existingRole);
+      if (!mayRemove) {
+        return Response.json(
+          { error: `You cannot remove ${withArticle(existingRole)} from ${workspace.name}.`, denied: true },
+          { status: 403 },
+        );
+      }
+      const [remaining] = await context.db
+        .select({ count: sql<number>`count(*)` })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.userId, target.id),
+            eq(memberships.status, "active"),
+            inArray(memberships.role, [...MEMBERSHIP_ROLES]),
+            sql`${memberships.organisationId} <> ${workspace.id}`,
+          ),
+        );
+      if (Number(remaining?.count ?? 0) === 0) {
+        return Response.json(
+          {
+            error: `${workspace.name} is the only workspace ${target.email} can open. Deactivate the person instead.`,
+            guardRail: "last_workspace",
+          },
+          { status: 409 },
+        );
+      }
+      await context.db
+        .update(memberships)
+        .set({ status: "removed", updatedAt: now })
+        .where(and(eq(memberships.userId, target.id), eq(memberships.organisationId, workspace.id)));
+      await recordAudit(context, {
+        action: "user.workspace_removed",
+        summary: `Removed ${target.email}'s access to ${workspace.name}`,
+        entityType: "user",
+        entityId: target.id,
+        detail: { workspaceId: workspace.id, role: existingRole },
+      });
+      return Response.json({ ok: true, userId: target.id, workspaceId: workspace.id, removed: true });
     }
 
     if (action === "deactivate" || action === "reactivate") {
@@ -951,17 +1387,12 @@ export async function PATCH(request: Request) {
           );
         }
 
-        // Deactivation reaches every workspace this person belongs to, so the
-        // last-super-admin question is asked of all of them, not just this one.
-        const stranded = await workspacesLosingTheirLastSuperAdmin(
-          context,
-          target.id,
-          "all",
-        );
-        if (stranded.length) {
+        // Deactivation reaches the whole account, including platform
+        // authority, so the last-Super-Admin question is the platform's.
+        if (await isLastPlatformAdmin(context, target.id)) {
           return Response.json(
             {
-              error: `${target.email} is the last active Super Admin in ${stranded.join(", ")}. Appoint another Super Admin first.`,
+              error: `${target.email} is the last active Super Admin. Appoint another Super Admin first.`,
               denied: true,
               guardRail: "last_super_admin",
             },

@@ -326,7 +326,13 @@ type OrganisationSummary = {
   primaryColour: string;
   planTier: string;
   status: string;
+  /** The client company the workspace belongs to. */
+  clientCompanyId?: string | null;
+  companyName?: string | null;
 };
+
+/** A client company, as far as this person can see it. */
+type CompanySummary = { id: string; name: string; owned: boolean; workspaceCount: number };
 
 type RuntimeWorkspaceContext = {
   actor: { email: string; displayName: string; role: DemoRole };
@@ -345,7 +351,14 @@ type RuntimeWorkspaceContext = {
     organisationIds: string[];
     crossOrganisation: boolean;
     unaffiliated: boolean;
+    /** MAINTSUPP platform staff: every company, every workspace. */
+    platformAdmin?: boolean;
+    /** An Owner of the company the current workspace belongs to. */
+    ownsCurrentCompany?: boolean;
   };
+  /** The client companies behind `organisations` — only those. */
+  companies?: CompanySummary[];
+  currentCompany?: { id: string; name: string | null; owned: boolean } | null;
   /**
    * Every client and what each holds. Served only to a super admin; a client
    * receives null, so this cannot leak another client's row counts.
@@ -1337,6 +1350,28 @@ export default function PortalApp({
    */
   const switchableOrganisations = runtimeContext?.organisations ?? [];
   const canSwitchWorkspace = isSuperAdmin || switchableOrganisations.length > 1;
+  /*
+   * An Owner of the current workspace's client company may add a workspace TO
+   * THAT COMPANY — and only to it; the server refuses any other. A Platform
+   * Super Admin may add a whole new client. Everybody else sees no button.
+   */
+  const ownsCurrentCompany = runtimeContext?.actor.role === "owner";
+  const currentCompany = runtimeContext?.currentCompany ?? null;
+  const canAddWorkspace = isSuperAdmin || (ownsCurrentCompany && Boolean(currentCompany));
+  /*
+   * Workspaces grouped by company — only when that says something: several
+   * companies, at least one of them with several workspaces. A list of
+   * one-workspace companies reads better flat.
+   */
+  const switcherGroups = (() => {
+    const groups = new Map<string, OrganisationSummary[]>();
+    for (const organisation of switchableOrganisations) {
+      const key = organisation.companyName ?? "";
+      groups.set(key, [...(groups.get(key) ?? []), organisation]);
+    }
+    const entries = [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+    return entries.length > 1 && entries.some(([, list]) => list.length > 1) ? entries : [];
+  })();
 
   const changeOrganisation = async (organisationId: string) => {
     // The server refuses a workspace that is not one of the caller's; this
@@ -1361,15 +1396,26 @@ export default function PortalApp({
   };
 
   const createOrganisation = async () => {
-    if (!isSuperAdmin) return;
-    const name = window.prompt("Enter the client or organisation name:")?.trim();
+    if (!canAddWorkspace) return;
+    const companyName = currentCompany?.name ?? "your company";
+    const name = window
+      .prompt(
+        isSuperAdmin
+          ? "Enter the client or organisation name:"
+          : `Name the new workspace for ${companyName}:`,
+      )
+      ?.trim();
     if (!name) return;
     setContextBusy(true);
     try {
       const response = await fetch("/api/context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "create_organisation", name }),
+        body: JSON.stringify(
+          isSuperAdmin
+            ? { action: "create_organisation", name }
+            : { action: "create_organisation", name, clientCompanyId: currentCompany?.id },
+        ),
       });
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error || "The client workspace could not be created.");
@@ -2834,7 +2880,14 @@ export default function PortalApp({
             <Icon name="building" size={17} />
           </span>
           <span className="workspace-switcher__copy">
-            <small>Workspace</small>
+            {/* The client company, when it says something the workspace name
+                does not — a company with several branches. */}
+            <small title={currentCompany?.name ?? undefined}>
+              {currentCompany?.name &&
+              currentCompany.name !== runtimeContext?.currentOrganisation.name
+                ? currentCompany.name
+                : "Workspace"}
+            </small>
             {canSwitchWorkspace && runtimeContext ? (
               <select
                 aria-label="Client workspace"
@@ -2842,22 +2895,32 @@ export default function PortalApp({
                 disabled={contextBusy}
                 onChange={(event) => void changeOrganisation(event.target.value)}
               >
-                {switchableOrganisations.map((organisation) => (
-                  <option key={organisation.id} value={organisation.id}>
-                    {organisation.name}
-                  </option>
-                ))}
+                {switcherGroups.length > 1
+                  ? switcherGroups.map(([company, organisations]) => (
+                      <optgroup key={company || "none"} label={company || "Other workspaces"}>
+                        {organisations.map((organisation) => (
+                          <option key={organisation.id} value={organisation.id}>
+                            {organisation.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))
+                  : switchableOrganisations.map((organisation) => (
+                      <option key={organisation.id} value={organisation.id}>
+                        {organisation.name}
+                      </option>
+                    ))}
               </select>
             ) : (
               <strong>{runtimeContext?.currentOrganisation.name ?? "Workspace"}</strong>
             )}
           </span>
-          {isSuperAdmin && (
+          {canAddWorkspace && (
             <button
               className="workspace-switcher__add"
               type="button"
-              aria-label="Add client workspace"
-              title="Add client workspace"
+              aria-label={isSuperAdmin ? "Add client workspace" : "Add a workspace to your company"}
+              title={isSuperAdmin ? "Add client workspace" : "Add a workspace to your company"}
               disabled={contextBusy}
               onClick={() => void createOrganisation()}
             >
@@ -2883,9 +2946,14 @@ export default function PortalApp({
             <span className="workspace-identity__scope">
               {runtimeContext.identity.crossOrganisation
                 ? `Every workspace · ${runtimeContext.identity.organisationIds.length}`
-                : runtimeContext.identity.organisationIds.length > 1
-                  ? `Your workspaces · ${runtimeContext.identity.organisationIds.length}`
-                  : "This workspace only"}
+                : runtimeContext.identity.ownsCurrentCompany && currentCompany?.name
+                  ? `All of ${currentCompany.name} · ${
+                      runtimeContext.companies?.find((company) => company.id === currentCompany.id)
+                        ?.workspaceCount ?? runtimeContext.identity.organisationIds.length
+                    }`
+                  : runtimeContext.identity.organisationIds.length > 1
+                    ? `Your workspaces · ${runtimeContext.identity.organisationIds.length}`
+                    : "This workspace only"}
             </span>
           </div>
         )}

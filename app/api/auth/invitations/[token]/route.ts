@@ -10,10 +10,12 @@ import {
 import { passwordProblem } from "../../../../lib/password";
 import { ORGANISATION_COOKIE } from "../../../../lib/tenant-access";
 import {
+  invitationGrant,
   invitationProblem,
   resolveInvitation,
   ROLE_LABEL,
   normaliseRole,
+  type InvitationGrant,
   type InvitationRow,
 } from "../invitation-tokens";
 
@@ -69,14 +71,34 @@ async function findUser(
   return row ?? null;
 }
 
-/** The public shape of an invitation. Deliberately four fields. */
-function describe(invitation: InvitationRow) {
-  const role = normaliseRole(invitation.role) ?? "client";
+function noLongerGrantable() {
+  return Response.json(
+    {
+      error: "This invitation can no longer be used. Ask your administrator for a new one.",
+      state: "revoked",
+    },
+    { status: 410 },
+  );
+}
+
+/**
+ * The public shape of an invitation: who it is for, as what, into which
+ * company and workspaces, and until when. Nothing else — no member list, no
+ * data, no other invitation.
+ */
+function describe(
+  invitation: InvitationRow,
+  grant: InvitationGrant,
+) {
   return {
     email: invitation.email ?? "",
-    role,
-    roleLabel: ROLE_LABEL[role],
-    organisationName: invitation.organisation_name ?? "",
+    role: grant.role,
+    roleLabel: ROLE_LABEL[grant.role],
+    organisationName: grant.landing.name,
+    companyName: grant.companyName,
+    workspaceNames: grant.workspaces.map((row) => row.name),
+    /* An Owner's access is the company, including workspaces added later. */
+    wholeCompany: grant.role === "owner",
     expiresAt: invitation.expires_at ?? "",
     message: invitation.message ?? null,
   };
@@ -92,11 +114,13 @@ export async function GET(
 
   const { state, invitation } = await resolveInvitation(d1, token);
   if (state !== "valid" || !invitation) return gone(state);
+  const grant = await invitationGrant(d1, invitation);
+  if (!grant) return noLongerGrantable();
 
   const existing = await findUser(d1, (invitation.email ?? "").toLowerCase());
 
   return Response.json({
-    invitation: describe(invitation),
+    invitation: describe(invitation, grant),
     /*
      * Tells the page which form to render. An address that already has a
      * password cannot have a new one set through this link — see POST — so the
@@ -119,13 +143,21 @@ export async function POST(
   if (state !== "valid" || !invitation) return gone(state);
 
   const email = (invitation.email ?? "").toLowerCase();
-  const role = normaliseRole(invitation.role);
-  if (!email || !role || !invitation.organisation_id) {
+  if (!email || !normaliseRole(invitation.role) || !invitation.organisation_id) {
     return Response.json(
       { error: "This invitation is incomplete. Ask your administrator for a new one." },
       { status: 410 },
     );
   }
+  /*
+   * What it grants is settled BEFORE the token is consumed, so a link whose
+   * company or workspaces have gone stays refusable rather than being burnt
+   * for nothing — and a legacy Super Admin invitation is refused outright.
+   */
+  const grant = await invitationGrant(d1, invitation);
+  if (!grant) return noLongerGrantable();
+  const role = grant.role;
+  const landingId = grant.landing.id;
 
   let payload: Record<string, unknown> = {};
   try {
@@ -227,7 +259,7 @@ export async function POST(
         `INSERT INTO users (id, organisation_id, email, full_name, role, active, status)
          VALUES (?, ?, ?, ?, ?, 1, 'active')`,
       )
-      .bind(userId, invitation.organisation_id, email, fullName, ROLE_LABEL[role])
+      .bind(userId, landingId, email, fullName, ROLE_LABEL[role])
       .run();
   }
 
@@ -235,37 +267,71 @@ export async function POST(
   if (!holdsPassword) await setPassword(d1, userId, password);
 
   /*
-   * The membership, written FROM the invitation row.
+   * The access, written FROM the invitation row.
    *
-   * `role` here is `invitation.role` — read out of the database, put there by
-   * an administrator whose authority to grant it was checked at creation time.
-   * Nothing in this request contributed to it.
+   * `role`, the company and the workspaces were read out of the database, put
+   * there by somebody whose authority to grant them was checked at creation
+   * time. Nothing in this request contributed to them.
+   *
+   *   · OWNER — one `client_company_members` row. No workspace membership:
+   *     ownership is what reaches the company's workspaces, today's and
+   *     tomorrow's.
+   *   · WORKSPACE ROLE — one membership per granted workspace, each at the
+   *     invited role. Nothing is inherited downwards: the person reaches
+   *     exactly these workspaces and no others of the company.
    */
-  await d1
-    .prepare(
-      `INSERT INTO memberships
-         (id, user_id, organisation_id, role, status, invited_by, accepted_at)
-       VALUES (?, ?, ?, ?, 'active', ?, ?)
-       ON CONFLICT(user_id, organisation_id) DO UPDATE SET
-         role = excluded.role,
-         status = 'active',
-         accepted_at = excluded.accepted_at,
-         updated_at = excluded.accepted_at`,
-    )
-    .bind(
-      `membership-${userId}-${invitation.organisation_id}`,
-      userId,
-      invitation.organisation_id,
-      role,
-      invitation.invited_by ?? null,
-      now,
-    )
-    .run();
+  if (role === "owner") {
+    await d1
+      .prepare(
+        `INSERT INTO client_company_members
+           (id, user_id, client_company_id, relationship, status, invited_by, accepted_at)
+         VALUES (?, ?, ?, 'owner', 'active', ?, ?)
+         ON CONFLICT(user_id, client_company_id) DO UPDATE SET
+           relationship = 'owner',
+           status = 'active',
+           accepted_at = excluded.accepted_at,
+           updated_at = excluded.accepted_at`,
+      )
+      .bind(
+        `company-member-${userId}-${grant.clientCompanyId}`,
+        userId,
+        grant.clientCompanyId,
+        invitation.invited_by ?? null,
+        now,
+      )
+      .run();
+  } else {
+    for (const workspace of grant.workspaces) {
+      await d1
+        .prepare(
+          `INSERT INTO memberships
+             (id, user_id, organisation_id, role, status, invited_by, accepted_at)
+           VALUES (?, ?, ?, ?, 'active', ?, ?)
+           ON CONFLICT(user_id, organisation_id) DO UPDATE SET
+             role = excluded.role,
+             status = 'active',
+             accepted_at = excluded.accepted_at,
+             updated_at = excluded.accepted_at`,
+        )
+        .bind(
+          `membership-${userId}-${workspace.id}`,
+          userId,
+          workspace.id,
+          role,
+          invitation.invited_by ?? null,
+          now,
+        )
+        .run();
+    }
+  }
 
   const body = {
     ok: true,
-    organisationId: invitation.organisation_id,
-    organisationName: invitation.organisation_name ?? null,
+    organisationId: landingId,
+    organisationName: grant.landing.name,
+    clientCompanyId: grant.clientCompanyId,
+    companyName: grant.companyName,
+    workspaceCount: grant.workspaces.length,
     role,
     redirectTo: "/dashboard",
   };
@@ -277,11 +343,11 @@ export async function POST(
    * accepts while signed in lands on /dashboard in whichever workspace their
    * browser last selected, and the invitation looks as though it did nothing.
    * The cookie is only a REQUEST — `resolveTenantAccess` honours it only for a
-   * workspace the memberships allow — so it cannot widen anything; the
-   * membership written above is what makes it valid.
+   * workspace the person can reach — so it cannot widen anything; the access
+   * written above is what makes it valid.
    */
   const workspaceCookie =
-    `${ORGANISATION_COOKIE}=${encodeURIComponent(invitation.organisation_id)}; ` +
+    `${ORGANISATION_COOKIE}=${encodeURIComponent(landingId)}; ` +
     "Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly";
 
   // An already-signed-in owner keeps the session they proved themselves with.
@@ -293,7 +359,7 @@ export async function POST(
 
   const { token: sessionToken } = await createSession(d1, {
     userId,
-    organisationId: invitation.organisation_id,
+    organisationId: landingId,
     request,
   });
   await recordLogin(d1, userId).catch(() => {});

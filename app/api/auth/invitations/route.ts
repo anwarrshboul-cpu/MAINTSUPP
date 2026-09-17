@@ -15,14 +15,16 @@ import {
   sendNotification,
   type SendResult,
 } from "../../../lib/notifications";
+import { findCompany } from "../../../lib/client-companies";
 import { can, canAssignRole, resolvePermissions } from "../../../lib/permissions";
 import { withArticle } from "../../../lib/roles";
 import { publicUrl } from "../../../lib/public-origin";
-import { scopedDb } from "../../../lib/tenant-db";
+import { roleInOrganisation } from "../../../lib/tenant-access";
+import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import {
   createInvitation,
   findOutstandingInvitation,
-  invitingRole,
+  invitationWorkspaceIds,
   normaliseEmail,
   normaliseRole,
   ROLE_LABEL,
@@ -71,7 +73,6 @@ export const dynamic = "force-dynamic";
  * administrator shares the link or presses Resend — never a silent one.
  */
 
-type OrganisationRow = { id?: string; name?: string; status?: string };
 type CountRow = { found?: number };
 
 const REFUSED = "You cannot invite people into that workspace.";
@@ -185,6 +186,16 @@ async function deliverInvitation(input: {
   }
 }
 
+type OrganisationRow = { id: string; name: string; clientCompanyId: string | null };
+
+function idList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim().slice(0, 100))
+    .slice(0, 50);
+}
+
 export async function POST(request: Request) {
   await ensureDatabase();
 
@@ -211,116 +222,250 @@ export async function POST(request: Request) {
   const role = normaliseRole(payload.role);
   if (!role) {
     return Response.json(
-      { error: "Choose a role: client, manager, admin or super_admin." },
+      { error: "Choose a role: owner, admin, manager or client." },
       { status: 400 },
     );
   }
-
-  const d1 = await getD1();
-
-  /*
-   * Falls back to the workspace the caller is LOOKING AT, so the common case
-   * ("invite this person to the workspace I am in") does not have to pass an
-   * id it might get wrong.
-   *
-   * This used to fall back to the session's own organisation, which is where
-   * the account signed in — not necessarily where it is standing. A Super Admin
-   * who had switched to another client and invited from the board's dialog
-   * (which sent no id) put the invitation in the wrong workspace. `scopedDb`
-   * resolves the selected workspace from the same session, filtered through
-   * the memberships, so the fallback can only ever be a workspace the caller
-   * belongs to.
-   */
-  const organisationId =
-    typeof payload.organisationId === "string" && payload.organisationId
-      ? payload.organisationId
-      : (await scopedDb(request).then((scope) => scope.orgId).catch(() => null)) ??
-        current.organisationId ??
-        current.user.organisationId;
-
-  if (!organisationId) {
-    return Response.json({ error: "Choose a workspace to invite into." }, { status: 400 });
-  }
-
-  const granting = await invitingRole(d1, current.user.id, organisationId);
-  if (!granting) {
-    // Identical whether the organisation does not exist, is archived, or simply
-    // is not theirs — otherwise this route answers "which tenants exist".
-    return Response.json({ error: REFUSED }, { status: 403 });
-  }
-  const subject = await resolvePermissions(await getDb(), organisationId, granting);
-  if (!can(subject, "users.invite")) {
-    return Response.json({ error: REFUSED }, { status: 403 });
-  }
-  if (!canAssignRole(granting, role)) {
+  /* Platform authority is never handed out by link — for anybody, so it is
+     refused before anything else is looked at. */
+  if (role === "super_admin") {
     return Response.json(
-      { error: `As ${withArticle(granting)} you cannot invite somebody as ${withArticle(role)}.` },
+      { error: "Platform Super Admins are not appointed by invitation.", denied: true },
       { status: 403 },
     );
   }
 
-  const organisationResult = await d1
-    .prepare("SELECT id, name, status FROM organisations WHERE id = ? LIMIT 1")
-    .bind(organisationId)
-    .all();
-  const [organisation] = (organisationResult.results ?? []) as OrganisationRow[];
-  if (!organisation || organisation.status !== "active") {
-    return Response.json({ error: REFUSED }, { status: 403 });
+  /*
+   * WHO IS ASKING, answered by the tenancy resolver for the session — the same
+   * answer every other route gets. Its `organisationIds` is the complete list
+   * of workspaces this person can reach, and nothing outside it is ever a
+   * valid target: an id that is not in it is refused with the same sentence as
+   * one that does not exist, so this route cannot be used to discover another
+   * customer's workspaces.
+   */
+  let scope: Awaited<ReturnType<typeof scopedDb>>;
+  try {
+    scope = await scopedDb(request);
+  } catch (error) {
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    throw error;
   }
+  const db = scope.db;
+  const d1 = await getD1();
+  const reachable = new Map<string, OrganisationRow>(
+    scope.activeOrganisations
+      .filter((item) => scope.organisationIds.includes(item.id))
+      .map((item) => [
+        item.id,
+        { id: item.id, name: item.name, clientCompanyId: item.clientCompanyId ?? null },
+      ]),
+  );
 
-  // Already in? Then an invitation is not the right tool, and sending one would
-  // create a link that grants nothing while looking as though it does.
-  const memberResult = await d1
-    .prepare(
-      `SELECT 1 AS found
-         FROM memberships m
-         JOIN users u ON u.id = m.user_id
-        WHERE m.organisation_id = ? AND lower(u.email) = ? AND m.status = 'active'
-        LIMIT 1`,
-    )
-    .bind(organisationId, email)
-    .all();
-  if (((memberResult.results ?? []) as CountRow[]).length) {
-    return Response.json(
-      { error: "That person is already a member of this workspace." },
-      { status: 409 },
+  const requestedCompany =
+    typeof payload.clientCompanyId === "string" ? payload.clientCompanyId.trim().slice(0, 100) : "";
+  const requestedWorkspaces = [
+    ...idList(payload.organisationIds),
+    ...(typeof payload.organisationId === "string" && payload.organisationId
+      ? [payload.organisationId]
+      : []),
+  ];
+
+  let clientCompanyId: string;
+  let landing: OrganisationRow;
+  /** The workspaces a workspace-role invitation grants; empty for an Owner. */
+  let targets: OrganisationRow[] = [];
+
+  if (role === "owner") {
+    /*
+     * AN OWNER is appointed to a COMPANY, by a Platform Super Admin only, and
+     * is given no workspace membership at all: ownership reaches every
+     * workspace of the company, including ones created later.
+     */
+    if (!scope.platformAdmin) {
+      return Response.json(
+        { error: "Only a Super Admin can appoint a company Owner.", denied: true },
+        { status: 403 },
+      );
+    }
+    const companyId =
+      requestedCompany ||
+      (requestedWorkspaces[0] ? reachable.get(requestedWorkspaces[0])?.clientCompanyId : null) ||
+      scope.clientCompanyId ||
+      "";
+    const company = companyId ? await findCompany(db, companyId) : null;
+    if (!company) return Response.json({ error: REFUSED }, { status: 403 });
+    const companyWorkspaces = [...reachable.values()].filter(
+      (item) => item.clientCompanyId === company.id,
     );
+    const landingWorkspace =
+      companyWorkspaces.find((item) => item.id === company.defaultOrganisationId) ??
+      companyWorkspaces[0];
+    if (!landingWorkspace) {
+      return Response.json(
+        { error: "Create a workspace for this company before inviting its Owner." },
+        { status: 409 },
+      );
+    }
+    clientCompanyId = company.id;
+    landing = landingWorkspace;
+
+    const alreadyOwner = await d1
+      .prepare(
+        `SELECT 1 AS found
+           FROM client_company_members m
+           JOIN users u ON u.id = m.user_id
+          WHERE m.client_company_id = ? AND lower(u.email) = ?
+            AND m.relationship = 'owner' AND m.status = 'active'
+          LIMIT 1`,
+      )
+      .bind(company.id, email)
+      .all();
+    if (((alreadyOwner.results ?? []) as CountRow[]).length) {
+      return Response.json(
+        { error: "That person is already an Owner of this company." },
+        { status: 409 },
+      );
+    }
+  } else {
+    /*
+     * A WORKSPACE ROLE is granted to named workspaces — one or several, all of
+     * ONE client company. The caller must be allowed to give this role in
+     * EVERY one of them: `users.invite` there, and the role inside their
+     * assignment table (`canAssignRole`) for the role they hold THERE. An
+     * Owner qualifies across their company; an Admin only in the workspaces
+     * they administer.
+     */
+    const ids = [...new Set(requestedWorkspaces.length ? requestedWorkspaces : [scope.orgId])];
+    const rows = ids.map((id) => reachable.get(id));
+    if (rows.some((row) => !row)) {
+      return Response.json({ error: REFUSED }, { status: 403 });
+    }
+    targets = rows as OrganisationRow[];
+    const companies = new Set(targets.map((row) => row.clientCompanyId ?? ""));
+    if (companies.size !== 1 || companies.has("")) {
+      return Response.json(
+        { error: "The workspaces in one invitation must all belong to the same client company." },
+        { status: 400 },
+      );
+    }
+    clientCompanyId = targets[0].clientCompanyId as string;
+    if (requestedCompany && requestedCompany !== clientCompanyId) {
+      return Response.json({ error: REFUSED }, { status: 403 });
+    }
+
+    for (const target of targets) {
+      const actingRole = roleInOrganisation(scope, target.id);
+      if (!actingRole) return Response.json({ error: REFUSED }, { status: 403 });
+      const subject = await resolvePermissions(db, target.id, actingRole);
+      if (!can(subject, "users.invite")) {
+        return Response.json({ error: REFUSED }, { status: 403 });
+      }
+      if (!canAssignRole(actingRole, role)) {
+        return Response.json(
+          {
+            error: `As ${withArticle(actingRole)} in ${target.name} you cannot invite somebody as ${withArticle(role)}.`,
+            denied: true,
+          },
+          { status: 403 },
+        );
+      }
+    }
+    landing = targets[0];
+
+    // Already in? Then an invitation is not the right tool for that workspace.
+    const memberResult = await d1
+      .prepare(
+        `SELECT m.organisation_id AS organisation_id
+           FROM memberships m
+           JOIN users u ON u.id = m.user_id
+          WHERE lower(u.email) = ? AND m.status = 'active'
+            AND m.role IN ('admin', 'manager', 'client')
+            AND m.organisation_id IN (${targets.map(() => "?").join(", ")})`,
+      )
+      .bind(email, ...targets.map((row) => row.id))
+      .all();
+    const alreadyIn = ((memberResult.results ?? []) as Array<{ organisation_id?: string }>)
+      .map((row) => reachable.get(row.organisation_id ?? "")?.name)
+      .filter(Boolean);
+    if (alreadyIn.length) {
+      return Response.json(
+        {
+          error: `That person is already a member of ${alreadyIn.join(", ")}. Change their workspace access instead.`,
+        },
+        { status: 409 },
+      );
+    }
+    const ownerResult = await d1
+      .prepare(
+        `SELECT 1 AS found
+           FROM client_company_members m
+           JOIN users u ON u.id = m.user_id
+          WHERE m.client_company_id = ? AND lower(u.email) = ?
+            AND m.relationship = 'owner' AND m.status = 'active'
+          LIMIT 1`,
+      )
+      .bind(clientCompanyId, email)
+      .all();
+    if (((ownerResult.results ?? []) as CountRow[]).length) {
+      return Response.json(
+        { error: "That person is an Owner of this company and already sees every workspace." },
+        { status: 409 },
+      );
+    }
   }
 
   /*
-   * ONE LIVE INVITATION, AND RESENDING IS ASKED FOR BY NAME.
+   * ONE LIVE INVITATION PER PERSON PER COMPANY, AND RESENDING IS ASKED FOR BY
+   * NAME.
    *
    * A second ordinary invite for somebody who already has a live one is almost
-   * always a double click or a second tab, and it used to mint a second link
-   * and — now that invitations are emailed — would send a second email. It is
-   * refused. `resend: true` is the explicit way to retire the outstanding link
-   * and send a new one, and it repeats the invitation as it was: a different
-   * role is a different invitation, so withdraw the first.
+   * always a double click or a second tab. It is refused. `resend: true` is the
+   * explicit way to retire the outstanding link and send a new one, and it
+   * repeats the invitation as it was: a different role or a different set of
+   * workspaces is a different invitation, so withdraw the first.
    */
+  const workspaceIds = role === "owner" ? null : targets.map((row) => row.id);
   const resend = payload.resend === true;
-  const outstanding = await findOutstandingInvitation(d1, organisationId, email);
+  const outstanding = await findOutstandingInvitation(d1, {
+    email,
+    clientCompanyId,
+    organisationIds: workspaceIds ?? [landing.id],
+  });
   if (outstanding && !resend) {
     return Response.json(
       {
-        error: `${email} already has a pending invitation to this workspace. Use Resend to send it again.`,
+        error: `${email} already has a pending invitation to this company. Use Resend to send it again.`,
         pendingInvitation: true,
       },
       { status: 409 },
     );
   }
-  if (outstanding && resend && outstanding.role !== role) {
-    return Response.json(
-      {
-        error:
-          "A resend repeats the invitation as it was. To offer a different role, withdraw this invitation and invite them again.",
-      },
-      { status: 409 },
-    );
+  if (outstanding && resend) {
+    const sameWorkspaces =
+      role === "owner" ||
+      JSON.stringify(
+        invitationWorkspaceIds({
+          workspace_ids: outstanding.workspace_ids,
+          organisation_id: outstanding.organisation_id,
+        }).sort(),
+      ) === JSON.stringify([...(workspaceIds ?? [])].sort());
+    if (outstanding.role !== role || !sameWorkspaces) {
+      return Response.json(
+        {
+          error:
+            "A resend repeats the invitation as it was. To offer a different role or different workspaces, withdraw this invitation and invite them again.",
+        },
+        { status: 409 },
+      );
+    }
   }
 
   const message = typeof payload.message === "string" ? payload.message : null;
   const invitation = await createInvitation(d1, {
-    organisationId,
+    organisationId: landing.id,
+    clientCompanyId,
+    workspaceIds,
     email,
     role,
     invitedBy: current.user.id,
@@ -329,6 +474,7 @@ export async function POST(request: Request) {
       typeof payload.expiryDays === "number" ? payload.expiryDays : undefined,
   });
   const { token, id, expiresAt } = invitation;
+  const company = await findCompany(db, clientCompanyId);
 
   /*
    * Deliberately records who was invited, to what, and until when — and NOT the
@@ -337,13 +483,13 @@ export async function POST(request: Request) {
    * opposite of what it is for.
    */
   await recordAudit({
-    organisationId,
+    organisationId: landing.id,
     actor: { userId: current.user.id, email: current.user.email },
     action: resend ? "user.invitation_resent" : "user.invited",
     entityType: "invitation",
     entityId: id,
     summary: `${resend ? "Resent the invitation to" : "Invited"} ${email} as ${role}.`,
-    detail: { email, role, expiresAt },
+    detail: { email, role, expiresAt, clientCompanyId, workspaceIds },
     request,
   });
 
@@ -357,10 +503,15 @@ export async function POST(request: Request) {
   const inviteUrl = publicUrl(request, `/invite/${token}`);
 
   const delivery = await deliverInvitation({
-    organisationId,
+    organisationId: landing.id,
     invitationId: id,
     email,
-    workspaceName: organisation.name ?? "your MAINTSUPP workspace",
+    workspaceName:
+      role === "owner"
+        ? (company?.name ?? landing.name)
+        : targets.length > 1
+          ? `${company?.name ?? landing.name} (${targets.length} workspaces)`
+          : landing.name,
     roleLabel: ROLE_LABEL[role],
     inviterName: current.user.displayName ?? null,
     inviteUrl,
@@ -381,8 +532,14 @@ export async function POST(request: Request) {
         id,
         email,
         role,
-        organisationId,
-        organisationName: organisation.name ?? null,
+        organisationId: landing.id,
+        organisationName: landing.name,
+        clientCompanyId,
+        companyName: company?.name ?? null,
+        workspaces: (role === "owner" ? [] : targets).map(({ id: workspaceId, name }) => ({
+          id: workspaceId,
+          name,
+        })),
         expiresAt,
       },
       inviteUrl,

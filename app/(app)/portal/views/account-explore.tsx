@@ -379,9 +379,11 @@ export function AccountInvitePanel({
    * the selected workspace), and `assignableRoles` is the same rule the
    * invitation route enforces — so Super Admin is never offered to an Admin,
    * rather than offered and then refused. `users.invite` decides whether the
-   * form is offered at all; the route refuses without it either way.
+   * form is offered at all; the route refuses without it either way. Owner is
+   * not offered: this form invites into THIS workspace, and an Owner is
+   * appointed to a whole client company from the client console.
    */
-  const roles = assignableRoles(snapshot.role);
+  const roles = assignableRoles(snapshot.role).filter((entry) => entry !== "owner");
   const effectiveRole = roles.find((entry) => entry === role) ?? roles[0] ?? "client";
   const canInvite = useCapability("users.invite");
 

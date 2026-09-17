@@ -295,9 +295,14 @@ test("a duplicate keeps the original's type, and a new client arrives with the t
   const mutations = codeOnly(await read("app/lib/board-mutations.ts"));
   assert.match(mutations, /jobTypeId: source\.jobTypeId,/, "a copy of a job is the same kind of work");
 
+  // Re-pointed: workspace creation moved into `createWorkspace`
+  // (app/lib/client-companies.ts), which both the switcher's route and the
+  // client-company console call.
   const context = codeOnly(await read("app/api/context/route.ts"));
-  assert.match(context, /await seedJobTypes\(d1, created\.id\);/);
-  assert.match(context, /seedBoardStructure, seedJobTypes/, "seeded from db/init, beside the board's own seeds");
+  assert.match(context, /await createWorkspace\(context\.db, \{/);
+  const creation = codeOnly(await read("app/lib/client-companies.ts"));
+  assert.match(creation, /await seedJobTypes\(d1, created\.id\);/);
+  assert.match(creation, /seedBoardStructure, seedJobTypes/, "seeded from db/init, beside the board's own seeds");
 });
 
 test("the import matches a Job type column to a type, and never invents one", async () => {

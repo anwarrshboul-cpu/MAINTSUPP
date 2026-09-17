@@ -39,7 +39,9 @@
  *
  * WHICH ROLES EXIST
  * -----------------
- * Four: `super_admin`, `admin`, `manager`, `client`, defined ONCE in `roles.ts`.
+ * Five roles a person can act with — `super_admin` (platform), `owner` (client
+ * company), `admin`, `manager`, `client` (workspace) — defined ONCE in
+ * `roles.ts`, which also explains the three levels.
  *
  * This paragraph used to say "exactly three", and warned that inventing a
  * `manager` here would create capability rows no actor could ever match. That
@@ -391,6 +393,31 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "settings.edit",
     "navigation.personalise",
   ],
+  /*
+   * `owner` holds everything an Admin holds, in every workspace of their own
+   * company. The company-level acts that make an Owner more than an Admin —
+   * seeing every company workspace, creating new ones, appointing Admins — are
+   * decided by company ownership in `tenant-access.ts` and
+   * `lib/client-companies.ts`, not by a capability, because a capability is a
+   * per-workspace switch and those acts are not about one workspace.
+   * `billing.manage` and `data.delete` stay closed by default, exactly as for
+   * an Admin; a Super Admin can open them per workspace.
+   */
+  owner: [
+    "board.view",
+    "board.edit",
+    "sites.edit",
+    "data.import",
+    "data.export",
+    "users.view",
+    "users.invite",
+    "users.edit",
+    "users.deactivate",
+    "teams.manage",
+    "audit.read",
+    "settings.edit",
+    "navigation.personalise",
+  ],
   manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],
   /*
    * `navigation.personalise` for clients too: arranging your OWN sidebar was
@@ -403,6 +430,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
 
 const DEFAULT_SETS: Record<WorkspaceRole, ReadonlySet<Capability>> = {
   super_admin: new Set(BUILT_IN_DEFAULTS.super_admin),
+  owner: new Set(BUILT_IN_DEFAULTS.owner),
   admin: new Set(BUILT_IN_DEFAULTS.admin),
   manager: new Set(BUILT_IN_DEFAULTS.manager),
   client: new Set(BUILT_IN_DEFAULTS.client),
@@ -423,7 +451,7 @@ export type CapabilityOverrides = Partial<Record<Capability, boolean>>;
 export type RoleOverrides = Record<WorkspaceRole, CapabilityOverrides>;
 
 export function emptyRoleOverrides(): RoleOverrides {
-  return { super_admin: {}, admin: {}, manager: {}, client: {} };
+  return { super_admin: {}, owner: {}, admin: {}, manager: {}, client: {} };
 }
 
 /**

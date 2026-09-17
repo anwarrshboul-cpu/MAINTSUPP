@@ -52,6 +52,12 @@ export type ScopedDatabase = {
    * `roleInOrganisation` rather than reusing it.
    */
   grants: TenantAccess["grants"];
+  /** The client company `orgId` belongs to. */
+  clientCompanyId: TenantAccess["clientCompanyId"];
+  /** A Platform Super Admin (`platform_admins`). Same value as `crossOrganisation`. */
+  platformAdmin: boolean;
+  /** Client companies this person owns. */
+  ownedCompanyIds: string[];
 };
 
 /**
@@ -84,6 +90,21 @@ export function isAnonymousAccess(error: unknown) {
 }
 
 /**
+ * Thrown when a SIGNED-IN person has no workspace access at all.
+ *
+ * Distinct from `AnonymousAccessError` on purpose: that one answers 401 and
+ * sends the browser to sign in, which for somebody who IS signed in would be
+ * a loop. This answers 403 with `noWorkspace: true` — "you are who you say,
+ * and there is nothing here for you yet".
+ */
+export class NoWorkspaceAccessError extends Error {
+  constructor() {
+    super("Your account has no workspace access yet. Ask your administrator to add you to a workspace.");
+    this.name = "NoWorkspaceAccessError";
+  }
+}
+
+/**
  * The answer an unauthenticated caller should get, or null if this is a real
  * failure that belongs in the caller's own error path.
  *
@@ -104,6 +125,12 @@ export function isAnonymousAccess(error: unknown) {
  * generic handler cannot tell these apart — it only ever sees a message.
  */
 export function anonymousRefusal(error: unknown): Response | null {
+  if (error instanceof NoWorkspaceAccessError) {
+    return Response.json(
+      { error: error.message, noWorkspace: true, denied: true },
+      { status: 403 },
+    );
+  }
   if (!isAnonymousAccess(error)) return null;
   return Response.json(
     { error: "Your session has ended. Sign in to continue.", signIn: true },
@@ -177,6 +204,24 @@ export async function scopedDb(
   if (access.anonymous && !options.allowAnonymous) {
     throw new AnonymousAccessError();
   }
+  /*
+   * A signed-in person with no access is refused like an anonymous caller —
+   * with a 403 rather than a 401, see `NoWorkspaceAccessError`. The two public
+   * surfaces that accept strangers (`allowAnonymous`) treat them exactly as
+   * they treat a stranger, which is what the resolved scope already is:
+   * no workspaces of their own and the public intake target.
+   */
+  if (access.noAccess && !options.allowAnonymous) {
+    throw new NoWorkspaceAccessError();
+  }
+  /*
+   * ...and on those public surfaces they must LOOK like a stranger too. The
+   * scope below would otherwise say `authenticated: true` with the public
+   * intake workspace as `orgId`, and a route that trusts `authenticated` (the
+   * file download does, to skip its job-link check) would read that workspace
+   * for somebody who belongs to none of it.
+   */
+  const strangerOnPublicRoute = access.noAccess && options.allowAnonymous === true;
 
   return {
     actor: access.actor,
@@ -189,9 +234,12 @@ export async function scopedDb(
     activeOrganisations: access.activeOrganisations,
     crossOrganisation: access.crossOrganisation,
     unaffiliated: access.unaffiliated,
-    authenticated: access.authenticated,
-    session: access.session,
+    authenticated: strangerOnPublicRoute ? false : access.authenticated,
+    session: strangerOnPublicRoute ? null : access.session,
     grants: access.grants,
+    clientCompanyId: access.clientCompanyId,
+    platformAdmin: access.platformAdmin,
+    ownedCompanyIds: access.ownedCompanyIds,
   };
 }
 

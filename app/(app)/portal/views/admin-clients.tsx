@@ -23,6 +23,12 @@
  * client switcher uses — which refuses an organisation the actor is not a member
  * of. Switching tenant therefore goes through the tenancy check rather than
  * around it.
+ *
+ * CLIENT COMPANIES sit above the workspace cards: onboarding a customer is
+ * create the company (with its first workspace) → invite its Owner → the Owner
+ * accepts and lands in their company. `CompaniesPanel` is that flow, over
+ * `/api/admin/companies` and `/api/auth/invitations`, and only a Platform
+ * Super Admin is served it.
  */
 
 import { useState } from "react";
@@ -32,14 +38,18 @@ import {
   AdminFlash,
   AdminLoading,
   AdminNotice,
+  adminWrite,
   relativeTime,
   useAdminResource,
 } from "./admin-shell";
+import { deliveryOf, IssuedLink, type Delivery } from "./admin-users";
 
 type ClientRow = {
   id: string;
   name: string;
   slug: string;
+  clientCompanyId?: string | null;
+  companyName?: string | null;
   planTier: string;
   status: string;
   primaryColour: string;
@@ -166,6 +176,8 @@ export function AdminClientsView({
             </div>
           </section>
 
+          <CompaniesPanel onChanged={reload} />
+
           {data.clients.length ? (
             <div className="admin-client-grid">
               {data.clients.map((client) => (
@@ -196,7 +208,11 @@ export function AdminClientsView({
                     </span>
                     <div>
                       <h2>{client.name}</h2>
-                      <small>{client.slug}</small>
+                      <small>
+                        {client.companyName && client.companyName !== client.name
+                          ? client.companyName
+                          : client.slug}
+                      </small>
                     </div>
                     <span className={`admin-plan admin-plan--${client.planTier}`}>
                       {client.planTier}
@@ -266,5 +282,281 @@ export function AdminClientsView({
         </>
       ) : null}
     </div>
+  );
+}
+
+type CompanySummary = {
+  id: string;
+  name: string;
+  defaultOrganisationId: string | null;
+  workspaces: Array<{ id: string; name: string }>;
+  owners: Array<{ userId: string; email: string; fullName: string | null; active: boolean }>;
+  pendingOwnerInvitations: Array<{ id: string; email: string; expiresAt: string }>;
+  canManageOwners: boolean;
+};
+
+type CompaniesPayload = {
+  companies: CompanySummary[];
+  actor: { platformAdmin: boolean; canCreateCompany: boolean };
+};
+
+/**
+ * Client companies, and onboarding a new one.
+ *
+ * Create the company with its first workspace, invite its Owner (the link is
+ * shown once, exactly as on the People screen — invitation emails are not
+ * switched on), and the Owner lands in their company on accepting. Adding a
+ * workspace and removing an Owner are here too. Every button is a request the
+ * server decides; a refusal comes back in its own words.
+ */
+function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }) {
+  const { data, denied, error, reload } =
+    useAdminResource<CompaniesPayload>("/api/admin/companies");
+  const [flash, setFlash] = useState<{ ok: boolean; message: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [issued, setIssued] = useState<{
+    email: string;
+    url: string;
+    kind: "invitation";
+    delivery: Delivery | null;
+  } | null>(null);
+  const [companyName, setCompanyName] = useState("");
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState<Record<string, string>>({});
+  const [newWorkspace, setNewWorkspace] = useState<Record<string, string>>({});
+
+  if (denied || !data?.actor.platformAdmin) return null;
+
+  async function refresh() {
+    await reload();
+    await onChanged();
+  }
+
+  async function companyAction(key: string, body: Record<string, unknown>, success: string) {
+    setBusy(key);
+    const result = await adminWrite("/api/admin/companies", "POST", body);
+    setBusy(null);
+    setFlash(result.ok ? { ok: true, message: success } : result);
+    if (result.ok) await refresh();
+    return result.ok;
+  }
+
+  async function inviteOwner(company: CompanySummary) {
+    const email = (ownerEmail[company.id] ?? "").trim();
+    if (!email) return;
+    setBusy(`owner-${company.id}`);
+    const result = await adminWrite("/api/auth/invitations", "POST", {
+      email,
+      role: "owner",
+      clientCompanyId: company.id,
+    });
+    setBusy(null);
+    const url = result.payload?.inviteUrl;
+    if (result.ok && typeof url === "string") {
+      const delivery = deliveryOf(result.payload);
+      setIssued({ email, url, kind: "invitation", delivery });
+      setFlash({
+        ok: true,
+        message: `${email} has been invited as Owner of ${company.name}. ${delivery?.message ?? ""}`.trim(),
+      });
+      setOwnerEmail((current) => ({ ...current, [company.id]: "" }));
+      await reload();
+      return;
+    }
+    setFlash(result);
+  }
+
+  return (
+    <section className="panel admin-panel">
+      <div className="panel-heading">
+        <div>
+          <span>Platform</span>
+          <h2>Client companies</h2>
+        </div>
+      </div>
+      <p className="admin-company-note admin-company-lede">
+        A client company holds one or more workspaces. Its Owners reach all of them,
+        including new ones; everybody else reaches only the workspaces they are given.
+      </p>
+
+      <AdminFlash flash={flash} onDismiss={() => setFlash(null)} />
+      {error ? (
+        <AdminNotice tone="error" icon="alert" title="Client companies could not be loaded">
+          {error}
+        </AdminNotice>
+      ) : null}
+      {issued ? <IssuedLink issued={issued} onDismiss={() => setIssued(null)} /> : null}
+
+      {data.actor.canCreateCompany ? (
+        <form
+          className="admin-company-add"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!companyName.trim()) return;
+            const ok = await companyAction(
+              "create-company",
+              {
+                action: "create_company",
+                name: companyName.trim(),
+                workspaceName: workspaceName.trim() || undefined,
+              },
+              `${companyName.trim()} was created with its first workspace. Invite its Owner next.`,
+            );
+            if (ok) {
+              setCompanyName("");
+              setWorkspaceName("");
+            }
+          }}
+        >
+          <label className="admin-field admin-field--grow">
+            <span>New client company</span>
+            <input
+              value={companyName}
+              maxLength={120}
+              placeholder="Company name"
+              onChange={(event) => setCompanyName(event.target.value)}
+            />
+          </label>
+          <label className="admin-field admin-field--grow">
+            <span>First workspace</span>
+            <input
+              value={workspaceName}
+              maxLength={120}
+              placeholder="Same as the company"
+              onChange={(event) => setWorkspaceName(event.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={busy === "create-company" || !companyName.trim()}
+          >
+            <Icon name="plus" size={16} />
+            {busy === "create-company" ? "Creating…" : "Create company"}
+          </button>
+        </form>
+      ) : null}
+
+      <div className="admin-company-grid">
+        {data.companies.map((company) => (
+          <article key={company.id} className="admin-company-card">
+            <h3>{company.name}</h3>
+            <dl>
+              <dt>Workspaces</dt>
+              <dd>
+                {company.workspaces.map((workspace) => (
+                  <span key={workspace.id} className="admin-chip">
+                    {workspace.name}
+                    {workspace.id === company.defaultOrganisationId ? " · default" : ""}
+                  </span>
+                ))}
+              </dd>
+              <dt>Owners</dt>
+              <dd>
+                {company.owners.length ? (
+                  company.owners.map((owner) => (
+                    <span key={owner.userId} className="admin-chip">
+                      {owner.fullName || owner.email}
+                      {company.canManageOwners ? (
+                        <button
+                          type="button"
+                          className="admin-chip__remove"
+                          aria-label={`Remove ${owner.email} as Owner of ${company.name}`}
+                          disabled={busy === `remove-${owner.userId}`}
+                          onClick={() => {
+                            if (!window.confirm(`Remove ${owner.email} as Owner of ${company.name}? They lose access to every workspace they reach only as its Owner.`)) return;
+                            void companyAction(
+                              `remove-${owner.userId}`,
+                              { action: "remove_owner", clientCompanyId: company.id, userId: owner.userId },
+                              `${owner.email} is no longer an Owner of ${company.name}.`,
+                            );
+                          }}
+                        >
+                          <Icon name="close" size={12} />
+                        </button>
+                      ) : null}
+                    </span>
+                  ))
+                ) : (
+                  <span className="admin-chip admin-chip--empty">No Owner yet</span>
+                )}
+              </dd>
+              {company.pendingOwnerInvitations.length ? (
+                <>
+                  <dt>Invited</dt>
+                  <dd>
+                    {company.pendingOwnerInvitations.map((invitation) => (
+                      <span key={invitation.id} className="admin-chip">
+                        {invitation.email} · expires {relativeTime(invitation.expiresAt).toLowerCase()}
+                      </span>
+                    ))}
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+            {company.canManageOwners ? (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void inviteOwner(company);
+                }}
+              >
+                <label className="admin-field admin-field--grow">
+                  <span>Invite an Owner</span>
+                  <input
+                    type="email"
+                    required
+                    value={ownerEmail[company.id] ?? ""}
+                    placeholder="owner@company.com"
+                    onChange={(event) =>
+                      setOwnerEmail((current) => ({ ...current, [company.id]: event.target.value }))
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={busy === `owner-${company.id}`}
+                >
+                  {busy === `owner-${company.id}` ? "Inviting…" : "Invite Owner"}
+                </button>
+              </form>
+            ) : null}
+            <form
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const name = (newWorkspace[company.id] ?? "").trim();
+                if (!name) return;
+                const ok = await companyAction(
+                  `workspace-${company.id}`,
+                  { action: "create_workspace", clientCompanyId: company.id, name },
+                  `${name} was added to ${company.name}.`,
+                );
+                if (ok) setNewWorkspace((current) => ({ ...current, [company.id]: "" }));
+              }}
+            >
+              <label className="admin-field admin-field--grow">
+                <span>Add a workspace</span>
+                <input
+                  value={newWorkspace[company.id] ?? ""}
+                  maxLength={120}
+                  placeholder="Branch or site name"
+                  onChange={(event) =>
+                    setNewWorkspace((current) => ({ ...current, [company.id]: event.target.value }))
+                  }
+                />
+              </label>
+              <button
+                type="submit"
+                className="secondary-button"
+                disabled={busy === `workspace-${company.id}`}
+              >
+                Add workspace
+              </button>
+            </form>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

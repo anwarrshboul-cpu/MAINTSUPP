@@ -34,7 +34,7 @@
 import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
 import { getD1 } from "../../../../../db";
-import { memberships, users } from "../../../../../db/schema";
+import { clientCompanyMembers, memberships, users } from "../../../../../db/schema";
 import { canManageRole, requireCapability } from "../../../../lib/permissions";
 import { withArticle } from "../../../../lib/roles";
 import {
@@ -71,9 +71,31 @@ export async function POST(request: Request) {
      * Resolved through the workspace, not by bare id. The membership join is
      * what stops an id belonging to another client's workspace from being
      * reset from here — it is not found rather than refused, because a 403
-     * would confirm the account exists.
+     * would confirm the account exists. An Owner of this workspace's company
+     * is on its roster without a membership, so they are found through the
+     * company instead (and then refused below Super Admin).
      */
-    const [target] = await context.db
+    const [ownerTarget] = context.targetClientCompanyId
+      ? await context.db
+          .select({
+            id: users.id,
+            email: users.email,
+            fullName: users.fullName,
+            active: users.active,
+          })
+          .from(clientCompanyMembers)
+          .innerJoin(users, eq(users.id, clientCompanyMembers.userId))
+          .where(
+            and(
+              eq(clientCompanyMembers.clientCompanyId, context.targetClientCompanyId),
+              eq(clientCompanyMembers.userId, userId),
+              eq(clientCompanyMembers.relationship, "owner"),
+              eq(clientCompanyMembers.status, "active"),
+            ),
+          )
+          .limit(1)
+      : [];
+    const [memberTarget] = ownerTarget ? [] : await context.db
       .select({
         id: users.id,
         email: users.email,
@@ -91,6 +113,7 @@ export async function POST(request: Request) {
         ),
       )
       .limit(1);
+    const target = ownerTarget ? { ...ownerTarget, role: "owner" } : memberTarget;
 
     if (!target) {
       return Response.json(

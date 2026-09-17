@@ -221,6 +221,14 @@ async function repairInvariants(d1: D1DatabaseLike) {
   await ensureCanonicalSiteLink(d1);
   await ensureDocumentVersionInvariant(d1);
   await repairOrphanedSectionBoards(d1);
+  /*
+   * A workspace created by a path that does not know about client companies —
+   * a seed, an import, or code deployed before companies existed — would be
+   * invisible to every Owner. This gives such a workspace a company of its own.
+   * Two statements, both filtered on `client_company_id IS NULL`, so on a
+   * healthy database they match nothing and cost two cheap reads.
+   */
+  await attachWorkspacesToCompanies(d1);
 }
 
 /** Every migration and seed stage, in the order they depend on each other. */
@@ -247,6 +255,12 @@ async function applyMigrations(d1: D1DatabaseLike) {
    * function, once the structure it references exists.
    */
   await ensureDemoWorkspaceOrganisation(d1);
+  /*
+   * Client companies and Platform Super Admins. Before the identity seed below,
+   * which writes `platform_admins`, and after every organisation the seeds
+   * create, so each gets a company of its own on a fresh database too.
+   */
+  await ensureClientCompanies(d1);
   await ensureTenantIdentities(d1);
 
   await ensureStageTwoFoundation(d1);
@@ -257,6 +271,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
   await ensureStageFourItems(d1);
   await ensureImportIdentity(d1);
   await ensureStageTwentyAccounts(d1);
+  /* After Stage 20, which creates `invitations`: `addColumns` treats a table
+     that does not exist yet as nothing to extend. */
+  await ensureInvitationScope(d1);
 
   /*
    * The Store Documentation board.
@@ -2064,12 +2081,20 @@ async function ensureStageOneFoundation(d1: D1DatabaseLike) {
         (id, user_id, organisation_id, role, status, accepted_at)
        SELECT 'membership-' || id, id, organisation_id,
          CASE lower(role)
-           WHEN 'super admin' THEN 'super_admin'
            WHEN 'admin' THEN 'admin'
+           WHEN 'manager' THEN 'manager'
            ELSE 'client'
          END,
          'active', CURRENT_TIMESTAMP
-       FROM users WHERE organisation_id IS NOT NULL`,
+       FROM users
+       -- Authority above a workspace is never read from the free-text label.
+       -- A "Super Admin" label used to become a super_admin membership here,
+       -- and the client-company migration turns those into Platform Super
+       -- Admins, so a label anybody with users.edit can type would have become
+       -- platform authority at the next replay. An Owner's access is the
+       -- client company, never a membership: one backfilled here would leave
+       -- them a Client of their landing workspace after ownership was removed.
+       WHERE organisation_id IS NOT NULL AND lower(role) NOT IN ('owner', 'super admin')`,
     )
     .run();
 
@@ -2394,6 +2419,140 @@ async function ensureDemoClientOrganisation(d1: D1DatabaseLike) {
  * Idempotent throughout, and it never touches the three pre-existing users or
  * their memberships.
  */
+/**
+ * CLIENT COMPANIES, COMPANY OWNERS AND PLATFORM SUPER ADMINS — additive.
+ *
+ * The product has three levels: the MAINTSUPP platform, the client company
+ * (the customer), and that company's workspaces (`organisations`). Before this
+ * stage there were only workspaces, and "super admin" was a membership row
+ * copied into every one of them.
+ *
+ * Everything here is additive and idempotent:
+ *
+ *   · three new tables, created only if missing;
+ *   · one nullable column on `organisations`;
+ *   · ONE COMPANY PER EXISTING WORKSPACE (`company-<organisation id>`, named
+ *     after the workspace). Nothing in the data says which existing workspaces
+ *     belong to the same customer, and merging two would hand one customer's
+ *     Owner the other's workspaces — so none are merged. Grouping is a
+ *     deliberate Platform Super Admin act, done later;
+ *   · every person holding an active `super_admin` membership becomes a
+ *     Platform Super Admin. Their membership rows are left untouched and no
+ *     longer grant anything; nobody loses access.
+ *
+ * Reversible in practice: dropping the three tables and the column returns the
+ * data to its previous shape, because nothing existing was rewritten.
+ */
+async function ensureClientCompanies(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS client_companies (
+         id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         slug TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'active',
+         default_organisation_id TEXT,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS client_companies_slug_idx ON client_companies(slug)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS client_company_members (
+         id TEXT PRIMARY KEY,
+         user_id TEXT NOT NULL REFERENCES users(id),
+         client_company_id TEXT NOT NULL REFERENCES client_companies(id),
+         relationship TEXT NOT NULL DEFAULT 'owner',
+         status TEXT NOT NULL DEFAULT 'active',
+         invited_by TEXT,
+         accepted_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS client_company_members_user_company_idx
+         ON client_company_members(user_id, client_company_id)`,
+    ),
+    d1.prepare(
+      `CREATE INDEX IF NOT EXISTS client_company_members_company_idx
+         ON client_company_members(client_company_id)`,
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS platform_admins (
+         user_id TEXT PRIMARY KEY REFERENCES users(id),
+         status TEXT NOT NULL DEFAULT 'active',
+         granted_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+  ]);
+
+  await addColumn(d1, "organisations", "client_company_id", "TEXT");
+  await d1
+    .prepare(
+      `CREATE INDEX IF NOT EXISTS organisations_client_company_idx
+         ON organisations(client_company_id)`,
+    )
+    .run();
+
+  await attachWorkspacesToCompanies(d1);
+
+  /* Platform authority moves from a role on a membership to the person. */
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
+       SELECT DISTINCT user_id, 'active', 'migration:super_admin_membership'
+         FROM memberships
+        WHERE role = 'super_admin' AND status = 'active'`,
+    )
+    .run();
+}
+
+/**
+ * Gives every workspace that has no client company a company of its own.
+ *
+ * One company per workspace, named after it, and designated as that company's
+ * default workspace. The UPDATE only points a workspace at a company that now
+ * exists, so a row the INSERT skipped can never leave a dangling reference.
+ */
+async function attachWorkspacesToCompanies(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO client_companies
+         (id, name, slug, status, default_organisation_id, created_by)
+       SELECT 'company-' || id, name, slug, 'active', id, 'migration:one-company-per-workspace'
+         FROM organisations
+        WHERE client_company_id IS NULL`,
+    )
+    .run();
+  await d1
+    .prepare(
+      `UPDATE organisations
+          SET client_company_id = 'company-' || id
+        WHERE client_company_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM client_companies c WHERE c.id = 'company-' || organisations.id
+          )`,
+    )
+    .run();
+}
+
+/**
+ * The two invitation columns client companies need. See `invitations` in
+ * `db/schema.ts`: both NULL on older invitations, which keep their meaning.
+ */
+async function ensureInvitationScope(d1: D1DatabaseLike) {
+  await addColumns(d1, "invitations", [
+    ["client_company_id", "TEXT"],
+    ["workspace_ids", "TEXT"],
+  ]);
+}
+
 async function ensureTenantIdentities(d1: D1DatabaseLike) {
   const organisationRows = await d1
     .prepare(
@@ -2457,17 +2616,28 @@ async function ensureTenantIdentities(d1: D1DatabaseLike) {
     }
   }
 
-  const everyOrganisation = organisationList
-    .filter((row): row is { id: string; slug?: string } => Boolean(row.id))
-    .map((row) => ({ organisationId: row.id, role: "super_admin" }));
-
+  /*
+   * THE TESTING SUPER ADMIN IS A PLATFORM ADMIN, NOT A MEMBER OF EVERY
+   * WORKSPACE. This used to grant a `super_admin` membership in every
+   * organisation. Platform authority now lives in `platform_admins`, so the
+   * identity gets no workspace rows at all — `resolveTenantAccess` gives a
+   * Platform Super Admin every workspace because of who they are.
+   */
   await upsertIdentity(
     "super-admin@test.maintsupp.com",
     "Super Admin (testing)",
     "Super Admin",
     primary.id,
-    everyOrganisation,
+    [],
   );
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
+       SELECT id, 'active', 'seed:testing-identity' FROM users
+        WHERE lower(email) = lower(?)`,
+    )
+    .bind("super-admin@test.maintsupp.com")
+    .run();
   await upsertIdentity(
     "admin@test.maintsupp.com",
     "Admin (testing)",
@@ -2483,33 +2653,12 @@ async function ensureTenantIdentities(d1: D1DatabaseLike) {
     [{ organisationId: primary.id, role: "client" }],
   );
 
-  // The existing superadmin@ account predates the role selector and is a member
-  // of the primary organisation only. Widen it to every organisation so the one
-  // real super admin on the database also sees everything.
-  const legacySuperAdmins = await d1
-    .prepare(
-      "SELECT user_id FROM memberships WHERE role = 'super_admin' AND status = 'active'",
-    )
-    .all();
-  for (const row of (legacySuperAdmins.results ?? []) as Array<{
-    user_id?: string;
-  }>) {
-    if (!row.user_id) continue;
-    for (const grant of everyOrganisation) {
-      await d1
-        .prepare(
-          `INSERT OR IGNORE INTO memberships
-             (id, user_id, organisation_id, role, status, accepted_at)
-           VALUES (?, ?, ?, 'super_admin', 'active', CURRENT_TIMESTAMP)`,
-        )
-        .bind(
-          `membership-${row.user_id}-${grant.organisationId}`,
-          row.user_id,
-          grant.organisationId,
-        )
-        .run();
-    }
-  }
+  /*
+   * The loop that stood here widened every existing super admin to a
+   * membership in every organisation. It is gone: `ensureClientCompanies`
+   * carries those people into `platform_admins` once, and platform authority
+   * no longer depends on a row per workspace.
+   */
 
   for (const organisation of organisationList) {
     if (!organisation.id || !organisation.slug) continue;

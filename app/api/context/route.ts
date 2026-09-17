@@ -1,17 +1,22 @@
 import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
-import { getD1 } from "../../../db";
-import { ensureDatabase, seedBoardStructure, seedJobTypes } from "../../../db/init";
-import { seedStoreDocumentationBoard } from "../../../db/seed-store-documentation";
+import { ensureDatabase } from "../../../db/init";
 import { CANONICAL_REGISTER, registerScopeFilter } from "../../lib/register-scope";
 import {
+  clientCompanies,
   maintenanceRequests,
   memberships,
-  optionSets,
-  optionValues,
   organisations,
+  platformAdmins,
   sites,
   users,
 } from "../../../db/schema";
+import { auditActor, recordAudit } from "../../lib/audit";
+import {
+  cleanName,
+  createClientCompany,
+  createWorkspace,
+  findCompany,
+} from "../../lib/client-companies";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenant-db";
 import {
   demoIdentityAllowed,
@@ -29,14 +34,6 @@ function clean(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-function toSlug(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 60);
-}
-
 function cookie(name: string, value: string) {
   return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly`;
 }
@@ -50,7 +47,7 @@ function cookie(name: string, value: string) {
  * organisation boundaries at all, which is why the guard is on the caller's
  * resolved `crossOrganisation` flag rather than on anything in the request.
  */
-async function tenantSummary(context: ScopedDatabase) {
+async function tenantSummary(context: ScopedDatabase, knownCompanyNames: Map<string, string>) {
   if (!context.crossOrganisation) return null;
   const ids = context.organisationIds;
   if (!ids.length) return null;
@@ -95,6 +92,10 @@ async function tenantSummary(context: ScopedDatabase) {
       id: organisation.id,
       name: organisation.name,
       slug: organisation.slug,
+      clientCompanyId: organisation.clientCompanyId ?? null,
+      companyName: organisation.clientCompanyId
+        ? (knownCompanyNames.get(organisation.clientCompanyId) ?? null)
+        : null,
       maintenanceRequests: jobs.get(organisation.id) ?? 0,
       sites: siteCounts.get(organisation.id) ?? 0,
     }));
@@ -106,9 +107,52 @@ async function contextPayload(request: Request) {
   // The organisations this actor may read — their memberships, or every active
   // organisation for a super admin. A client is handed exactly one entry, so
   // the sidebar's client switcher has nothing to switch to.
-  const visibleOrganisations = context.activeOrganisations
+  const visibleOrganisationRows = context.activeOrganisations
     .filter((organisation) => context.organisationIds.includes(organisation.id))
     .sort((left, right) => left.name.localeCompare(right.name));
+
+  /*
+   * The client companies those workspaces belong to — ONLY those. A person
+   * learns the name of a company exactly when they can already open one of its
+   * workspaces, so this cannot be used to discover another customer.
+   */
+  const companyIds = [
+    ...new Set(
+      visibleOrganisationRows
+        .map((organisation) => organisation.clientCompanyId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const companyRows = companyIds.length
+    ? await context.db
+        .select({ id: clientCompanies.id, name: clientCompanies.name })
+        .from(clientCompanies)
+        .where(inArray(clientCompanies.id, companyIds))
+    : [];
+  const companyNames = new Map(companyRows.map((row) => [row.id, row.name]));
+  const visibleOrganisations = visibleOrganisationRows.map((organisation) => ({
+    ...organisation,
+    companyName: organisation.clientCompanyId
+      ? (companyNames.get(organisation.clientCompanyId) ?? null)
+      : null,
+  }));
+  const companies = companyRows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      owned: context.ownedCompanyIds.includes(row.id),
+      workspaceCount: visibleOrganisationRows.filter(
+        (organisation) => organisation.clientCompanyId === row.id,
+      ).length,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const currentCompany = context.clientCompanyId
+    ? {
+        id: context.clientCompanyId,
+        name: companyNames.get(context.clientCompanyId) ?? null,
+        owned: context.ownedCompanyIds.includes(context.clientCompanyId),
+      }
+    : null;
 
   const [siteRows, priorities, engineers, labels, permissions] = await Promise.all([
     context.db
@@ -139,8 +183,15 @@ async function contextPayload(request: Request) {
 
   return {
     actor: context.actor,
-    currentOrganisation: context.organisation,
+    currentOrganisation: {
+      ...context.organisation,
+      companyName: currentCompany?.name ?? null,
+    },
     organisations: visibleOrganisations,
+    /* The client-company level: which companies the workspaces above belong
+       to, whether this person owns each, and which one they are standing in. */
+    companies,
+    currentCompany,
     /*
      * WHAT THIS ACTOR MAY DO, decided by the server.
      *
@@ -162,11 +213,14 @@ async function contextPayload(request: Request) {
       email: context.identityEmail,
       organisationIds: context.organisationIds,
       crossOrganisation: context.crossOrganisation,
+      /* The platform level, stated plainly rather than inferred from a role. */
+      platformAdmin: context.platformAdmin,
+      ownsCurrentCompany: currentCompany?.owned ?? false,
       // No membership matched; the actor is confined to the primary
       // organisation on the cookie role alone.
       unaffiliated: context.unaffiliated,
     },
-    tenantSummary: await tenantSummary(context),
+    tenantSummary: await tenantSummary(context, companyNames),
     /*
      * Whether this caller proved who they are.
      *
@@ -257,17 +311,25 @@ export async function POST(request: Request) {
               organisationIdentityEmail(context.organisation.slug, role),
               roleIdentityEmail(role),
             ];
-      const identityRows = await context.db
-        .select({ email: users.email })
-        .from(users)
-        .innerJoin(memberships, eq(memberships.userId, users.id))
-        .where(
-          and(
-            inArray(users.email, wanted),
-            eq(memberships.status, "active"),
-            eq(memberships.role, role),
-          ),
-        );
+      /* The testing Super Admin is a `platform_admins` row, not a membership. */
+      const identityRows =
+        role === "super_admin"
+          ? await context.db
+              .select({ email: users.email })
+              .from(users)
+              .innerJoin(platformAdmins, eq(platformAdmins.userId, users.id))
+              .where(and(inArray(users.email, wanted), eq(platformAdmins.status, "active")))
+          : await context.db
+              .select({ email: users.email })
+              .from(users)
+              .innerJoin(memberships, eq(memberships.userId, users.id))
+              .where(
+                and(
+                  inArray(users.email, wanted),
+                  eq(memberships.status, "active"),
+                  eq(memberships.role, role),
+                ),
+              );
       const available = new Set(identityRows.map((row) => row.email));
       const identity = wanted.find((email) => available.has(email)) ?? null;
 
@@ -323,124 +385,81 @@ export async function POST(request: Request) {
       return response;
     }
 
-    // Everything below manages client workspaces, which only a super admin may
-    // do — and `context.actor.role` is the role the database granted, not the
-    // one the role cookie claimed.
-    if (context.actor.role !== "super_admin") {
-      return Response.json(
-        { error: "Only a Super Admin can manage client workspaces." },
-        { status: 403 },
-      );
-    }
-
+    /*
+     * CREATING A WORKSPACE — a Platform Super Admin anywhere, an Owner inside
+     * their own client company, nobody else.
+     *
+     * This used to be Super Admin only, and it created a workspace with no
+     * parent. A workspace now always belongs to a client company:
+     *
+     *   · a Platform Super Admin may name any active company, or name none, in
+     *     which case a company of the same name is created for it — the
+     *     one-customer-one-workspace shape every existing workspace was given;
+     *   · an Owner may only create inside a company they own (the current
+     *     workspace's company when none is named). A company id they do not
+     *     own is refused with the same sentence as one that does not exist.
+     *
+     * The new workspace starts with NO members: its company's Owners and the
+     * Platform Super Admins see it at once, and everybody else only once they
+     * are given a membership. `createWorkspace` holds the rest.
+     */
     if (action === "create_organisation") {
-      const name = clean(payload.name, 120);
-      const requestedSlug = clean(payload.slug, 80);
-      const slug = toSlug(requestedSlug || name);
-      if (!name || !slug) {
-        return Response.json({ error: "A client name is required." }, { status: 400 });
+      const name = cleanName(payload.name);
+      if (!name) {
+        return Response.json({ error: "A workspace name is required." }, { status: 400 });
       }
-      const [existing] = await context.db
-        .select({ id: organisations.id })
-        .from(organisations)
-        .where(eq(organisations.slug, slug))
-        .limit(1);
-      if (existing) {
-        return Response.json({ error: "A client with that name already exists." }, { status: 409 });
-      }
-      const [created] = await context.db
-        .insert(organisations)
-        .values({
-          id: `org_${crypto.randomUUID().replaceAll("-", "")}`,
-          name,
-          slug,
-          logoUrl: null,
-          primaryColour: "#12B4A8",
-          planTier: "development",
-          status: "active",
-        })
-        .returning();
-      const sourceSets = await context.db
-        .select()
-        .from(optionSets)
-        .where(eq(optionSets.organisationId, context.orgId));
-      for (const sourceSet of sourceSets) {
-        const newSetId = `set_${crypto.randomUUID().replaceAll("-", "")}`;
-        await context.db.insert(optionSets).values({
-          id: newSetId,
-          organisationId: created.id,
-          key: sourceSet.key,
-          name: sourceSet.name,
-          description: sourceSet.description,
-        });
-        const sourceValues = await context.db
-          .select()
-          .from(optionValues)
-          .where(eq(optionValues.optionSetId, sourceSet.id));
-        for (const sourceValue of sourceValues) {
-          await context.db.insert(optionValues).values({
-            id: `value_${crypto.randomUUID().replaceAll("-", "")}`,
-            organisationId: created.id,
-            optionSetId: newSetId,
-            value: sourceValue.value,
-            label: sourceValue.label,
-            colourHex: sourceValue.colourHex,
-            textColour: sourceValue.textColour,
-            position: sourceValue.position,
-            isDone: sourceValue.isDone,
-            isDefault: sourceValue.isDefault,
-            active: sourceValue.active,
-            system: sourceValue.system,
-          });
+      let companyId = clean(payload.clientCompanyId, 100) || null;
+      if (context.platformAdmin) {
+        if (companyId) {
+          if (!(await findCompany(context.db, companyId))) {
+            return Response.json({ error: "That client company is unavailable." }, { status: 404 });
+          }
+        } else {
+          companyId = (
+            await createClientCompany(context.db, {
+              name,
+              createdBy: context.session?.user.id ?? null,
+            })
+          ).id;
+        }
+      } else {
+        companyId ||= context.clientCompanyId;
+        if (!companyId || !context.ownedCompanyIds.includes(companyId)) {
+          return Response.json(
+            {
+              error: "Only a Super Admin or the company's Owner can create workspaces.",
+              denied: true,
+            },
+            { status: 403 },
+          );
         }
       }
 
-      /*
-       * Stage 19 — a new client has to arrive with a board and with identities.
-       *
-       * Copying the option sets alone left the new organisation with no
-       * columns, no groups and nobody who could sign into it, so "create
-       * client" produced a workspace that rendered as an error. Both seeders are
-       * idempotent and organisation-scoped, and neither writes a single row of
-       * operational data: the new client is empty, which is the point.
-       */
-      const d1 = await getD1();
-      await seedBoardStructure(d1, created.id);
-      await seedStoreDocumentationBoard(d1, created.id);
-      /*
-       * And its three default job types — Reactive, Planned, Project — so the
-       * new client's pickers, Settings card and Reports KPIs have them from the
-       * first request. `ensureDatabase` seeds every active organisation, but it
-       * runs once per instance and this organisation did not exist when it
-       * ran. Idempotent on fixed ids, so the next boot's replay is a no-op.
-       */
-      await seedJobTypes(d1, created.id);
-      for (const role of ["admin", "client"] as const) {
-        const email = organisationIdentityEmail(created.slug, role);
-        const userId = `user-${email.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
-        await context.db
-          .insert(users)
-          .values({
-            id: userId,
-            organisationId: created.id,
-            email,
-            fullName: `${created.name} ${role}`,
-            role: role === "admin" ? "Admin" : "Client",
-            active: true,
-          })
-          .onConflictDoNothing();
-        await context.db
-          .insert(memberships)
-          .values({
-            id: `membership-${userId}-${created.id}`,
-            userId,
-            organisationId: created.id,
-            role,
-            status: "active",
-            acceptedAt: new Date().toISOString(),
-          })
-          .onConflictDoNothing();
-      }
+      /* The template is the company's own default workspace when the caller
+         can reach it, so a new branch copies its own company's vocabulary. */
+      const company = await findCompany(context.db, companyId);
+      const template =
+        company?.defaultOrganisationId &&
+        context.organisationIds.includes(company.defaultOrganisationId)
+          ? company.defaultOrganisationId
+          : context.orgId;
+      const created = await createWorkspace(context.db, {
+        name,
+        clientCompanyId: companyId,
+        templateOrganisationId: template,
+      });
+
+      await recordAudit({
+        db: context.db,
+        organisationId: created.id,
+        actor: auditActor(context),
+        action: "workspace.created",
+        entityType: "organisation",
+        entityId: created.id,
+        summary: `Created the workspace ${created.name}.`,
+        detail: { clientCompanyId: companyId },
+        request,
+      });
 
       const response = Response.json({ organisation: created }, { status: 201 });
       response.headers.append(

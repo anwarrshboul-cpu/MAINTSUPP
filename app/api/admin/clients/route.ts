@@ -32,12 +32,14 @@ import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
   auditEvents,
+  clientCompanies,
   maintenanceRequests,
   memberships,
   sites,
   units,
   users,
 } from "../../../../db/schema";
+import { MEMBERSHIP_ROLES } from "../../../lib/roles";
 import {
   ROLE_LABELS,
   effectiveCapabilities,
@@ -95,6 +97,9 @@ export async function GET(request: Request) {
           and(
             inArray(memberships.organisationId, scope),
             eq(memberships.status, "active"),
+            // Workspace members only: legacy `super_admin` rows are not
+            // members, and platform staff are not a client's users.
+            inArray(memberships.role, [...MEMBERSHIP_ROLES]),
             eq(users.active, true),
           ),
         )
@@ -183,6 +188,20 @@ export async function GET(request: Request) {
           .map((row) => [row.organisationId, row.at]),
       );
 
+    const companyIds = [
+      ...new Set(visible.map((item) => item.clientCompanyId).filter(Boolean)),
+    ] as string[];
+    const companyNames = new Map(
+      companyIds.length
+        ? (
+            await context.db
+              .select({ id: clientCompanies.id, name: clientCompanies.name })
+              .from(clientCompanies)
+              .where(inArray(clientCompanies.id, companyIds))
+          ).map((row) => [row.id, row.name])
+        : [],
+    );
+
     const jobs = numbers(jobRows);
     const openJobs = numbers(openJobRows);
     const siteCounts = numbers(siteRows);
@@ -199,6 +218,10 @@ export async function GET(request: Request) {
           id: organisation.id,
           name: organisation.name,
           slug: organisation.slug,
+          clientCompanyId: organisation.clientCompanyId ?? null,
+          companyName: organisation.clientCompanyId
+            ? (companyNames.get(organisation.clientCompanyId) ?? null)
+            : null,
           planTier: organisation.planTier,
           status: organisation.status,
           primaryColour: organisation.primaryColour,
@@ -226,7 +249,11 @@ export async function GET(request: Request) {
           isCurrent: organisation.id === context.orgId,
         };
       })
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort(
+        (left, right) =>
+          (left.companyName ?? left.name).localeCompare(right.companyName ?? right.name) ||
+          left.name.localeCompare(right.name),
+      );
 
     return Response.json({
       clients,

@@ -436,28 +436,14 @@ export async function ensureDemoWorkspaceOrganisation(d1: D1DatabaseLike): Promi
     .run();
 
   /*
-   * A membership for every super admin this database already has.
+   * No membership rows are written for super admins any more.
    *
-   * `resolveTenantAccess` gives a `super_admin` every active organisation
-   * regardless of membership, so the workspace switcher would already offer
-   * this tenant with no row here at all. The row is written anyway, because
-   * access that exists only as a consequence of a role is access nobody can
-   * see: a membership makes it legible in the data, and makes a future
-   * demo-only account a one-row change rather than a code change.
-   *
-   * It grants nothing that was not already granted, and it touches no other
-   * organisation's memberships.
+   * This used to copy every `super_admin` membership into this workspace so
+   * the access was "legible in the data". Platform Super Admins are now
+   * `platform_admins` rows, and `resolveTenantAccess` gives them every
+   * workspace — this one included — because of who they are, not because a
+   * row per workspace says so. Rows written before are left untouched.
    */
-  await d1
-    .prepare(
-      `INSERT OR IGNORE INTO memberships (id, user_id, organisation_id, role, status)
-       SELECT 'demo-member-' || m.user_id, m.user_id, ?, 'super_admin', 'active'
-         FROM memberships m
-        WHERE m.role = 'super_admin' AND m.status = 'active'
-        GROUP BY m.user_id`,
-    )
-    .bind(DEMO_WORKSPACE_ID)
-    .run();
 }
 
 /**
