@@ -1123,6 +1123,20 @@
   overflow-wrap: anywhere;
 }
 
+/* MAINTSUPP's own demonstration company: marked, never mistaken for a client. */
+.admin-chip--internal {
+  margin-left: 8px;
+  border-color: var(--amber-600);
+  background: var(--amber-100);
+  color: var(--amber-600);
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.admin-company-card--internal {
+  border-style: dashed;
+}
+
 .admin-company-card .admin-chip {
   max-width: 100%;
   white-space: normal;

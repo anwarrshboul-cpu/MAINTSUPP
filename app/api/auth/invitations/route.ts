@@ -16,6 +16,7 @@ import {
   type SendResult,
 } from "../../../lib/notifications";
 import { findCompany } from "../../../lib/client-companies";
+import { COMPANY_KIND } from "../../../lib/company-authority";
 import { can, canAssignRole, resolvePermissions } from "../../../lib/permissions";
 import { withArticle } from "../../../lib/roles";
 import { publicUrl } from "../../../lib/public-origin";
@@ -188,6 +189,23 @@ async function deliverInvitation(input: {
 
 type OrganisationRow = { id: string; name: string; clientCompanyId: string | null };
 
+/**
+ * MAINTSUPP's internal (demonstration) company has no customer people: its
+ * workspaces are the platform's, and a membership there would grant nothing
+ * (see `resolveTenantAccess`). Refused rather than issued, so nobody is sent a
+ * link that opens nothing.
+ */
+function internalCompanyRefusal() {
+  return Response.json(
+    {
+      error:
+        "This is MAINTSUPP's internal company. Its workspaces are for Platform Super Admins only, so nobody is invited into it.",
+      denied: true,
+    },
+    { status: 409 },
+  );
+}
+
 function idList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -295,6 +313,7 @@ export async function POST(request: Request) {
       "";
     const company = companyId ? await findCompany(db, companyId) : null;
     if (!company) return Response.json({ error: REFUSED }, { status: 403 });
+    if (company.kind === COMPANY_KIND.internal) return internalCompanyRefusal();
     const companyWorkspaces = [...reachable.values()].filter(
       (item) => item.clientCompanyId === company.id,
     );
@@ -353,6 +372,7 @@ export async function POST(request: Request) {
     if (requestedCompany && requestedCompany !== clientCompanyId) {
       return Response.json({ error: REFUSED }, { status: 403 });
     }
+    if (scope.internalCompanyIds.includes(clientCompanyId)) return internalCompanyRefusal();
 
     for (const target of targets) {
       const actingRole = roleInOrganisation(scope, target.id);

@@ -96,6 +96,11 @@ async function tenantSummary(context: ScopedDatabase, knownCompanyNames: Map<str
       companyName: organisation.clientCompanyId
         ? (knownCompanyNames.get(organisation.clientCompanyId) ?? null)
         : null,
+      /* MAINTSUPP's own demonstration company, not a customer. */
+      internal: Boolean(
+        organisation.clientCompanyId &&
+          context.internalCompanyIds.includes(organisation.clientCompanyId),
+      ),
       maintenanceRequests: jobs.get(organisation.id) ?? 0,
       sites: siteCounts.get(organisation.id) ?? 0,
     }));
@@ -140,6 +145,7 @@ async function contextPayload(request: Request) {
     .map((row) => ({
       id: row.id,
       name: row.name,
+      internal: context.internalCompanyIds.includes(row.id),
       owned: context.ownedCompanyIds.includes(row.id),
       workspaceCount: visibleOrganisationRows.filter(
         (organisation) => organisation.clientCompanyId === row.id,

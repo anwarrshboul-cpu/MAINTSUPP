@@ -28,12 +28,12 @@
  * real sign-in, because a real sign-in always answers first.
  */
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { memberships, organisations, users } from "../../db/schema";
+import { organisations } from "../../db/schema";
 import { getSession, type AuthenticatedSession } from "./auth-session";
-import { loadCompanyAuthority } from "./company-authority";
-import { normaliseMembershipRole, type MembershipRole } from "./roles";
+import { loadCompanyAuthority, loadInternalCompanyIds } from "./company-authority";
+import { loadGrants, type MembershipGrant } from "./tenant-grants";
 import {
   getWorkspaceActor,
   workspaceCookieValue,
@@ -123,23 +123,8 @@ export function organisationIdentityEmail(slug: string, role: WorkspaceRole) {
   return `${role.replaceAll("_", "-")}@${slug}.test.maintsupp.com`;
 }
 
-function parseSiteScope(value: string | null): string[] | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const ids = parsed.filter((item): item is string => typeof item === "string");
-    return ids.length ? ids : null;
-  } catch {
-    return null;
-  }
-}
-
-export type MembershipGrant = {
-  organisationId: string;
-  role: MembershipRole;
-  siteScope: string[] | null;
-};
+/* The membership reader and its types live in `tenant-grants.ts`. */
+export type { MembershipGrant } from "./tenant-grants";
 
 export type TenantAccess = {
   /**
@@ -176,6 +161,8 @@ export type TenantAccess = {
   platformAdmin: boolean;
   /** Active client companies this person owns. */
   ownedCompanyIds: string[];
+  /** Internal (demonstration) companies, which only the platform reaches. */
+  internalCompanyIds: string[];
   /** Site restriction carried by the membership for `orgId`, if any. */
   siteScope: string[] | null;
   /**
@@ -283,51 +270,6 @@ function resolveIdentityCandidates(
 }
 
 /**
- * Active WORKSPACE memberships held by any of `emails`, keyed back to the email.
- *
- * Only the three workspace roles survive. A legacy `super_admin` membership row
- * — the seeds used to copy one into every workspace — is skipped: platform
- * authority is read from `platform_admins` (see `loadCompanyAuthority`), and a
- * row per workspace no longer means anything.
- */
-async function loadGrants(db: Database, emails: string[]) {
-  if (!emails.length) return new Map<string, MembershipGrant[]>();
-  const rows = await db
-    .select({
-      email: sql<string>`lower(${users.email})`,
-      organisationId: memberships.organisationId,
-      role: memberships.role,
-      siteScope: memberships.siteScope,
-    })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
-    .where(
-      and(
-        eq(memberships.status, "active"),
-        eq(users.active, true),
-        sql`lower(${users.email}) in (${sql.join(
-          emails.map((email) => sql`${email}`),
-          sql`, `,
-        )})`,
-      ),
-    );
-
-  const grants = new Map<string, MembershipGrant[]>();
-  for (const row of rows) {
-    const role = normaliseMembershipRole(row.role);
-    if (!role) continue;
-    const list = grants.get(row.email) ?? [];
-    list.push({
-      organisationId: row.organisationId,
-      role,
-      siteScope: parseSiteScope(row.siteScope),
-    });
-    grants.set(row.email, list);
-  }
-  return grants;
-}
-
-/**
  * Resolves the actor, their role and the workspaces they may read.
  *
  * The single place tenancy is decided. `scopedDb` is a thin wrapper over this,
@@ -375,10 +317,27 @@ export async function resolveTenantAccess(
   const session = await getSession(request);
 
   const candidates = resolveIdentityCandidates(request, actor, session);
-  const [grantsByEmail, authorityByEmail] = await Promise.all([
+  const [grantsByEmail, authorityByEmail, internalCompanies] = await Promise.all([
     loadGrants(db, candidates),
     loadCompanyAuthority(db, candidates),
+    loadInternalCompanyIds(db),
   ]);
+  /*
+   * An INTERNAL company's workspaces (MAINTSUPP's demonstration company) are
+   * the platform's alone. A membership row there grants a customer account
+   * nothing, so it is dropped before anything below counts it.
+   */
+  const internalOrganisationIds = new Set(
+    activeOrganisations
+      .filter((item) => item.clientCompanyId && internalCompanies.has(item.clientCompanyId))
+      .map((item) => item.id),
+  );
+  for (const [email, list] of grantsByEmail) {
+    grantsByEmail.set(
+      email,
+      list.filter((grant) => !internalOrganisationIds.has(grant.organisationId)),
+    );
+  }
   const holdsAccess = (email: string) => {
     const authority = authorityByEmail.get(email);
     return Boolean(
@@ -425,10 +384,12 @@ export async function resolveTenantAccess(
   if (platformAdmin) {
     organisationIds = activeOrganisations.map((item) => item.id);
   } else {
-    const granted = new Set(grants.map((grant) => grant.organisationId));
-    organisationIds = activeOrganisations
-      .filter((item) => ownsWorkspace(item) || granted.has(item.id))
-      .map((item) => item.id);
+    organisationIds = reachableOrganisationIds({
+      activeOrganisations,
+      grants,
+      ownedCompanyIds,
+      internalCompanyIds: internalCompanies,
+    });
     if (!organisationIds.length) {
       /*
        * NO ACCESS ANYWHERE.
@@ -540,6 +501,7 @@ export async function resolveTenantAccess(
     crossOrganisation: platformAdmin,
     platformAdmin,
     ownedCompanyIds,
+    internalCompanyIds: [...internalCompanies].sort(),
     siteScope,
     unaffiliated,
     anonymous,
@@ -556,6 +518,7 @@ export async function resolveTenantAccess(
  * tests can load them. They are re-exported here, where callers look.
  */
 export { administersCompany, companyOfOrganisation, roleInOrganisation } from "./access-scope";
+import { reachableOrganisationIds } from "./access-scope";
 
 /** True when `organisationId` is one this access grant may read. */
 export function canReadOrganisation(

@@ -292,7 +292,8 @@ export const organisations = sqliteTable("organisations", {
  * `organisations.client_company_id` names this row, including ones created
  * after they became Owner; nobody below Owner inherits anything from it.
  * `default_organisation_id` is where an Owner lands when they have no valid
- * last-selected workspace.
+ * last-selected workspace. `kind` is `customer` or `internal` (MAINTSUPP's own
+ * demonstration company, reached by Platform Super Admins only).
  */
 export const clientCompanies = sqliteTable(
   "client_companies",
@@ -301,6 +302,7 @@ export const clientCompanies = sqliteTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     status: text("status").notNull().default("active"),
+    kind: text("kind").notNull().default("customer"),
     defaultOrganisationId: text("default_organisation_id"),
     createdBy: text("created_by"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

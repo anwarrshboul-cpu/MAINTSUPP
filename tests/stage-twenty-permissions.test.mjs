@@ -161,7 +161,11 @@ test("the role list in permissions.ts matches the one tenancy grants", async () 
   // Re-pointed: the resolver now keeps only membership roles from a
   // membership row (`normaliseMembershipRole`) — a legacy super_admin row is
   // not a grant — and still takes the vocabulary from roles.ts.
-  assert.match(access, /import \{ normaliseMembershipRole, type MembershipRole \} from "\.\/roles"/);
+  // …and since the membership reader moved to `tenant-grants.ts`, that is
+  // where the import lives; tenant-access.ts takes the reader from there.
+  const grants = await source("app/lib/tenant-grants.ts");
+  assert.match(grants, /import \{ normaliseMembershipRole, type MembershipRole \} from "\.\/roles"/);
+  assert.match(access, /from "\.\/tenant-grants"/);
   assert.match(permissions, /from "\.\/roles"/);
   assert.match(invitations, /from "\.\.\/\.\.\/\.\.\/lib\/roles"/);
   assert.match(actor, /export type \{ WorkspaceRole \} from "\.\/roles"/);
@@ -230,9 +234,14 @@ test("the shared admin resolver refuses an organisation the actor is not in", as
 });
 
 test("deactivation never deletes", async () => {
+  // Re-pointed: the write moved to `deactivateAccountGuarded`, which carries
+  // the last-Owner rule inside the UPDATE. Still a flag, never a DELETE.
   const text = await source("app/api/admin/users/route.ts");
-  assert.match(text, /set active = 0/);
-  assert.match(text, /status = 'deactivated'/);
+  assert.match(text, /await deactivateAccountGuarded\(await getD1\(\), target\.id\)/);
+  const guarded = await source("app/lib/company-owners.ts");
+  assert.match(guarded, /SET active = 0,/);
+  assert.match(guarded, /status = 'deactivated'/);
+  assert.doesNotMatch(guarded, /DELETE FROM users/i);
   assert.doesNotMatch(
     text,
     /\bdelete\(users\)|DELETE FROM users/i,
@@ -430,7 +439,7 @@ test("GUARD-RAIL: you cannot edit yourself out of your own workspace", async (t)
   );
   assert.ok(
     route.indexOf("You cannot deactivate your own account.") <
-      route.indexOf("set active = 0,"),
+      route.indexOf("await deactivateAccountGuarded("),
     "self-deactivation is refused before the write",
   );
 
@@ -511,7 +520,7 @@ test("GUARD-RAIL: the last super admin cannot be demoted or deactivated", async 
   assert.ok(
     route.indexOf("if (await isLastPlatformAdmin(context, target.id)) {") > 0 &&
       route.indexOf("if (await isLastPlatformAdmin(context, target.id)) {") <
-        route.indexOf("set active = 0,"),
+        route.indexOf("await deactivateAccountGuarded("),
     "the last-Super-Admin question is asked before the account is switched off",
   );
   assert.match(route, /guardRail: "last_super_admin"/);

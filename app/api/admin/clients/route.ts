@@ -222,6 +222,11 @@ export async function GET(request: Request) {
           companyName: organisation.clientCompanyId
             ? (companyNames.get(organisation.clientCompanyId) ?? null)
             : null,
+          /* MAINTSUPP's own demonstration company, shown as such. */
+          internal: Boolean(
+            organisation.clientCompanyId &&
+              context.internalCompanyIds.includes(organisation.clientCompanyId),
+          ),
           planTier: organisation.planTier,
           status: organisation.status,
           primaryColour: organisation.primaryColour,
@@ -251,6 +256,7 @@ export async function GET(request: Request) {
       })
       .sort(
         (left, right) =>
+          Number(left.internal) - Number(right.internal) ||
           (left.companyName ?? left.name).localeCompare(right.companyName ?? right.name) ||
           left.name.localeCompare(right.name),
       );

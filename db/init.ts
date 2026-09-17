@@ -12,6 +12,7 @@ import {
 } from "./demo-workspace";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
+import { backfillLegacyMemberships } from "./legacy-memberships";
 import { getD1 } from ".";
 import { defaultBoardOptions } from "./seed-options";
 import { maintenanceFormConfiguration, maintenanceOptions } from "./monday-board-spec";
@@ -274,6 +275,7 @@ async function applyMigrations(d1: D1DatabaseLike) {
   /* After Stage 20, which creates `invitations`: `addColumns` treats a table
      that does not exist yet as nothing to extend. */
   await ensureInvitationScope(d1);
+  await promoteLegacySuperAdmins(d1);
 
   /*
    * The Store Documentation board.
@@ -2075,28 +2077,7 @@ async function ensureStageOneFoundation(d1: D1DatabaseLike) {
   }
 
 
-  await d1
-    .prepare(
-      `INSERT OR IGNORE INTO memberships
-        (id, user_id, organisation_id, role, status, accepted_at)
-       SELECT 'membership-' || id, id, organisation_id,
-         CASE lower(role)
-           WHEN 'admin' THEN 'admin'
-           WHEN 'manager' THEN 'manager'
-           ELSE 'client'
-         END,
-         'active', CURRENT_TIMESTAMP
-       FROM users
-       -- Authority above a workspace is never read from the free-text label.
-       -- A "Super Admin" label used to become a super_admin membership here,
-       -- and the client-company migration turns those into Platform Super
-       -- Admins, so a label anybody with users.edit can type would have become
-       -- platform authority at the next replay. An Owner's access is the
-       -- client company, never a membership: one backfilled here would leave
-       -- them a Client of their landing workspace after ownership was removed.
-       WHERE organisation_id IS NOT NULL AND lower(role) NOT IN ('owner', 'super admin')`,
-    )
-    .run();
+  await backfillLegacyMemberships(d1);
 
   const setDefinitions = [
     ["maintenance_status", "Maintenance status", "Workflow states for maintenance tickets"],
@@ -2451,6 +2432,7 @@ async function ensureClientCompanies(d1: D1DatabaseLike) {
          name TEXT NOT NULL,
          slug TEXT NOT NULL,
          status TEXT NOT NULL DEFAULT 'active',
+         kind TEXT NOT NULL DEFAULT 'customer',
          default_organisation_id TEXT,
          created_by TEXT,
          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2492,6 +2474,9 @@ async function ensureClientCompanies(d1: D1DatabaseLike) {
     ),
   ]);
 
+  /* Added after the table first shipped, so an estate that already has it
+     gets the column too. Every existing company is a customer until marked. */
+  await addColumn(d1, "client_companies", "kind", "TEXT NOT NULL DEFAULT 'customer'");
   await addColumn(d1, "organisations", "client_company_id", "TEXT");
   await d1
     .prepare(
@@ -2502,13 +2487,63 @@ async function ensureClientCompanies(d1: D1DatabaseLike) {
 
   await attachWorkspacesToCompanies(d1);
 
-  /* Platform authority moves from a role on a membership to the person. */
+  /*
+   * MAINTSUPP's demonstration workspace belongs to an INTERNAL company: seen
+   * and managed by Platform Super Admins, never by a customer's people. Marked
+   * by the workspace's fixed id — the constant the demo seed itself uses — and
+   * never by its name, which anybody with the platform console can change.
+   */
+  await d1
+    .prepare(
+      `UPDATE client_companies
+          SET kind = 'internal'
+        WHERE kind <> 'internal'
+          AND id = (SELECT client_company_id FROM organisations WHERE id = ?)`,
+    )
+    .bind(DEMO_WORKSPACE_ID)
+    .run();
+
+}
+
+/**
+ * Platform authority moves from a role on a membership to the person.
+ *
+ * Promoted: an ACTIVE account, WITH A PASSWORD, holding an active legacy
+ * `super_admin` membership — exactly the people who could sign in and reach
+ * every workspace before this change. Not promoted: a deactivated account, and
+ * a passwordless one (the seeded testing identities, which exist on every
+ * database, can never sign in, and must not become platform authority by
+ * being carried over). Their legacy rows stay, inert.
+ *
+ * After Stage 20, which adds `users.password_hash`, so a fresh database runs
+ * this against a table that has the column.
+ */
+async function promoteLegacySuperAdmins(d1: D1DatabaseLike) {
   await d1
     .prepare(
       `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
-       SELECT DISTINCT user_id, 'active', 'migration:super_admin_membership'
-         FROM memberships
-        WHERE role = 'super_admin' AND status = 'active'`,
+       SELECT DISTINCT m.user_id, 'active', 'migration:super_admin_membership'
+         FROM memberships m
+         JOIN users u ON u.id = m.user_id
+        WHERE m.role = 'super_admin'
+          AND m.status = 'active'
+          AND u.active = 1
+          AND u.password_hash IS NOT NULL`,
+    )
+    .run();
+  /*
+   * A promotion an earlier build of this migration made for an account that
+   * cannot sign in is withdrawn — a status, never a DELETE. It is a no-op on a
+   * database that never ran that build; the development testing identity is
+   * seeded under its own `granted_by` and is not touched.
+   */
+  await d1
+    .prepare(
+      `UPDATE platform_admins
+          SET status = 'revoked', updated_at = CURRENT_TIMESTAMP
+        WHERE granted_by = 'migration:super_admin_membership'
+          AND status = 'active'
+          AND user_id IN (SELECT id FROM users WHERE password_hash IS NULL)`,
     )
     .run();
 }
@@ -2630,14 +2665,29 @@ async function ensureTenantIdentities(d1: D1DatabaseLike) {
     primary.id,
     [],
   );
-  await d1
-    .prepare(
-      `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
-       SELECT id, 'active', 'seed:testing-identity' FROM users
-        WHERE lower(email) = lower(?)`,
-    )
-    .bind("super-admin@test.maintsupp.com")
-    .run();
+  /* Platform authority for the testing identity exists only where testing
+     identities are usable at all — never on a production deployment, where
+     this account has no password and must stay without authority. */
+  if (process.env.NODE_ENV !== "production") {
+    await d1
+      .prepare(
+        `INSERT OR IGNORE INTO platform_admins (user_id, status, granted_by)
+         SELECT id, 'active', 'seed:testing-identity' FROM users
+          WHERE lower(email) = lower(?)`,
+      )
+      .bind("super-admin@test.maintsupp.com")
+      .run();
+    /* The row is this seed's own: claimed under the seed's name, so the
+       migration-promotion clean-up below never withdraws it. */
+    await d1
+      .prepare(
+        `UPDATE platform_admins
+            SET status = 'active', granted_by = 'seed:testing-identity'
+          WHERE user_id = (SELECT id FROM users WHERE lower(email) = lower(?))`,
+      )
+      .bind("super-admin@test.maintsupp.com")
+      .run();
+  }
   await upsertIdentity(
     "admin@test.maintsupp.com",
     "Admin (testing)",

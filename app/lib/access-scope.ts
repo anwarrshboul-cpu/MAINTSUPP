@@ -66,3 +66,28 @@ export function administersCompany(
 ) {
   return access.platformAdmin || access.ownedCompanyIds.includes(clientCompanyId);
 }
+
+/**
+ * The workspaces a person who is NOT a Platform Super Admin may read, in the
+ * order they are listed: every workspace of a customer company they own, and
+ * every workspace a membership names — never one of an INTERNAL company
+ * (MAINTSUPP's demonstration company), whatever a row says. Nothing is
+ * inherited downwards: a membership reaches its own workspace only.
+ */
+export function reachableOrganisationIds(input: {
+  activeOrganisations: Array<{ id: string; clientCompanyId?: string | null }>;
+  grants: Array<{ organisationId: string }>;
+  ownedCompanyIds: string[];
+  internalCompanyIds: string[] | ReadonlySet<string>;
+}): string[] {
+  const internal = new Set(input.internalCompanyIds);
+  const owned = new Set(input.ownedCompanyIds);
+  const granted = new Set(input.grants.map((grant) => grant.organisationId));
+  return input.activeOrganisations
+    .filter((item) => {
+      const company = item.clientCompanyId ?? null;
+      if (company && internal.has(company)) return false;
+      return (company !== null && owned.has(company)) || granted.has(item.id);
+    })
+    .map((item) => item.id);
+}

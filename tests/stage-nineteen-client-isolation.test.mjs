@@ -92,13 +92,18 @@ test("every data route takes its organisation from scopedDb and nowhere else", a
 
 test("tenancy is decided in one place, from memberships rather than cookies", async () => {
   const access = await source("app/lib/tenant-access.ts");
+  // The membership reader moved to its own module (`tenant-grants.ts`) so the
+  // migration tests can load it; the resolver still asks it, and only it.
+  const grants = await source("app/lib/tenant-grants.ts");
 
   // The organisation is only ever taken from a membership row — or, since the
   // three-level batch, from company ownership or platform authority, both read
   // from their own tables (`loadCompanyAuthority`), never from a cookie.
-  assert.match(access, /from\(memberships\)/);
-  assert.match(access, /innerJoin\(users/);
-  assert.match(access, /eq\(memberships\.status, "active"\)/);
+  assert.match(access, /import \{ loadGrants, type MembershipGrant \} from "\.\/tenant-grants";/);
+  assert.match(access, /loadGrants\(db, candidates\)/);
+  assert.match(grants, /from\(memberships\)/);
+  assert.match(grants, /innerJoin\(users/);
+  assert.match(grants, /eq\(memberships\.status, "active"\)/);
   assert.match(access, /loadCompanyAuthority\(db, candidates\)/);
 
   // The cookie is a request, not a grant: it is filtered through the allowed

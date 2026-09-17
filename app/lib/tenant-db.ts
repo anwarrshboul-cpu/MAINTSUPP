@@ -58,6 +58,8 @@ export type ScopedDatabase = {
   platformAdmin: boolean;
   /** Client companies this person owns. */
   ownedCompanyIds: string[];
+  /** Internal (demonstration) companies, which only the platform reaches. */
+  internalCompanyIds: string[];
 };
 
 /**
@@ -240,6 +242,7 @@ export async function scopedDb(
     clientCompanyId: access.clientCompanyId,
     platformAdmin: access.platformAdmin,
     ownedCompanyIds: access.ownedCompanyIds,
+    internalCompanyIds: access.internalCompanyIds,
   };
 }
 

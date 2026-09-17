@@ -50,6 +50,8 @@ type ClientRow = {
   slug: string;
   clientCompanyId?: string | null;
   companyName?: string | null;
+  /** MAINTSUPP's own demonstration company, not a customer. */
+  internal?: boolean;
   planTier: string;
   status: string;
   primaryColour: string;
@@ -213,6 +215,9 @@ export function AdminClientsView({
                           ? client.companyName
                           : client.slug}
                       </small>
+                      {client.internal ? (
+                        <span className="admin-chip admin-chip--internal">MAINTSUPP internal</span>
+                      ) : null}
                     </div>
                     <span className={`admin-plan admin-plan--${client.planTier}`}>
                       {client.planTier}
@@ -288,6 +293,8 @@ export function AdminClientsView({
 type CompanySummary = {
   id: string;
   name: string;
+  internal: boolean;
+  canRename: boolean;
   defaultOrganisationId: string | null;
   workspaces: Array<{ id: string; name: string }>;
   owners: Array<{ userId: string; email: string; fullName: string | null; active: boolean }>;
@@ -324,6 +331,7 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
   const [workspaceName, setWorkspaceName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState<Record<string, string>>({});
   const [newWorkspace, setNewWorkspace] = useState<Record<string, string>>({});
+  const [renaming, setRenaming] = useState<Record<string, string>>({});
 
   if (denied || !data?.actor.platformAdmin) return null;
 
@@ -439,8 +447,22 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
 
       <div className="admin-company-grid">
         {data.companies.map((company) => (
-          <article key={company.id} className="admin-company-card">
-            <h3>{company.name}</h3>
+          <article
+            key={company.id}
+            className={`admin-company-card${company.internal ? " admin-company-card--internal" : ""}`}
+          >
+            <h3>
+              {company.name}
+              {company.internal ? (
+                <span className="admin-chip admin-chip--internal">MAINTSUPP internal</span>
+              ) : null}
+            </h3>
+            {company.internal ? (
+              <p className="admin-company-note">
+                MAINTSUPP&rsquo;s own demonstration company. Only Platform Super Admins see and
+                manage it; it has no customer Owners or users.
+              </p>
+            ) : null}
             <dl>
               <dt>Workspaces</dt>
               <dd>
@@ -454,31 +476,48 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
               <dt>Owners</dt>
               <dd>
                 {company.owners.length ? (
-                  company.owners.map((owner) => (
-                    <span key={owner.userId} className="admin-chip">
-                      {owner.fullName || owner.email}
-                      {company.canManageOwners ? (
-                        <button
-                          type="button"
-                          className="admin-chip__remove"
-                          aria-label={`Remove ${owner.email} as Owner of ${company.name}`}
-                          disabled={busy === `remove-${owner.userId}`}
-                          onClick={() => {
-                            if (!window.confirm(`Remove ${owner.email} as Owner of ${company.name}? They lose access to every workspace they reach only as its Owner.`)) return;
-                            void companyAction(
-                              `remove-${owner.userId}`,
-                              { action: "remove_owner", clientCompanyId: company.id, userId: owner.userId },
-                              `${owner.email} is no longer an Owner of ${company.name}.`,
-                            );
-                          }}
-                        >
-                          <Icon name="close" size={12} />
-                        </button>
-                      ) : null}
-                    </span>
-                  ))
+                  company.owners.map((owner) => {
+                    /* The last active Owner cannot be removed: the server
+                       refuses it, and the control says why before anyone asks. */
+                    const sole =
+                      owner.active && company.owners.filter((other) => other.active).length === 1;
+                    return (
+                      <span key={owner.userId} className="admin-chip">
+                        {owner.fullName || owner.email}
+                        {company.canManageOwners ? (
+                          <button
+                            type="button"
+                            className="admin-chip__remove"
+                            aria-label={
+                              sole
+                                ? `${owner.email} is the only Owner of ${company.name} and cannot be removed until another Owner is appointed`
+                                : `Remove ${owner.email} as Owner of ${company.name}`
+                            }
+                            title={
+                              sole
+                                ? "The only Owner cannot be removed. Invite and appoint another Owner first."
+                                : undefined
+                            }
+                            disabled={sole || busy === `remove-${owner.userId}`}
+                            onClick={() => {
+                              if (!window.confirm(`Remove ${owner.email} as Owner of ${company.name}? They lose access to every workspace they reach only as its Owner.`)) return;
+                              void companyAction(
+                                `remove-${owner.userId}`,
+                                { action: "remove_owner", clientCompanyId: company.id, userId: owner.userId },
+                                `${owner.email} is no longer an Owner of ${company.name}.`,
+                              );
+                            }}
+                          >
+                            <Icon name="close" size={12} />
+                          </button>
+                        ) : null}
+                      </span>
+                    );
+                  })
                 ) : (
-                  <span className="admin-chip admin-chip--empty">No Owner yet</span>
+                  <span className="admin-chip admin-chip--empty">
+                    {company.internal ? "Platform only" : "No Owner yet"}
+                  </span>
                 )}
               </dd>
               {company.pendingOwnerInvitations.length ? (
@@ -494,6 +533,40 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
                 </>
               ) : null}
             </dl>
+            {company.canRename ? (
+              <form
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const name = (renaming[company.id] ?? "").trim();
+                  if (!name || name === company.name) return;
+                  const ok = await companyAction(
+                    `rename-${company.id}`,
+                    { action: "rename_company", clientCompanyId: company.id, name },
+                    `${company.name} is now called ${name}.`,
+                  );
+                  if (ok) setRenaming((current) => ({ ...current, [company.id]: "" }));
+                }}
+              >
+                <label className="admin-field admin-field--grow">
+                  <span>Company name</span>
+                  <input
+                    value={renaming[company.id] ?? ""}
+                    maxLength={120}
+                    placeholder={company.name}
+                    onChange={(event) =>
+                      setRenaming((current) => ({ ...current, [company.id]: event.target.value }))
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={busy === `rename-${company.id}` || !(renaming[company.id] ?? "").trim()}
+                >
+                  Rename
+                </button>
+              </form>
+            ) : null}
             {company.canManageOwners ? (
               <form
                 onSubmit={(event) => {

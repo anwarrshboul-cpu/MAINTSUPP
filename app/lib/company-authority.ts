@@ -11,7 +11,8 @@
  *
  * Both reads require the person's `users` row to be active and the grant's own
  * status to be active — the same two conditions a membership must meet — and an
- * Owner's company must itself be active. A deactivated account therefore loses
+ * Owner's company must itself be active and a CUSTOMER company: an internal
+ * (demonstration) company has no customer Owners, whatever a row says. A deactivated account therefore loses
  * platform and company authority on its next request, exactly as it loses its
  * memberships.
  */
@@ -64,6 +65,7 @@ export async function loadCompanyAuthority(
           eq(clientCompanyMembers.relationship, "owner"),
           eq(clientCompanyMembers.status, "active"),
           eq(clientCompanies.status, "active"),
+          eq(clientCompanies.kind, COMPANY_KIND.customer),
           eq(users.active, true),
           lowerEmails(emails),
         ),
@@ -91,6 +93,27 @@ export async function loadCompanyAuthority(
     bucket.ownedCompanies.sort((left, right) => left.id.localeCompare(right.id));
   }
   return result;
+}
+
+/**
+ * The two kinds of client company.
+ *
+ * `customer` is a real client. `internal` is MAINTSUPP's own — the
+ * demonstration workspace today — which only Platform Super Admins see and
+ * manage: no customer Owner, Admin, Manager or Client reaches its workspaces,
+ * even with a membership row. An explicit marker rather than a name, so a
+ * rename cannot change who sees it.
+ */
+export const COMPANY_KIND = { customer: "customer", internal: "internal" } as const;
+export type CompanyKind = (typeof COMPANY_KIND)[keyof typeof COMPANY_KIND];
+
+/** Internal companies, which only the platform reaches. One small read per request. */
+export async function loadInternalCompanyIds(db: Database): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: clientCompanies.id })
+    .from(clientCompanies)
+    .where(eq(clientCompanies.kind, COMPANY_KIND.internal));
+  return new Set(rows.map((row) => row.id));
 }
 
 /** The active Platform Super Admins among `userIds`. */

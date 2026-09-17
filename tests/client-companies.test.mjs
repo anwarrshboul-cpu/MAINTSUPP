@@ -20,7 +20,11 @@
  *      guessed grouping.
  *   4. Invitations that encode the relationship, the company and the
  *      workspaces — and nothing the invitee can choose.
- *   5. Live, against a running dev server (skipped when nothing answers): two
+ *   5. MAINTSUPP's demonstration company is INTERNAL and the platform's alone;
+ *      an Owner never holds billing or permanent delete; a company keeps its
+ *      last Owner; display labels grant nothing (the database-level proofs are
+ *      in `tests/access-migration-safety.test.mjs`).
+ *   6. Live, against a running dev server (skipped when nothing answers): two
  *      test companies, an Owner, an Admin, a Manager, a Client and a
  *      two-workspace person; a workspace created after they joined; every
  *      cross-company door tried and refused; landing per role. The fixtures
@@ -40,6 +44,8 @@ const OWNER = {
 };
 
 const ORGANISATION_COOKIE = "maintsupp_demo_organisation";
+const PRIMARY = "org_000000000000000000000001";
+const DEMO_WORKSPACE = "org_maintsupp_demo_workspace";
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const roles = await import("../app/lib/roles.ts");
 const permissions = await import("../app/lib/permissions.ts");
@@ -152,6 +158,70 @@ test("roleInOrganisation: platform everywhere, Owner across the company, members
   assert.equal(tenantAccess.companyOfOrganisation(owner, "A2"), "A");
 });
 
+test("reachable workspaces: an Owner's company, a member's grants, never an internal company", () => {
+  const activeOrganisations = [
+    { id: "A1", clientCompanyId: "A" },
+    { id: "A2", clientCompanyId: "A" },
+    { id: "B1", clientCompanyId: "B" },
+    { id: "DEMO", clientCompanyId: "INTERNAL" },
+  ];
+  const reach = (overrides) =>
+    tenantAccess.reachableOrganisationIds({
+      activeOrganisations,
+      grants: [],
+      ownedCompanyIds: [],
+      internalCompanyIds: ["INTERNAL"],
+      ...overrides,
+    });
+  assert.deepEqual(reach({ ownedCompanyIds: ["A"] }), ["A1", "A2"], "an Owner reaches the whole company");
+  assert.deepEqual(reach({ grants: [{ organisationId: "A1" }] }), ["A1"], "a member reaches exactly the grant");
+  assert.deepEqual(
+    reach({ grants: [{ organisationId: "DEMO" }], ownedCompanyIds: ["INTERNAL"] }),
+    [],
+    "an internal company is reached by nobody below the platform, whatever the rows say",
+  );
+  assert.deepEqual(reach({ grants: [{ organisationId: "GONE" }] }), [], "an archived workspace is not reachable");
+});
+
+test("an Owner never holds platform billing or permanent delete, whatever the matrix says", () => {
+  for (const capability of ["billing.manage", "data.delete"]) {
+    assert.equal(permissions.can({ role: "owner", capabilities: { [capability]: true } }, capability), false);
+    assert.equal(permissions.isForbiddenForRole("owner", capability), true);
+    assert.match(
+      String(permissions.roleCapabilityWriteRefusal("super_admin", "owner", capability, true)),
+      /The Owner role can never hold/,
+    );
+    assert.equal(permissions.can({ role: "super_admin", capabilities: {} }, capability), true);
+  }
+  // Everything an Admin holds by default, an Owner holds.
+  const owner = permissions.effectiveCapabilities("owner", {});
+  for (const capability of ["users.invite", "users.edit", "users.deactivate", "settings.edit", "navigation.personalise"]) {
+    assert.equal(owner[capability], true, capability);
+  }
+});
+
+test("the Team tab is a directory: labels are captions and accounts are changed in Users & access", async () => {
+  const route = await read("app/api/workspace/route.ts");
+  // The development seed names its two sample memberships; it reads no label.
+  assert.match(route, /const SAMPLE_MEMBERSHIPS = \[/);
+  assert.doesNotMatch(route, /member\.role\.toLowerCase\(\)/);
+  assert.doesNotMatch(route, /const label = member\.role/);
+  // A person with portal access keeps their switch and their sign-in email.
+  assert.match(route, /async function portalAccountRefusal\(/);
+  const update = route.slice(route.indexOf("export async function PATCH"), route.indexOf("export async function DELETE"));
+  assert.ok(
+    update.indexOf("await portalAccountRefusal(db, orgId, id, data)") > 0 &&
+      update.indexOf("await portalAccountRefusal(db, orgId, id, data)") < update.indexOf("await db.update(users).set({"),
+    "refused before the write",
+  );
+  const archive = route.slice(route.indexOf("export async function DELETE"));
+  assert.match(archive, /await portalAccountRefusal\(db, orgId, id, \{ active: false \}\)/);
+
+  const init = await read("db/init.ts");
+  assert.match(init, /await backfillLegacyMemberships\(d1\);/);
+  assert.doesNotMatch(init, /CASE lower\(role\)/, "no label-to-role mapping is left in the replay");
+});
+
 test("an invitation's workspaces are read from the row, oldest format included", () => {
   assert.deepEqual(
     tokens.invitationWorkspaceIds({ workspace_ids: '["A1","A2","A1"]', organisation_id: "A1" }),
@@ -181,11 +251,18 @@ test("the migration is additive: new tables, one new column each, no rewrite", a
   // One company per existing workspace — never a guessed grouping.
   assert.match(init, /SELECT 'company-' \|\| id, name, slug, 'active', id, 'migration:one-company-per-workspace'\s+FROM organisations\s+WHERE client_company_id IS NULL/);
   assert.match(init, /UPDATE organisations\s+SET client_company_id = 'company-' \|\| id\s+WHERE client_company_id IS NULL/);
-  // Platform authority carried over from the memberships that meant it.
+  // Platform authority carried over from the memberships that meant it — for
+  // active accounts that can sign in, after the stage that adds passwords.
+  const promote = init.slice(init.indexOf("async function promoteLegacySuperAdmins("));
   assert.match(
-    block,
-    /INSERT OR IGNORE INTO platform_admins[\s\S]{0,200}FROM memberships[\s\S]{0,80}role ?= ?'super_admin'[\s\S]{0,40}status ?= ?'active'/,
+    promote.slice(0, 1500),
+    /FROM memberships m\s+JOIN users u ON u\.id = m\.user_id\s+WHERE m\.role = 'super_admin'\s+AND m\.status = 'active'\s+AND u\.active = 1\s+AND u\.password_hash IS NOT NULL/,
   );
+  assert.ok(
+    init.indexOf("await ensureStageTwentyAccounts(d1);") < init.indexOf("await promoteLegacySuperAdmins(d1);"),
+    "promotion runs after Stage 20 adds password_hash",
+  );
+  assert.match(init, /if \(process\.env\.NODE_ENV !== "production"\) \{\s*await d1\s*\.prepare\(\s*`INSERT OR IGNORE INTO platform_admins/);
   // A workspace created outside the new path still gets a company, every boot.
   const repairs = init.slice(init.indexOf("async function repairInvariants("));
   assert.match(repairs.slice(0, 4000), /attachWorkspacesToCompanies\(d1\)/);
@@ -203,15 +280,17 @@ test("the migration is additive: new tables, one new column each, no rewrite", a
 
 test("nothing derives an Owner or a Super Admin membership from a label any more", async () => {
   const init = await read("db/init.ts");
-  assert.match(init, /WHERE organisation_id IS NOT NULL AND lower\(role\) NOT IN \('owner', 'super admin'\)/);
-  assert.doesNotMatch(init, /WHEN 'super admin' THEN 'super_admin'/, "a label never becomes a super_admin membership");
+  const legacy = await read("db/legacy-memberships.ts");
+  assert.match(legacy, /AND lower\(role\) NOT IN \('owner', 'super admin'\)/);
+  assert.doesNotMatch(init + legacy, /THEN 'super_admin'/, "a label never becomes a super_admin membership");
   assert.doesNotMatch(init, /everyOrganisation/, "the testing Super Admin is not widened into every workspace");
 
   const auth = await read("app/lib/auth-session.ts");
   assert.match(auth, /INSERT OR IGNORE INTO platform_admins \(user_id, status, granted_by\)\s+VALUES \(\?, 'active', 'owner-bootstrap'\)/);
 
   const workspace = await read("app/api/workspace/route.ts");
-  assert.match(workspace, /if \(label === "super admin" \|\| label === "owner"\) continue;/);
+  assert.match(workspace, /\{ email: "sample-admin@maintsupp\.local", role: "admin" \}/);
+  assert.match(workspace, /\{ email: "sample-client@maintsupp\.local", role: "client" \}/);
 
   const demo = await read("db/demo-workspace.ts");
   assert.doesNotMatch(demo, /'demo-member-' \|\| m\.user_id/);
@@ -220,7 +299,10 @@ test("nothing derives an Owner or a Super Admin membership from a label any more
 test("the resolver: platform sees everything, an Owner their companies, a member their grants", async () => {
   const source = await read("app/lib/tenant-access.ts");
   assert.match(source, /loadCompanyAuthority/);
-  assert.match(source, /normaliseMembershipRole/, "legacy super_admin rows are not grants");
+  assert.match(source, /loadInternalCompanyIds\(db\)/);
+  assert.match(source, /reachableOrganisationIds\(\{/);
+  const grants = await read("app/lib/tenant-grants.ts");
+  assert.match(grants, /const role = normaliseMembershipRole\(row\.role\);\s*if \(!role\) continue;/, "legacy super_admin rows are not grants");
   assert.match(source, /crossOrganisation: platformAdmin|crossOrganisation = platformAdmin|crossOrganisation:\s*platformAdmin/);
   assert.match(source, /noAccess/);
 
@@ -445,7 +527,10 @@ after(async () => {
   if (!live || !platformCookie || !fixtures) return;
   // Deactivate every account this run created, then archive both companies
   // (their workspaces and outstanding invitations with them). Nothing is
-  // deleted — the product does not delete people or workspaces.
+  // deleted — the product does not delete people or workspaces. A company's
+  // LAST Owner is refused deactivation by design; archiving the company takes
+  // away everything that account could reach, so it is left active but with
+  // no workspace at all (reported as such).
   for (const organisationId of [fixtures.A1, fixtures.A2, fixtures.B1]) {
     const roster = await api(platformCookie, `/api/admin/users?organisationId=${organisationId}`);
     for (const user of roster.body?.users ?? []) {
@@ -794,19 +879,210 @@ test("live: landing — last valid choice, company default, deterministic first;
   const fresh = await signIn(w.ownerA.email);
   assert.equal((await contextOf(fresh)).currentOrganisation.id, w.A2);
 
-  // Removing the Owner removes the company with it — and nothing is left over.
-  const ownerRow = (await api(await platform(), `/api/admin/users?organisationId=${w.B1}`)).body.users.find(
-    (user) => user.email === w.ownerB.email,
-  );
-  const removed = await post(await platform(), "/api/admin/companies", {
-    action: "remove_owner",
-    clientCompanyId: w.B,
-    userId: ownerRow.id,
+});
+
+test("live: a company keeps its last Owner — removal and deactivation are refused until a replacement exists", { skip: !live }, async (t) => {
+  const cookie = await platform();
+  if (!cookie) return t.skip("the seeded owner could not sign in");
+  const w = await world();
+  const rosterB = async () => (await api(cookie, `/api/admin/users?organisationId=${w.B1}`)).body.users;
+  const ownerB = (await rosterB()).find((user) => user.email === w.ownerB.email);
+  assert.equal(ownerB.soleOwner, true, "the roster says so before anyone tries");
+
+  const removeOwner = (userId) =>
+    post(cookie, "/api/admin/companies", { action: "remove_owner", clientCompanyId: w.B, userId });
+  const lonely = await removeOwner(ownerB.id);
+  assert.equal(lonely.status, 409, lonely.text);
+  assert.equal(lonely.body.guardRail, "last_owner");
+  assert.match(lonely.body.error, /only Owner/);
+  const switchedOff = await patch(cookie, "/api/admin/users", {
+    organisationId: w.B1,
+    userId: ownerB.id,
+    action: "deactivate",
   });
-  assert.equal(removed.status, 200, removed.text);
-  const orphan = await api(w.ownerB.cookie, "/api/context");
+  assert.equal(switchedOff.status, 409, switchedOff.text);
+  assert.equal(switchedOff.body.guardRail, "last_owner");
+  // The Team tab is not a way round it.
+  const viaTeam = await api(withCookie(cookie, ORGANISATION_COOKIE, w.B1), "/api/workspace", {
+    method: "DELETE",
+    body: JSON.stringify({ entity: "member", id: ownerB.id }),
+  });
+  assert.equal(viaTeam.status, 409, viaTeam.text);
+  assert.equal((await contextOf(w.ownerB.cookie)).currentOrganisation.id, w.B1, "Owner B still works");
+
+  // Appoint a replacement first…
+  const email = `companies-owner-b2-${STAMP}@companies.test.maintsupp.com`;
+  const invited = await post(cookie, "/api/auth/invitations", { email, role: "owner", clientCompanyId: w.B });
+  assert.equal(invited.status, 201, invited.text);
+  created.push(email);
+  const ownerB2 = await accept(tokenOf(invited.body.inviteUrl), "Owner B2");
+  const b2 = (await rosterB()).find((user) => user.email === email);
+  assert.equal(b2.companyOwner, true);
+
+  // …then two removals race. Exactly one wins; the company keeps an Owner.
+  const [first, second] = await Promise.all([removeOwner(ownerB.id), removeOwner(b2.id)]);
+  const statuses = [first.status, second.status].sort();
+  assert.deepEqual(statuses, [200, 409], `one removal goes through, one is refused (${statuses})`);
+  const survivors = (await rosterB()).filter((user) => user.companyOwner && user.active);
+  assert.equal(survivors.length, 1, "never zero Owners");
+
+  // Whoever lost ownership has no workspace at all — not a fallback one.
+  const removedCookie = first.status === 200 ? w.ownerB.cookie : ownerB2.cookie;
+  const orphan = await api(removedCookie, "/api/context");
   assert.equal(orphan.status, 403, "no workspace at all, not a fallback one");
   assert.equal(orphan.body.noWorkspace, true);
-  const orphanUsers = await api(w.ownerB.cookie, `/api/admin/users?organisationId=${w.B1}`);
-  assert.equal(orphanUsers.status, 403);
+  assert.equal((await api(removedCookie, `/api/admin/users?organisationId=${w.B1}`)).status, 403);
+  const keptCookie = first.status === 200 ? ownerB2.cookie : w.ownerB.cookie;
+  assert.equal((await contextOf(keptCookie)).currentOrganisation.id, w.B1);
+  assert.equal((await removeOwner(survivors[0].id)).status, 409, "and the survivor is now the last Owner");
+});
+
+test("live: MAINTSUPP's internal company is the platform's alone", { skip: !live }, async (t) => {
+  const cookie = await platform();
+  if (!cookie) return t.skip("the seeded owner could not sign in");
+  const w = await world();
+  const companies = (await api(cookie, "/api/admin/companies")).body.companies;
+  const internal = companies.find((company) => company.workspaces.some((workspace) => workspace.id === DEMO_WORKSPACE));
+  assert.ok(internal, "the platform sees the internal company");
+  assert.equal(internal.internal, true);
+  assert.equal(internal.kind, "internal");
+  assert.equal(internal.canManageOwners, false, "an internal company has no Owners to appoint");
+  assert.equal(companies.filter((company) => company.internal).length, 1);
+
+  const ownerInvite = await post(cookie, "/api/auth/invitations", {
+    email: `companies-internal-owner-${STAMP}@companies.test.maintsupp.com`,
+    role: "owner",
+    clientCompanyId: internal.id,
+  });
+  assert.equal(ownerInvite.status, 409, "nobody is appointed Owner of the internal company");
+  const memberInvite = await post(cookie, "/api/auth/invitations", {
+    email: `companies-internal-client-${STAMP}@companies.test.maintsupp.com`,
+    role: "client",
+    organisationIds: [DEMO_WORKSPACE],
+  });
+  assert.equal(memberInvite.status, 409, "nor invited into its workspaces");
+
+  // Customer accounts never see it.
+  for (const person of [w.ownerA, w.admin, w.manager, w.client]) {
+    const context = await contextOf(person.cookie);
+    assert.ok(!idsOf(context).includes(DEMO_WORKSPACE), `${person.email} does not see the demo workspace`);
+    assert.ok(!(context.companies ?? []).some((company) => company.id === internal.id));
+    const forced = await contextOf(withCookie(person.cookie, ORGANISATION_COOKIE, DEMO_WORKSPACE));
+    assert.notEqual(forced.currentOrganisation.id, DEMO_WORKSPACE);
+  }
+  const ownerView = await api(w.ownerA.cookie, "/api/admin/companies");
+  assert.ok(!ownerView.body.companies.some((company) => company.internal));
+  const ownerWrite = await post(w.ownerA.cookie, "/api/admin/companies", {
+    action: "create_workspace",
+    clientCompanyId: internal.id,
+    name: `RBAC stray ${STAMP}`,
+  });
+  assert.equal(ownerWrite.status, 403);
+
+  // And the platform's own views mark it.
+  const summary = (await contextOf(cookie)).tenantSummary.find((tenant) => tenant.id === DEMO_WORKSPACE);
+  assert.equal(summary.internal, true);
+  const console_ = (await api(cookie, "/api/admin/clients")).body.clients.find((client) => client.id === DEMO_WORKSPACE);
+  assert.equal(console_.internal, true);
+});
+
+test("live: an Owner renames their own company and nobody else's, and holds no billing or purge", { skip: !live }, async (t) => {
+  const cookie = await platform();
+  if (!cookie) return t.skip("the seeded owner could not sign in");
+  const w = await world();
+  const rename = (person, clientCompanyId, name) =>
+    post(person.cookie ?? person, "/api/admin/companies", { action: "rename_company", clientCompanyId, name });
+
+  const renamed = await rename(w.ownerA, w.A, `RBAC Test Company A renamed ${STAMP}`);
+  assert.equal(renamed.status, 200, renamed.text);
+  const listed = (await api(w.ownerA.cookie, "/api/admin/companies")).body.companies.find((company) => company.id === w.A);
+  assert.equal(listed.name, `RBAC Test Company A renamed ${STAMP}`);
+  assert.equal((await contextOf(w.admin.cookie)).currentCompany.name, listed.name, "everyone in the company sees it");
+  assert.equal((await rename(w.ownerA, w.B, "Hijacked")).status, 403, "not another company");
+  assert.equal((await rename(w.admin, w.A, "Hijacked")).status, 403, "not an Admin");
+  assert.equal((await rename(w.ownerA, w.A, "   ")).status, 400);
+
+  const view = await api(w.ownerA.cookie, `/api/admin/users?organisationId=${w.A1}`);
+  assert.equal(view.body.actor.capabilities["billing.manage"], false);
+  assert.equal(view.body.actor.capabilities["data.delete"], false);
+  const widen = await api(cookie, "/api/admin/roles", {
+    method: "PUT",
+    body: JSON.stringify({
+      organisationId: w.A1,
+      changes: [{ role: "owner", capability: "data.delete", allowed: true }],
+    }),
+  });
+  assert.equal(widen.status, 403);
+  assert.equal(widen.body.guardRail, "role_ceiling");
+  const purge = await api(withCookie(w.ownerA.cookie, ORGANISATION_COOKIE, w.A1), "/api/trash");
+  assert.equal(purge.status, 200);
+  assert.equal(purge.body.bin.canPurge, false, "the recycle bin offers an Owner no permanent delete");
+  assert.equal(purge.body.bin.canRestore, true, "but restoring is theirs");
+});
+
+test("live: display labels grant nothing, and the Team tab cannot switch an account off", { skip: !live }, async (t) => {
+  const cookie = await platform();
+  if (!cookie) return t.skip("the seeded owner could not sign in");
+  const w = await world();
+  const inPrimary = withCookie(cookie, ORGANISATION_COOKIE, PRIMARY);
+  const team = (body, method = "POST") =>
+    api(inPrimary, "/api/workspace", { method, body: JSON.stringify(body) });
+
+  // A label the Team tab offers, and one it does not.
+  const labelled = [];
+  for (const role of ["Admin", "Super Admin"]) {
+    const email = `companies-label-${role.replace(/\s+/g, "-").toLowerCase()}-${STAMP}@label.test.maintsupp.com`;
+    const made = await team({ entity: "member", data: { name: `Label ${role} ${STAMP}`, email, role, active: true } });
+    assert.equal(made.status, 200, made.text);
+    labelled.push({ id: made.body.id, email });
+  }
+  for (const role of ["Owner", "Manager"]) {
+    const refused = await team({
+      entity: "member",
+      data: { name: `Label ${role}`, email: `companies-label-x-${STAMP}@label.test.maintsupp.com`, role, active: true },
+    });
+    assert.equal(refused.status, 400, `"${role}" is not a Team label`);
+  }
+  try {
+    // The development seed runs on every workspace read; it used to turn the
+    // label into a membership right here.
+    assert.equal((await api(inPrimary, "/api/workspace")).status, 200);
+    const roster = (await api(cookie, `/api/admin/users?organisationId=${PRIMARY}`)).body.users;
+    for (const person of labelled) {
+      assert.ok(!roster.some((user) => user.email === person.email), `${person.email} has no membership`);
+    }
+    const companies = (await api(cookie, "/api/admin/companies")).body.companies;
+    assert.ok(!companies.some((company) => company.owners.some((owner) => labelled.some((p) => p.email === owner.email))));
+  } finally {
+    for (const person of labelled) {
+      const archived = await team({ entity: "member", id: person.id }, "DELETE");
+      assert.equal(archived.status, 200, "a plain directory entry is still the Team tab's to archive");
+    }
+  }
+
+  // Owner A's account row lives in A1's Team tab. The Admin there may edit the
+  // caption, never the switch or the sign-in email.
+  const ownerRow = (await api(cookie, `/api/admin/users?organisationId=${w.A1}`)).body.users.find(
+    (user) => user.email === w.ownerA.email,
+  );
+  const adminTeam = (body, method = "PATCH") =>
+    api(withCookie(w.admin.cookie, ORGANISATION_COOKIE, w.A1), "/api/workspace", { method, body: JSON.stringify(body) });
+  const off = await adminTeam({ entity: "member", id: ownerRow.id, data: { active: false } });
+  assert.equal(off.status, 409, off.text);
+  assert.equal(off.body.guardRail, "portal_account");
+  const moved = await adminTeam({ entity: "member", id: ownerRow.id, data: { email: `stolen-${STAMP}@example.com` } });
+  assert.equal(moved.status, 409, moved.text);
+  const archived = await adminTeam({ entity: "member", id: ownerRow.id }, "DELETE");
+  assert.equal(archived.status, 409, archived.text);
+  const caption = await adminTeam({ entity: "member", id: ownerRow.id, data: { role: "Admin" } });
+  assert.equal(caption.status, 200, "the caption is display only");
+  // …and the caption changed nothing about who they are.
+  const context = await contextOf(w.ownerA.cookie);
+  assert.equal(context.actor.role, "owner");
+  assert.equal(context.identity.email, w.ownerA.email);
+  const after = (await api(cookie, `/api/admin/users?organisationId=${w.A1}`)).body.users.find(
+    (user) => user.email === w.ownerA.email,
+  );
+  assert.equal(after.active, true);
+  assert.equal(after.role, "owner");
 });

@@ -41,7 +41,9 @@ import {
   platformAdmins,
   users,
 } from "../../../../db/schema";
+import { getD1 } from "../../../../db";
 import { platformAdminIds } from "../../../lib/company-authority";
+import { deactivateAccountGuarded } from "../../../lib/company-owners";
 import {
   CAPABILITY_CATALOGUE,
   ROLE_LABELS,
@@ -202,6 +204,8 @@ async function roster(context: AdminContext) {
         .orderBy(asc(users.fullName), asc(users.email))
     : [];
   const ownerIds = new Set(ownerRows.map((row) => row.id));
+  /* The last active Owner cannot be removed or switched off; say so up front. */
+  const activeOwnerCount = ownerRows.filter((row) => Boolean(row.active)).length;
   const rows = [
     ...ownerRows.map((row) => ({
       ...row,
@@ -316,6 +320,7 @@ async function roster(context: AdminContext) {
       isSelf: row.email.toLowerCase() === self,
       /* An Owner's access is the whole company, not memberships. */
       companyOwner: ownerIds.has(row.id),
+      soleOwner: ownerIds.has(row.id) && Boolean(row.active) && activeOwnerCount === 1,
       platformAdmin: superAdminIds.has(row.id),
       /*
        * Whether the caller may act on this person at all — `canManageRole`,
@@ -548,6 +553,8 @@ export async function GET(request: Request) {
             id: company.id,
             name: company.name,
             owned: context.ownedCompanyIds.includes(company.id),
+            /* MAINTSUPP's own demonstration company: nobody is invited into it. */
+            internal: context.internalCompanyIds.includes(company.id),
             defaultOrganisationId: company.defaultOrganisationId,
           }
         : null,
@@ -1219,6 +1226,16 @@ export async function PATCH(request: Request) {
       const workspaceId = trimmed(body.workspaceId, 100);
       const access = trimmed(body.access, 20);
       const workspace = context.activeOrganisations.find((item) => item.id === workspaceId);
+      if (workspace?.clientCompanyId && context.internalCompanyIds.includes(workspace.clientCompanyId)) {
+        return Response.json(
+          {
+            error:
+              "That is a MAINTSUPP internal workspace. Only Platform Super Admins work in it, so nobody is given access to it here.",
+            denied: true,
+          },
+          { status: 409 },
+        );
+      }
       if (
         !workspace ||
         !context.organisationIds.includes(workspace.id) ||
@@ -1400,16 +1417,24 @@ export async function PATCH(request: Request) {
           );
         }
 
-        // No DELETE. The row, its memberships and its audit history all stay;
-        // only the flag `tenant-access.ts` reads is cleared.
-        await context.db.run(sql`
-          update users
-             set active = 0,
-                 status = 'deactivated',
-                 deactivated_at = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP
-           where id = ${target.id}
-        `);
+        /*
+         * No DELETE. The row, its memberships and its audit history all stay;
+         * only the flag `tenant-access.ts` reads is cleared — and never on the
+         * last active Owner of a client company. That rule is inside the
+         * write (`deactivateAccountGuarded`), so two deactivations at the same
+         * moment cannot leave a company with no Owner.
+         */
+        const blocking = await deactivateAccountGuarded(await getD1(), target.id);
+        if (blocking.length) {
+          return Response.json(
+            {
+              error: `${target.email} is the only Owner of ${blocking.map((company) => company.name).join(", ")}. Appoint another Owner first, then deactivate this account.`,
+              denied: true,
+              guardRail: "last_owner",
+            },
+            { status: 409 },
+          );
+        }
       } else {
         await context.db.run(sql`
           update users

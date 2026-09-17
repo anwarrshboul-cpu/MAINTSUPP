@@ -599,7 +599,8 @@ test("the Users screen offers only assignable roles and no controls over people 
     /!canManageRole\(context\.actor\.role, targetRole\) &&\s*!\(isSelf && action === "profile"\)/,
     "PATCH refuses acting on a role the caller may not manage",
   );
-  assert.match(view, /\{can\("users\.invite"\) && assignable\.length > 0 \? \(/);
+  // Re-pointed: nobody is invited into MAINTSUPP's internal company either.
+  assert.match(view, /\{can\("users\.invite"\) && assignable\.length > 0 && !data\?\.company\?\.internal \? \(/);
   assert.match(route, /const administrable = await administrableOrganisations\(context\);/);
   assert.match(route, /organisations: administrable\.map\(/);
   assert.match(route, /invitedBy: row\.invitedBy \? \(inviters\.get\(row\.invitedBy\) \?\? null\) : null/);

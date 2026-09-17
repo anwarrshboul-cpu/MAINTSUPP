@@ -10,7 +10,9 @@
  *                                 workspace has nowhere for its Owner to land.
  *          create_workspace       Super Admin, or an Owner of that company.
  *          set_default_workspace  Super Admin, or an Owner of that company.
- *          remove_owner           Super Admin.
+ *          rename_company         Super Admin, or an Owner of that company.
+ *          remove_owner           Super Admin — never the company's last
+ *                                 active Owner (`removeOwnerGuarded`).
  *          archive_company        Super Admin. The company, its workspaces and
  *                                 its outstanding invitations, reversibly (a
  *                                 status, never a DELETE).
@@ -24,9 +26,15 @@
  * A company id the caller does not administer is refused with the same
  * sentence as one that does not exist, so this cannot be used to discover
  * another customer.
+ *
+ * INTERNAL COMPANIES (`kind = 'internal'`, MAINTSUPP's demonstration company)
+ * are the platform's alone: no Owner is appointed to one, and only a Platform
+ * Super Admin changes one. The authority loader already gives nobody else a
+ * path to them; the checks here say so plainly.
  */
 
 import { and, eq, isNull } from "drizzle-orm";
+import { getD1 } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import { DEMO_WORKSPACE_ID } from "../../../../db/demo-workspace";
 import {
@@ -43,7 +51,10 @@ import {
   createWorkspace,
   findCompany,
   listCompanies,
+  renameCompany,
 } from "../../../lib/client-companies";
+import { COMPANY_KIND } from "../../../lib/company-authority";
+import { removeOwnerGuarded } from "../../../lib/company-owners";
 import { administersCompany, PRIMARY_ORGANISATION_ID } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../../lib/tenant-db";
 
@@ -90,10 +101,13 @@ export async function GET(request: Request) {
     return Response.json({
       companies: companies.map((company) => ({
         ...company,
+        internal: company.kind === COMPANY_KIND.internal,
         owned: context.ownedCompanyIds.includes(company.id),
-        /* Owner appointments are the platform's business. */
+        /* Owner appointments are the platform's business, and an internal
+           company has no Owners to appoint. */
         pendingOwnerInvitations: context.platformAdmin ? company.pendingOwnerInvitations : [],
-        canManageOwners: context.platformAdmin,
+        canManageOwners: context.platformAdmin && company.kind !== COMPANY_KIND.internal,
+        canRename: context.platformAdmin || context.ownedCompanyIds.includes(company.id),
       })),
       actor: {
         email: context.identityEmail,
@@ -160,6 +174,7 @@ export async function POST(request: Request) {
     const clientCompanyId = text(body.clientCompanyId, 100);
     const company = clientCompanyId ? await findCompany(context.db, clientCompanyId) : null;
     if (!company || !administersCompany(context, company.id)) return refused(NOT_YOURS);
+    if (company.kind === COMPANY_KIND.internal && !context.platformAdmin) return refused(NOT_YOURS);
 
     if (action === "create_workspace") {
       const name = cleanName(body.name);
@@ -229,6 +244,25 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, defaultOrganisationId: workspace.id });
     }
 
+    if (action === "rename_company") {
+      const name = cleanName(body.name);
+      if (!name) return Response.json({ error: "A company name is required." }, { status: 400 });
+      if (name === company.name) return Response.json({ ok: true, name });
+      await renameCompany(context.db, company.id, name);
+      await recordAudit({
+        db: context.db,
+        organisationId: company.defaultOrganisationId,
+        actor,
+        action: "company.renamed",
+        entityType: "client_company",
+        entityId: company.id,
+        summary: `Renamed the client company ${company.name} to ${name}.`,
+        detail: { from: company.name, to: name },
+        request,
+      });
+      return Response.json({ ok: true, name });
+    }
+
     if (action === "remove_owner") {
       if (!context.platformAdmin) return refused("Only a Super Admin can remove a company Owner.");
       const userId = text(body.userId, 120);
@@ -248,16 +282,25 @@ export async function POST(request: Request) {
       if (!owner) {
         return Response.json({ error: "That person is not an Owner of this company." }, { status: 404 });
       }
-      /* A status, not a DELETE: who owned the company, and when, survives. */
-      await context.db
-        .update(clientCompanyMembers)
-        .set({ status: "removed", updatedAt: new Date().toISOString() })
-        .where(
-          and(
-            eq(clientCompanyMembers.clientCompanyId, company.id),
-            eq(clientCompanyMembers.userId, userId),
-          ),
+      /*
+       * A status, not a DELETE: who owned the company, and when, survives.
+       * Never the LAST active Owner — the guard is inside the write, so two
+       * removals at the same moment cannot leave the company with none.
+       */
+      const outcome = await removeOwnerGuarded(await getD1(), company.id, userId);
+      if (outcome === "not_owner") {
+        return Response.json({ error: "That person is not an Owner of this company." }, { status: 404 });
+      }
+      if (outcome === "last_owner") {
+        return Response.json(
+          {
+            error: `${owner.email} is the only Owner of ${company.name}. Invite and appoint another Owner first, then remove this one.`,
+            denied: true,
+            guardRail: "last_owner",
+          },
+          { status: 409 },
         );
+      }
       await recordAudit({
         db: context.db,
         organisationId: company.defaultOrganisationId,

@@ -73,6 +73,8 @@ type AdminUser = {
   manageable?: boolean;
   /** An Owner of this workspace's client company: every workspace of it. */
   companyOwner?: boolean;
+  /** The company's only active Owner, who cannot be removed or switched off. */
+  soleOwner?: boolean;
   platformAdmin?: boolean;
 };
 
@@ -305,7 +307,7 @@ export function AdminUsersView() {
             deleting them or their history.
           </p>
         </div>
-        {can("users.invite") && assignable.length > 0 ? (
+        {can("users.invite") && assignable.length > 0 && !data?.company?.internal ? (
           <button className="primary-button" type="button" onClick={() => setInviting(true)}>
             <Icon name="plus" size={17} />
             Invite person
@@ -522,6 +524,7 @@ export function AdminUsersView() {
                           <span className="admin-actions">
                             {canGrantAccess &&
                             data.company &&
+                            !data.company.internal &&
                             user.manageable !== false &&
                             !user.isSelf &&
                             !user.companyOwner &&
@@ -561,7 +564,15 @@ export function AdminUsersView() {
                               <button
                                 type="button"
                                 className="secondary-button admin-mini"
-                                disabled={busy === user.id}
+                                /* The only Owner of a company stays switched on
+                                   until another Owner is appointed; the server
+                                   refuses it either way. */
+                                title={
+                                  user.soleOwner && user.active
+                                    ? `The only Owner of ${data.company?.name ?? "this company"} cannot be deactivated. Appoint another Owner first.`
+                                    : undefined
+                                }
+                                disabled={busy === user.id || Boolean(user.soleOwner && user.active)}
                                 onClick={() =>
                                   void run(
                                     {
@@ -597,11 +608,19 @@ export function AdminUsersView() {
 
           {issued ? <IssuedLink issued={issued} onDismiss={() => setIssued(null)} /> : null}
 
+          {data.company?.internal ? (
+            <AdminNotice tone="empty" icon="shield" title="MAINTSUPP internal workspace">
+              This workspace belongs to MAINTSUPP&rsquo;s own demonstration company. Only Platform
+              Super Admins work in it, so nobody is invited or given access here.
+            </AdminNotice>
+          ) : null}
+
           {data.company && (data.actor.platformAdmin || data.company.owned) ? (
             <CompanyWorkspacesPanel
               company={data.company}
               workspaces={companyWorkspaces}
               canAdd
+              canRename
               onFlash={setFlash}
               onAdded={reload}
             />

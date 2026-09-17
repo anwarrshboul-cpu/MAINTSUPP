@@ -259,7 +259,8 @@ test("the Stage 19 tenancy rules are untouched", async () => {
   // (`platform_admins`), which no membership row can grant.
   assert.match(text, /const platformAdmin = authority\?\.platformAdmin \?\? false;/);
   assert.match(text, /crossOrganisation: platformAdmin/);
-  assert.match(text, /eq\(memberships\.status, "active"\)/);
+  // The membership reader now lives in `tenant-grants.ts`.
+  assert.match(await source("app/lib/tenant-grants.ts"), /eq\(memberships\.status, "active"\)/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -397,7 +398,7 @@ test("only an admin may invite, and never above their own role", async () => {
   // label on users.role. Re-pointed: the inviter's authority is read by the
   // tenancy resolver, which the route asks; neither file reads users.role.
   const helpers = await source("app/api/auth/invitations/invitation-tokens.ts");
-  const resolver = await source("app/lib/tenant-access.ts");
+  const resolver = await source("app/lib/tenant-grants.ts");
   assert.match(resolver, /from\(memberships\)/);
   assert.doesNotMatch(helpers, /FROM users\s+WHERE[\s\S]{0,80}role/);
   assert.doesNotMatch(create, /FROM users\s+WHERE[\s\S]{0,80}role/);

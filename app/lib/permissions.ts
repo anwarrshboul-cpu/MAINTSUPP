@@ -313,12 +313,19 @@ export function isReservedCapability(capability: Capability) {
  * says a Manager must not have them — so `can()` refuses them whatever a row
  * says, and the matrix refuses to store them.
  *
+ * The Owner decision the same way: an Owner is the highest authority INSIDE
+ * one client company, and platform billing (`billing.manage`) and permanent
+ * deletion (`data.delete`) stay the Platform Super Admin's. The Owner's reach
+ * over the rest of the platform (other companies, All clients, roles, the
+ * global sidebar) is already closed by the reservations and by scope.
+ *
  * `client` has no ceiling beyond the reservations: the product has always let
  * a Super Admin widen a client per workspace (the Stage 20 tests do exactly
  * that with `users.view`), and nothing in the decision withdrew it. A client
  * still cannot assign any role — that is `canAssignRole`'s table.
  */
 const ROLE_CEILINGS: Partial<Record<WorkspaceRole, ReadonlySet<Capability>>> = {
+  owner: new Set<Capability>(["billing.manage", "data.delete"]),
   manager: new Set<Capability>([
     "users.view",
     "users.invite",

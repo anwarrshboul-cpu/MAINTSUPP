@@ -367,6 +367,8 @@ type RuntimeWorkspaceContext = {
     id: string;
     name: string;
     slug: string;
+    /** MAINTSUPP's own demonstration company, not a customer. */
+    internal?: boolean;
     maintenanceRequests: number;
     sites: number;
   }> | null;
@@ -2982,6 +2984,7 @@ export default function PortalApp({
                   {tenant.maintenanceRequests === 0 && tenant.sites === 0
                     ? "No data yet"
                     : `${tenant.maintenanceRequests} jobs · ${tenant.sites} sites`}
+                  {tenant.internal ? " · MAINTSUPP internal" : ""}
                 </span>
               </button>
             ))}

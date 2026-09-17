@@ -230,10 +230,11 @@ test("a member's role is checked against the roles the Team tab can express", as
   assert.match(route, /function memberRoleRefusal\(/, "one guard");
 
   /*
-   * Both verbs. The create is the half that matters — a new member has no
-   * membership, so `seedWorkspaceIfEmpty` derives one from this label; an edit
-   * cannot reach that path because the insert leaves an existing membership
-   * alone. Guarding only the edit would close the harmless half.
+   * Both verbs. The create was the half that mattered — a new member had no
+   * membership, and `seedWorkspaceIfEmpty` used to derive one from this label.
+   * Since the three-level batch no label is ever read as access (see
+   * `db/legacy-memberships.ts` and `tests/access-migration-safety.test.mjs`),
+   * so this list is now about a legible directory, not about authority.
    */
   const create = route.slice(route.indexOf("export async function POST"), route.indexOf("export async function PATCH"));
   assert.match(create, /memberRoleRefusal\(data\)/, "the create must refuse an unknown role");

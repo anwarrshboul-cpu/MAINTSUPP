@@ -220,6 +220,8 @@ export type CompanySummary = {
   id: string;
   name: string;
   status: string;
+  /** `customer`, or `internal` for MAINTSUPP's own demonstration company. */
+  kind: string;
   defaultOrganisationId: string | null;
   workspaces: Array<{ id: string; name: string; status: string }>;
   owners: Array<{ userId: string; email: string; fullName: string | null; active: boolean }>;
@@ -244,7 +246,8 @@ export async function listCompanies(
         ? and(inArray(clientCompanies.id, companyIds), eq(clientCompanies.status, "active"))
         : eq(clientCompanies.status, "active"),
     )
-    .orderBy(asc(clientCompanies.name));
+    // Customers first, then MAINTSUPP's internal companies; by name within each.
+    .orderBy(asc(clientCompanies.kind), asc(clientCompanies.name));
   const ids = companyRows.map((row) => row.id);
   if (!ids.length) return [];
 
@@ -300,6 +303,7 @@ export async function listCompanies(
     id: company.id,
     name: company.name,
     status: company.status,
+    kind: company.kind,
     defaultOrganisationId: company.defaultOrganisationId,
     workspaces: workspaceRows
       .filter((row) => row.clientCompanyId === company.id)
@@ -316,6 +320,17 @@ export async function listCompanies(
       .filter((row) => row.clientCompanyId === company.id && Date.parse(row.expiresAt) > now)
       .map(({ id, email, expiresAt }) => ({ id, email, expiresAt })),
   }));
+}
+
+/**
+ * A company's display name, changed. The slug is left as it was: nothing
+ * routes on it, and a stable slug keeps any link that mentions it working.
+ */
+export async function renameCompany(db: Database, clientCompanyId: string, name: string) {
+  await db
+    .update(clientCompanies)
+    .set({ name, updatedAt: new Date().toISOString() })
+    .where(eq(clientCompanies.id, clientCompanyId));
 }
 
 /** One active company, or null. */

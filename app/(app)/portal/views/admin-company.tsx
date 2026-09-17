@@ -39,6 +39,8 @@ export type CompanyRef = {
   id: string;
   name: string;
   owned: boolean;
+  /** MAINTSUPP's own demonstration company. */
+  internal?: boolean;
   defaultOrganisationId?: string | null;
 } | null;
 
@@ -246,17 +248,22 @@ export function CompanyWorkspacesPanel({
   company,
   workspaces,
   canAdd,
+  canRename,
   onFlash,
   onAdded,
 }: {
   company: NonNullable<CompanyRef>;
   workspaces: CompanyWorkspace[];
   canAdd: boolean;
+  /** A Platform Super Admin, or an Owner of this company. */
+  canRename: boolean;
   onFlash: (flash: Flash) => void;
   onAdded: () => void | Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [companyName, setCompanyName] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   return (
     <section className="panel admin-panel">
@@ -281,6 +288,45 @@ export function CompanyWorkspacesPanel({
           </li>
         ))}
       </ul>
+      {canRename ? (
+        <form
+          className="admin-company-add"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const next = companyName.trim();
+            if (renaming || !next || next === company.name) return;
+            setRenaming(true);
+            const result = await adminWrite("/api/admin/companies", "POST", {
+              action: "rename_company",
+              clientCompanyId: company.id,
+              name: next,
+            });
+            setRenaming(false);
+            onFlash(result.ok ? { ok: true, message: `The company is now called ${next}.` } : result);
+            if (result.ok) {
+              setCompanyName("");
+              await onAdded();
+            }
+          }}
+        >
+          <label className="admin-field admin-field--grow">
+            <span>Company name</span>
+            <input
+              value={companyName}
+              maxLength={120}
+              placeholder={company.name}
+              onChange={(event) => setCompanyName(event.target.value)}
+            />
+          </label>
+          <button
+            type="submit"
+            className="secondary-button"
+            disabled={renaming || !companyName.trim()}
+          >
+            {renaming ? "Renaming…" : "Rename company"}
+          </button>
+        </form>
+      ) : null}
       {canAdd ? (
         <form
           className="admin-company-add"
