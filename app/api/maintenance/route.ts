@@ -50,7 +50,10 @@ import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapabi
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import { resolveJobTypeWrite } from "../../lib/job-types";
 import { contractorLinkValues } from "../../lib/contractor-reference";
-import { assigneeLinkValues } from "../../lib/assignee-reference";
+import {
+  approvedByLinkValues,
+  assigneeLinkValues,
+} from "../../lib/assignee-reference";
 import { recordContractorComment } from "../../lib/contractor-comments";
 import {
   automationContext,
@@ -920,6 +923,14 @@ export async function PATCH(request: Request) {
         return Response.json({ error: assigneeLink.reason }, { status: 404 });
       }
       Object.assign(values, assigneeLink.values);
+
+      /* The approver, on identical terms — same resolver, same refusal, and
+         applied after `requestFieldValues` for the same reason. */
+      const approvedByLink = await approvedByLinkValues(db, orgId, fields);
+      if (!approvedByLink.ok) {
+        return Response.json({ error: approvedByLink.reason }, { status: 404 });
+      }
+      Object.assign(values, approvedByLink.values);
     }
 
     const [before] = await db

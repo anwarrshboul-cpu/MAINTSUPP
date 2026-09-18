@@ -50,6 +50,7 @@ import {
   maintenanceRequests,
   optionSets,
   optionValues,
+  sites,
 } from "../../../db/schema";
 import { invalidateOptionCache } from "../../lib/options-repository";
 import {
@@ -82,6 +83,7 @@ import {
 } from "../../lib/recycle-bin";
 import { statusForStage } from "../../lib/stage-status";
 import { listRetailSites } from "../../lib/sites-repository";
+import { requireCapability, resolvePermissions } from "../../lib/permissions";
 import {
   createBoardItem,
   duplicateBoardItems,
@@ -3293,6 +3295,87 @@ export async function PATCH(request: Request) {
           { status: 400 },
         );
       }
+      /*
+       * A STORE LOCATION IS A SITE, SO RENAMING ONE RENAMES THE SHOP.
+       *
+       * The Store Location column does not draw from the chip store at all —
+       * `GET` above builds its options from the site register and hands each
+       * one the id `site-option-<site id>`. So the label a reader edits in that
+       * column is the site's name, and writing it anywhere else would create
+       * exactly the second estate the register was introduced to end: the board
+       * would show a spelling no site answers to.
+       *
+       * `sites.edit` is checked on its own rather than leaning on the
+       * `board.edit` this route already required. The two capabilities carry
+       * the same roles by default, but they are separate switches a Super Admin
+       * can open and close per workspace, and "may rearrange a board" has never
+       * implied "may rename the client's shops".
+       *
+       * The id is stable across the rename because it is the SITE's id, not the
+       * label's — which is what keeps every job already filed under this store
+       * pointing at the same place.
+       */
+      const siteOptionId = optionId.startsWith("site-option-")
+        ? optionId.slice("site-option-".length)
+        : "";
+      if (siteOptionId) {
+        const subject = await resolvePermissions(db, orgId, actor.role);
+        const denied = requireCapability(subject, "sites.edit");
+        if (denied) return denied;
+        if (!label) {
+          return Response.json(
+            { error: "A store location needs a name." },
+            { status: 400 },
+          );
+        }
+        /* Read first: the OLD name is what the jobs are filed under, and it
+           is gone the moment the site row is written. */
+        const [existingSite] = await db
+          .select({ id: sites.id, name: sites.name })
+          .from(sites)
+          .where(and(eq(sites.id, siteOptionId), eq(sites.organisationId, orgId)))
+          .limit(1);
+        if (!existingSite) {
+          return Response.json({ error: "Store location not found." }, { status: 404 });
+        }
+        const previousName = existingSite.name;
+        const [renamed] = await db
+          .update(sites)
+          .set({ name: label, updatedAt: new Date().toISOString() })
+          .where(and(eq(sites.id, siteOptionId), eq(sites.organisationId, orgId)))
+          .returning();
+        if (!renamed) {
+          return Response.json({ error: "Store location not found." }, { status: 404 });
+        }
+        /*
+         * The jobs keep the name they are filed under in step with it.
+         *
+         * `maintenance_requests.location` holds the store as TEXT — it is what
+         * the cell shows, what the CSV exports and what every existing filter
+         * matches on. Leaving it behind would make the board draw the old
+         * spelling against the new option and quietly unselect every one of
+         * those rows, which is precisely the "cells using it update
+         * consistently" the rename has to deliver.
+         */
+        await db
+          .update(maintenanceRequests)
+          .set({ location: renamed.name })
+          .where(
+            and(
+              eq(maintenanceRequests.organisationId, orgId),
+              eq(maintenanceRequests.location, previousName),
+            ),
+          );
+        return Response.json({
+          option: {
+            id: optionId,
+            columnKey: "storeLocation",
+            value: renamed.name,
+            label: renamed.name,
+          },
+        });
+      }
+
       const values: Partial<typeof maintenanceBoardOptions.$inferInsert> = {
         updatedAt: new Date().toISOString(),
       };

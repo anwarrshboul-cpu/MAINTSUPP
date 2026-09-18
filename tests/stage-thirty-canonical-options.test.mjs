@@ -178,13 +178,30 @@ test("only ACTIVE sites are offered to a submitter", async () => {
   assert.match(body, /row\.status === "active"/, "and so must a closed one");
   assert.match(
     body,
-    /RETAIL_SITE_TYPES\.includes/,
+    /isRetailSiteType\(row\.siteTypeValue \?\? row\.type\)/,
     "and the office, the warehouses and anything unverified are not locations a shop reports from",
   );
+  /*
+   * RE-POINTED FROM THE ALLOW-LIST TO THE DENY-LIST, same contract.
+   *
+   * This pinned `["Inline", "Kiosk"]` — the two types the original client's
+   * register happened to use. Site types are per-workspace, so that list was
+   * the first client's vocabulary standing in for the rule, and on a workspace
+   * using its own it hid real shops from the picker. The rule the sentence
+   * above states is about the office and the warehouse, and that is what is
+   * pinned now; everything a workspace calls its retail estate is offered.
+   */
   assert.match(
     repository,
-    /const RETAIL_SITE_TYPES = \["Inline", "Kiosk"\]/,
-    "retail is the two types a customer walks into",
+    /const NON_RETAIL_SITE_TYPES = new Set\(\["office", "warehouse"\]\)/,
+    "an office and a warehouse are not shops; nothing else is excluded by type",
+  );
+  /* The unclassified guard lives in the helper, beside the deny-list. */
+  const guard = repository.slice(repository.indexOf("function isRetailSiteType"));
+  assert.match(
+    guard.slice(0, 300),
+    /type\.length > 0/,
+    "an unclassified row is still not a suggestion",
   );
 });
 
@@ -328,7 +345,19 @@ test("the chip store's own editor mirrors back onto the registry", async () => {
   const route = await read("app/api/board/route.ts");
   assert.match(route, /async function mirrorRegistryOption/);
   for (const action of ['action === "create_option"', 'action === "update_option"', 'action === "delete_option"']) {
-    const body = route.slice(route.indexOf(action), route.indexOf(action) + 4000);
+    /*
+     * THE ACTION'S OWN BODY, not the 4,000 characters after its first mention.
+     *
+     * A fixed window said "this contract holds somewhere near here", which is
+     * a different claim and a weaker one: `update_option` grew a branch that
+     * routes a `site-option-…` id to the site register, and the mirror call it
+     * was pinning slid past character 4,000 while every word of the contract
+     * stayed true. Bounded by the next action instead, so the assertion reads
+     * the whole of this branch and none of the next one however either grows.
+     */
+    const start = route.indexOf(action);
+    const next = route.indexOf('action === "', start + action.length);
+    const body = route.slice(start, next === -1 ? route.length : next);
     assert.match(
       body,
       /mirrorRegistryOption\(/,

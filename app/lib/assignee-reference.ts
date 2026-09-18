@@ -1,5 +1,6 @@
 /**
- * Who a job is assigned to: the display name, and the account behind it.
+ * Who a job is assigned to, and who signed it off: the display name, and the
+ * account behind it.
  *
  * The sibling of `contractor-reference.ts`, and deliberately its mirror image.
  * `maintenance_requests` carries two columns for one fact:
@@ -9,6 +10,14 @@
  *                          every CSV export and every existing filter holds.
  *   · `assignee_user_id` — the stable `users.id`, added so the board can offer
  *                          the workspace's REAL roster.
+ *
+ * `approved_by` / `approved_by_user_id` are the same fact about a different
+ * act, so they resolve through the same function rather than a copy of it.
+ * Approved by was left behind when Assigned To was given the roster: its picker
+ * still offered the names sitting in `assignee`, which on an estate with
+ * nothing assigned is nobody at all. One resolver means the tenancy predicate
+ * below is written once and cannot be got right in one place and wrong in the
+ * other.
  *
  * The two resolve in opposite directions, and that difference is the point. A
  * contractor is named as text and the register is asked which contractor that
@@ -124,13 +133,51 @@ export async function assigneeLinkValues(
   | { ok: true; values: { assignee?: string | null; assigneeUserId?: string | null } }
   | { ok: false; reason: string }
 > {
-  if (!Object.prototype.hasOwnProperty.call(fields, "assigneeUserId")) {
+  return personLinkValues(db, orgId, fields, "assignee", "assigneeUserId");
+}
+
+/**
+ * The `approved_by` / `approved_by_user_id` pair, on the same terms.
+ *
+ * Separate export rather than a parameter at the call site, so a route asks for
+ * the pair it means by name and cannot write an approver into the assignee
+ * columns by passing the wrong string.
+ */
+export async function approvedByLinkValues(
+  db: AssigneeDatabase,
+  orgId: string,
+  fields: Record<string, unknown>,
+): Promise<
+  | { ok: true; values: { approvedBy?: string | null; approvedByUserId?: string | null } }
+  | { ok: false; reason: string }
+> {
+  return personLinkValues(db, orgId, fields, "approvedBy", "approvedByUserId");
+}
+
+/**
+ * One pair, resolved. The name half is always DERIVED from the id half — see
+ * `resolveAssigneeLink` for why a caller-supplied name is only ever a hint.
+ */
+async function personLinkValues<N extends string, I extends string>(
+  db: AssigneeDatabase,
+  orgId: string,
+  fields: Record<string, unknown>,
+  nameKey: N,
+  idKey: I,
+): Promise<
+  | { ok: true; values: Partial<Record<N | I, string | null>> }
+  | { ok: false; reason: string }
+> {
+  if (!Object.prototype.hasOwnProperty.call(fields, idKey)) {
     return { ok: true, values: {} };
   }
-  const link = await resolveAssigneeLink(db, orgId, fields.assigneeUserId);
+  const link = await resolveAssigneeLink(db, orgId, fields[idKey]);
   if (!link.ok) return link;
   return {
     ok: true,
-    values: { assignee: link.name, assigneeUserId: link.assigneeUserId },
+    values: {
+      [nameKey]: link.name,
+      [idKey]: link.assigneeUserId,
+    } as Partial<Record<N | I, string | null>>,
   };
 }

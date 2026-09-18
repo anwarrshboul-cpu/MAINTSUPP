@@ -99,11 +99,26 @@ export function AssigneeCell({
   title,
   assignee,
   assigneeUserId,
+  emptyLabel = "Unassigned",
+  clearLabel = "Clear the assignment",
   onChange,
 }: {
   title: string;
   assignee: string;
   assigneeUserId: string | null;
+  /*
+   * WHAT "NOBODY" IS CALLED IN THIS COLUMN.
+   *
+   * Two columns share this picker — Assigned To, and Approved by, which used to
+   * be an `OptionCell` fed by the names already sitting in `assignee`. The
+   * mechanism is identical (choose an active member of this workspace, write
+   * the name and the id together), and only the wording for the empty row
+   * differs: a job with no approver is not "Unassigned", it is "Not approved".
+   *
+   * Defaults are the assignment's, so the original caller is unchanged.
+   */
+  emptyLabel?: string;
+  clearLabel?: string;
   onChange: (change: AssigneeChange) => void;
 }) {
   const mobile = useContext(MobileBoardContext);
@@ -228,10 +243,8 @@ export function AssigneeCell({
         </span>
       )}
       <span className="assignee-option__text">
-        <strong>{member ? member.name : "Unassigned"}</strong>
-        <small>
-          {member ? member.title || member.email : "Clear the assignment"}
-        </small>
+        <strong>{member ? member.name : emptyLabel}</strong>
+        <small>{member ? member.title || member.email : clearLabel}</small>
       </span>
       {member?.isMe && <em className="assignee-option__me">You</em>}
       {(member ? person?.id === member.id : !person && !assignee) && (
@@ -249,7 +262,7 @@ export function AssigneeCell({
           value={search}
           autoComplete="off"
           placeholder="Search people"
-          aria-label={`Search people to assign to ${title}`}
+          aria-label={`Search people for ${title}`}
           onChange={(event) => {
             setSearch(event.target.value);
             // Typing is a manual move: the first match leads, not the assignee.
@@ -289,7 +302,7 @@ export function AssigneeCell({
         className={`assignee-trigger${person || assignee ? " is-assigned" : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={person ? `${person.name}${person.email ? ` · ${person.email}` : ""}` : assignee || "Unassigned"}
+        title={person ? `${person.name}${person.email ? ` · ${person.email}` : ""}` : assignee || emptyLabel}
         onClick={() => {
             /*
              * Opening starts clean. Done here rather than in an effect on
@@ -325,7 +338,7 @@ export function AssigneeCell({
               <Icon name="user" size={13} />
             </span>
             <span className="assignee-trigger__name assignee-trigger__name--empty">
-              Unassigned
+              {emptyLabel}
             </span>
           </>
         )}

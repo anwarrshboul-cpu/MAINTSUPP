@@ -23,6 +23,8 @@ import { ColumnSettingsDialog } from "./board-column-settings";
 import { chipStyle } from "./chip-ink";
 import { Icon } from "../../components";
 import { publishBoardOptions } from "../../lib/board-option-registry";
+import { boardOptionWriters } from "./board-option-writes";
+import { storeLocationChoices } from "./board-store-location";
 import type {
   AttachmentKind,
   BoardColumnChoice,
@@ -1682,67 +1684,23 @@ export function LiveMaintenanceBoard({
   const optionsFor = (columnKey: BoardOptionColumn): Option[] =>
     boardColumnOptions(boardOptions, columnKey);
 
-  const createOption = async (
-    columnKey: BoardOptionColumn,
-    label: string,
-    color: string,
-  ) => {
-    const response = await fetch(boardUrl("/api/board", boardId), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "create_option", columnKey, label, color }),
-    });
-    const payload = (await response.json()) as {
-      option?: BoardColumnOption;
-      error?: string;
-    };
-    if (!response.ok || !payload.option) {
-      throw new Error(payload.error || "The label could not be created.");
-    }
-    setBoardOptions((current) => [...current, payload.option!]);
-    onNotify(`${payload.option.label} added.`);
-  };
+  /* The site register, plus the areas this board files jobs under that the
+     register does not name — see board-store-location.ts for why both. */
+  const storeLocationOptions = useMemo(
+    () => storeLocationChoices(boardColumnOptions(boardOptions, "storeLocation"), scopedRequests, groupColors),
+    [boardOptions, scopedRequests],
+  );
 
-  const updateOption = async (
-    optionId: string,
-    changes: { label?: string; color?: string; active?: boolean },
-  ) => {
-    const response = await fetch(boardUrl("/api/board", boardId), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update_option", optionId, ...changes }),
-    });
-    const payload = (await response.json()) as {
-      option?: BoardColumnOption;
-      error?: string;
-    };
-    if (!response.ok || !payload.option) {
-      throw new Error(payload.error || "The label could not be updated.");
-    }
-    setBoardOptions((current) =>
-      current.map((option) =>
-        option.id === payload.option!.id ? payload.option! : option,
-      ),
-    );
-    onNotify(`${payload.option.label} updated.`);
-  };
-
-  const deleteOption = async (optionId: string) => {
-    const response = await fetch(boardUrl("/api/board", boardId), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete_option", optionId }),
-    });
-    const payload = (await response.json()) as {
-      deleted?: boolean;
-      error?: string;
-    };
-    if (!response.ok || !payload.deleted) {
-      throw new Error(payload.error || "The label could not be deleted.");
-    }
-    setBoardOptions((current) => current.filter((option) => option.id !== optionId));
-    onNotify("Label deleted.");
-  };
+  /* Add / rename / delete a chip — see board-option-writes.ts. */
+  const { createOption, updateOption, deleteOption } = useMemo(
+    () =>
+      boardOptionWriters({
+        boardUrl: (path) => boardUrl(path, boardId),
+        setBoardOptions,
+        onNotify,
+      }),
+    [boardId, onNotify],
+  );
 
   const createCustomColumn = async (type: BoardColumnType) => {
     if (columnBusy) return;
@@ -4285,9 +4243,8 @@ export function LiveMaintenanceBoard({
                               priority: optionsFor("priority"),
                               label: optionsFor("label"),
                               status: optionsFor("status"),
-                              storeLocation: optionsFor("storeLocation"),
+                              storeLocation: storeLocationOptions,
                             }}
-                            assigneeOptions={assigneeOptions}
                             onCreateOption={createOption}
                             onUpdateOption={updateOption}
                             onDeleteOption={deleteOption}
@@ -4437,7 +4394,7 @@ export function LiveMaintenanceBoard({
                                   priority: optionsFor("priority"),
                                   label: optionsFor("label"),
                                   status: optionsFor("status"),
-                                  storeLocation: optionsFor("storeLocation"),
+                                  storeLocation: storeLocationOptions,
                                 }}
                                 assigneeOptions={assigneeOptions}
                                 customCells={customCells}
@@ -4716,7 +4673,6 @@ function BoardRow({
   onSave,
   onMove,
   optionSets,
-  assigneeOptions,
   onCreateOption,
   onUpdateOption,
   onDeleteOption,
@@ -4782,7 +4738,11 @@ function BoardRow({
   onSave: (fields: EditableFields) => void;
   onMove: (groupId: string) => void;
   optionSets: Record<BoardOptionColumn, Option[]>;
-  assigneeOptions: Option[];
+  /* No `assigneeOptions` here any more. Both columns that took it — Assigned To
+     and Approved by — are person pickers over the workspace roster now, so a
+     row has nothing to do with the list derived from the board's own values.
+     The FILTER still uses it, and the summary and subitem rows still receive
+     it; only the row stopped needing it. */
   onCreateOption: (
     columnKey: BoardOptionColumn,
     label: string,
@@ -5255,13 +5215,21 @@ function BoardRow({
       case "approvedBy":
         return (
           <td {...shared}>
-            <OptionCell
+            {/* The roster, not `assigneeOptions` — that list is derived from the
+                names already on the board's own rows, so an estate with nothing
+                assigned could never record an approver. Same picker and same
+                name/id pair as Assigned To; see assignee-cell.tsx. */}
+            <AssigneeCell
               title={column.title}
-              mobileKind="people"
-              value={request.approvedBy ?? ""}
-              options={assigneeOptions}
-              onChange={(approvedBy) =>
-                onSave({ approvedBy: approvedBy || null })
+              assignee={request.approvedBy ?? ""}
+              assigneeUserId={request.approvedByUserId ?? null}
+              emptyLabel="Not approved"
+              clearLabel="Clear the approval"
+              onChange={(change) =>
+                onSave({
+                  approvedBy: change.assignee,
+                  approvedByUserId: change.assigneeUserId,
+                })
               }
             />
           </td>
@@ -5312,11 +5280,21 @@ function BoardRow({
       case "storeLocation":
         return (
           <td {...shared}>
+            {/* The stores this workspace actually has — `/api/board` builds these
+                from the site register (`listRetailSites`). This used to pass a
+                one-entry list holding the cell's OWN value, so the column could
+                never be changed from the board and every chip drew in the same
+                colour while the footer showed the real palette. */}
             <OptionCell
               title={column.title}
               value={request.location}
-              options={request.location ? [{ value: request.location, color: groupColors[0] }] : []}
+              options={optionSets.storeLocation}
               columns={3}
+              editableColumn="storeLocation"
+              /* Rename and recolour only. A store is CREATED in the site
+                 register or not at all, and deleting one from a board cell
+                 would be deleting a shop, so neither verb is offered here. */
+              onUpdateOption={onUpdateOption}
               onChange={(location) => onSave({ location })}
             />
           </td>

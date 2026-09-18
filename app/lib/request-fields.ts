@@ -215,6 +215,9 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
   }
   if (typeof fields.approvedBy === "string" || fields.approvedBy === null) {
     values.approvedBy = trimString(fields.approvedBy, 120) || null;
+    /* Same rule as `assignee` directly above: a write that carries only the
+       NAME must not leave the previous approver's account linked beside it. */
+    values.approvedByUserId = null;
   }
   if (typeof fields.invoice === "string" || fields.invoice === null) {
     values.invoice = trimString(fields.invoice, 160) || null;
@@ -369,6 +372,18 @@ export function invalidRequestFields(fields: Record<string, unknown>): string[] 
     fields.assigneeUserId !== null
   ) {
     note("assigneeUserId", "a workspace member's user id, or null to unassign");
+  }
+
+  /* `approvedByUserId` is the same kind of value, checked the same way. */
+  if (
+    has("approvedByUserId") &&
+    typeof fields.approvedByUserId !== "string" &&
+    fields.approvedByUserId !== null
+  ) {
+    note(
+      "approvedByUserId",
+      "a workspace member's user id, or null to clear the approval",
+    );
   }
 
   /*

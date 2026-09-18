@@ -383,6 +383,12 @@ export interface MaintenanceRequest {
    */
   boardId?: string | null;
   approvedBy?: string | null;
+  /**
+   * The account behind `approvedBy`, the counterpart of `assigneeUserId` above.
+   * Null where the job was never signed off, and null on an old row whose
+   * approver was only ever a spelling.
+   */
+  approvedByUserId?: string | null;
   invoice?: string | null;
   attachmentCount: number;
   issueAttachmentCount?: number;

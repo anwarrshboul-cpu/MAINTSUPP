@@ -104,7 +104,34 @@ export function junkReason(name: string, address: string): string | null {
  * an answer to "which shop is this job at". Existing in `sites` and appearing
  * in a location picker are deliberately different things.
  */
-const RETAIL_SITE_TYPES = ["Inline", "Kiosk"];
+/*
+ * NAMED BY WHAT IS EXCLUDED, NOT BY WHAT IS ALLOWED.
+ *
+ * This was the allow-list `["Inline", "Kiosk"]`, which were the only two types
+ * the original client's register used. Site types are configured per workspace,
+ * though, and the moment one uses its own vocabulary the allow-list stops
+ * describing "somewhere a customer walks into" and starts describing one
+ * client's spelling of it: the demonstration workspace files jobs against a
+ * Flagship, three Stores, two Kiosks and a Warehouse, and its Location picker
+ * offered the two Kiosks. Five real shops were missing from it, and nothing
+ * said so — the register held them and the dropdown simply did not.
+ *
+ * The intent has always been a deny-list. An office and a warehouse are not
+ * shops; everything else a workspace chooses to call its retail estate is. A
+ * new type is therefore offered without a deploy, which is the behaviour a
+ * configurable vocabulary has to have, and the two exclusions still say exactly
+ * what the paragraph above says.
+ *
+ * Matched case-insensitively and on the trimmed value, because these come from
+ * a per-workspace option set rather than from this file.
+ */
+const NON_RETAIL_SITE_TYPES = new Set(["office", "warehouse"]);
+
+function isRetailSiteType(value: string | null | undefined) {
+  const type = (value ?? "").trim().toLowerCase();
+  // An unclassified row is not a suggestion: the register cannot vouch for it.
+  return type.length > 0 && !NON_RETAIL_SITE_TYPES.has(type);
+}
 
 /**
  * The sites a location picker may offer: open, and somewhere a customer walks
@@ -135,7 +162,7 @@ export async function listRetailSites(
     (row) =>
       row.active &&
       row.status === "active" &&
-      RETAIL_SITE_TYPES.includes(row.siteTypeValue ?? row.type ?? ""),
+      isRetailSiteType(row.siteTypeValue ?? row.type),
   );
 }
 
