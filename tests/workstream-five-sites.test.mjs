@@ -433,10 +433,17 @@ test("placeholder rows never become sites", async () => {
 
 test("the site dropdown is scoped to active retail sites only", async () => {
   const repository = await read("app/lib/sites-repository.ts");
+  /*
+   * RE-POINTED: the rule is "not the office, not the warehouse", and it used to
+   * be spelled as the allow-list `["Inline", "Kiosk"]` — the two types one
+   * client's register used. Types are configured per workspace, so that spelling
+   * quietly excluded every other workspace's shops (the demonstration estate
+   * offered two of its eight sites). The exclusions below are unchanged.
+   */
   assert.match(
     repository,
-    /const RETAIL_SITE_TYPES = \["Inline", "Kiosk"\]/,
-    "retail means Inline and Kiosk — the office and the warehouses are not shops",
+    /const NON_RETAIL_SITE_TYPES = new Set\(\["office", "warehouse"\]\)/,
+    "the office and the warehouses are not shops",
   );
   const listing = repository.slice(
     repository.indexOf("export async function listRetailSites"),
@@ -446,7 +453,7 @@ test("the site dropdown is scoped to active retail sites only", async () => {
   assert.match(listing, /row\.status === "active"/, "closed, international and legacy rows are not offered");
   assert.match(
     listing,
-    /RETAIL_SITE_TYPES\.includes\(row\.siteTypeValue \?\? row\.type \?\? ""\)/,
+    /isRetailSiteType\(row\.siteTypeValue \?\? row\.type\)/,
     "only retail types are offered",
   );
 

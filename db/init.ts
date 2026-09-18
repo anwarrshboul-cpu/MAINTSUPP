@@ -4885,6 +4885,18 @@ async function ensureOwnerFixesAndBilling(d1: D1DatabaseLike) {
   await addColumn(d1, "maintenance_requests", "assignee_user_id", "TEXT");
 
   /*
+   * THE SAME PAIR FOR THE APPROVER.
+   *
+   * "Approved by" was a text column whose picker offered the names already
+   * sitting in `assignee` — so on a workspace where nobody had been assigned
+   * yet, the only thing that could be recorded as an approver was nobody. It
+   * is a person, chosen from the roster exactly as the assignee is, and the id
+   * beside the name is what lets a rename in Users & access reach a job that
+   * was signed off last year.
+   */
+  await addColumn(d1, "maintenance_requests", "approved_by_user_id", "TEXT");
+
+  /*
    * Billing eligibility on the site itself.
    *
    * `billable` defaults to 1 so that turning billing on does not silently

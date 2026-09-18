@@ -129,6 +129,15 @@ test("the maintenance date cell renders it, and the expiry cell is untouched", a
 
 test("the hint cannot swallow a click meant for the input", async () => {
   const css = await read("app/globals.css");
-  const rule = css.slice(css.indexOf(".sheet-date__relative"), css.indexOf(".sheet-date__relative") + 260);
+  /*
+   * THE DECLARATION BLOCK, not the 260 characters after the name's first
+   * appearance anywhere in the file. A comment on `.sheet-date-input` that
+   * mentions this class by name — explaining that the VALUE is `--ink` while
+   * this hint stays `--muted` — comes earlier in the stylesheet, so `indexOf`
+   * found the sentence about the rule rather than the rule. Matching the block
+   * itself pins the same contract and cannot be moved by prose.
+   */
+  const rule = /\.sheet-date__relative\s*\{[^}]*\}/.exec(css)?.[0] ?? "";
+  assert.ok(rule, "the .sheet-date__relative rule must exist");
   assert.match(rule, /pointer-events: none/, "the cell must still click through to the date input");
 });

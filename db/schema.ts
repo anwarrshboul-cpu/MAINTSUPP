@@ -785,6 +785,17 @@ export const maintenanceRequests = sqliteTable(
     seedBatchId: text("seed_batch_id"),
     cost: real("cost"),
     approvedBy: text("approved_by"),
+    /*
+     * Who signed the job off, as an account rather than as a spelling — the
+     * counterpart of `assignee_user_id` above, added for the same reason and
+     * written by the same resolver (`app/lib/assignee-reference.ts`).
+     *
+     * `approved_by` stays free text and stays the record of the name, so every
+     * imported row, export and filter is untouched. An approval is a person's
+     * act, though, and storing only what they were called loses the act the
+     * day they are renamed; the id is what survives that.
+     */
+    approvedByUserId: text("approved_by_user_id"),
     invoice: text("invoice"),
     attachmentCount: integer("attachment_count").notNull().default(0),
     issueAttachmentCount: integer("issue_attachment_count")

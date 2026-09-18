@@ -374,17 +374,21 @@ export default function BoardColumnSummary({
     );
   }
   if (key === "storeLocation") {
-    const locationOptions = Array.from(
-      new Set(rows.map((request) => request.location).filter(Boolean)),
-    ).map((value, index) => ({
-      value,
-      color: groupColors[index % groupColors.length],
-    }));
+    /*
+     * THE SAME LIST THE CELLS DRAW FROM.
+     *
+     * This built its own from the rows, and the cell built its own from
+     * nothing — which is why the bar under this column showed a palette while
+     * every chip above it was one colour. `optionSets.storeLocation` is the
+     * register plus the board's own values (see board-store-location.ts), so a
+     * store now carries the SITE's colour in both places and the footer cannot
+     * disagree with the column again.
+     */
     return (
       <td className={className} style={style}>
         <SummaryDistribution
           values={rows.map((request) => request.location)}
-          options={locationOptions}
+          options={optionSets.storeLocation}
         />
       </td>
     );

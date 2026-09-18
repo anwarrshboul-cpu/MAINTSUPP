@@ -51,6 +51,9 @@ export type EditableFields = Partial<
     | "nextUpdateAt"
     | "cost"
     | "approvedBy"
+    /* The approver's account, written WITH `approvedBy` for the same reason
+       `assigneeUserId` is written with `assignee`. */
+    | "approvedByUserId"
     | "invoice"
     | "formUrl"
   >

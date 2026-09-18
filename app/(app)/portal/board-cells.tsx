@@ -365,34 +365,48 @@ export function OptionCell({
                     if (event.key === "Enter") event.currentTarget.blur();
                   }}
                 />
-                <button
-                  type="button"
-                  disabled={!option.id || working === option.id}
-                  title={option.active === false ? "Activate label" : "Deactivate label"}
-                  onClick={() => {
-                    if (!option.id || !onUpdateOption) return;
-                    runChange(option.id, () =>
-                      onUpdateOption(option.id!, { active: option.active === false }),
-                    );
-                  }}
-                >
-                  {option.active === false ? "On" : "Off"}
-                </button>
-                <button
-                  type="button"
-                  className="is-danger"
-                  disabled={!option.id || option.system || working === option.id}
-                  title={option.system ? "Default labels can be deactivated" : "Delete label"}
-                  onClick={() => {
-                    if (!option.id || !onDeleteOption) return;
-                    runChange(option.id, () => onDeleteOption(option.id!));
-                  }}
-                >
-                  ×
-                </button>
+                {/* ADD, DEACTIVATE AND DELETE ARE THE CHIP STORE'S VERBS, and
+                    they are offered together or not at all. Store Location
+                    draws its options from the SITE REGISTER, so it is given a
+                    rename handler and no lifecycle handlers: a shop is created
+                    and retired in the register, and rendering controls here
+                    that quietly did nothing — every one of them guarded by an
+                    `if (!onDeleteOption) return` — is worse than not drawing
+                    them. Colour and name stay, which is what a rename is. */}
+                {onDeleteOption && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={!option.id || working === option.id}
+                      title={option.active === false ? "Activate label" : "Deactivate label"}
+                      onClick={() => {
+                        if (!option.id || !onUpdateOption) return;
+                        runChange(option.id, () =>
+                          onUpdateOption(option.id!, { active: option.active === false }),
+                        );
+                      }}
+                    >
+                      {option.active === false ? "On" : "Off"}
+                    </button>
+                    <button
+                      type="button"
+                      className="is-danger"
+                      disabled={!option.id || option.system || working === option.id}
+                      title={option.system ? "Default labels can be deactivated" : "Delete label"}
+                      onClick={() => {
+                        if (!option.id) return;
+                        runChange(option.id, () => onDeleteOption(option.id!));
+                      }}
+                    >
+                      ×
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
+          {/* Adding is the same chip-store verb as deleting — see above. */}
+          {onCreateOption && (
           <div className="sheet-label-editor__new">
             <input
               type="color"
@@ -431,6 +445,7 @@ export function OptionCell({
               Add
             </button>
           </div>
+          )}
           {editorError && <small className="sheet-label-editor__error">{editorError}</small>}
         </div>
       )}
@@ -1131,10 +1146,25 @@ export function TimelineCell({
     return () => document.removeEventListener("mousedown", close);
   }, [mobile, open]);
 
+  /*
+   * THE STRIP READS THE SAVED DATES, NOT THE DRAFT.
+   *
+   * This was built from `draftStart`/`draftEnd`, which `useState` seeds once
+   * and never re-seeds. The timeline's start IS Date Requested and its end IS
+   * Due Date — two other cells on the same row — so editing either of those
+   * changed this cell's props and left the strip showing the range it had when
+   * the row first rendered. It only caught up if you happened to open the
+   * timeline's own editor, which is what re-seeds the drafts.
+   *
+   * Derived from the props, the strip cannot lag: whatever the row says the
+   * dates are is what it draws, on the same render the save lands.
+   */
+  const savedStart = dateInputValue(start);
+  const savedEnd = dateInputValue(end);
   const label =
-    draftStart && draftEnd
-      ? `${draftStart.slice(5)} → ${draftEnd.slice(5)}`
-      : draftStart || draftEnd || "Set dates";
+    savedStart && savedEnd
+      ? `${savedStart.slice(5)} → ${savedEnd.slice(5)}`
+      : savedStart || savedEnd || "Set dates";
 
   const saveTimeline = () => {
     const endToSave = mobile && draftStart && !draftEnd ? draftStart : draftEnd;

@@ -225,6 +225,28 @@
   --chip-neutral-fg: #40505d;
 
   /*
+   * ---- The dated chip --------------------------------------------------
+   *
+   * The neutral chip above means "no value yet" — its own comment says so —
+   * and the timeline strip was using it whether or not it had dates. So a job
+   * with a booked window and a job with nothing planned drew identically, in
+   * the greyest thing on the row, on 745 pills.
+   *
+   * A timeline that HAS dates is a fact about the job, so it gets the brand
+   * rather than the absence of one: the teal wash the product already uses for
+   * a selected surface, carrying navy text. Deliberately a wash and not a fill
+   * — Priority and Status own the saturated chips on this row, and a solid
+   * teal strip beside them would read as a third status.
+   *
+   * Measured: text 8.94:1 light, 6.93:1 dark, against 6.55:1 and 6.68:1 for the
+   * neutral pair it replaces. The chip's own edge against the card is 1.12:1
+   * light and 1.26:1 dark, which is the same quietness the neutral chip already
+   * has there (1.27:1 and 1.34:1) rather than a new one.
+   */
+  --chip-dated-bg: var(--brand-wash);
+  --chip-dated-fg: var(--navy-700);
+
+  /*
    * ---- The switch ------------------------------------------------------
    *
    * A switch has no text, so none of it is covered by the contrast test,
@@ -483,6 +505,14 @@ body[data-theme="dark"] {
 
   --chip-neutral-bg: #2b3a45;
   --chip-neutral-fg: #b7c6ce;
+
+  /*
+   * The dated chip in dark. The wash is too close to the card here, so the
+   * ground is the navy surface and the brighter teal carries the text — the
+   * same swap `--switch-on` makes a few lines down, and for the same reason.
+   */
+  --chip-dated-bg: var(--navy-800);
+  --chip-dated-fg: var(--brand-fg);
 
   /*
    * The rail tokens are NOT restated here. That is the point: the sidebar is
@@ -6247,7 +6277,24 @@ th.sheet-column--name {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--muted);
+  /*
+   * THE DATE IS THE CELL'S VALUE, NOT A HINT ABOUT IT.
+   *
+   * This drew in `--muted`, the token the product uses for secondary labels —
+   * so Date Requested and Date Completed were the palest text in the row while
+   * every other value beside them was `--ink`. `.sheet-date__relative` below
+   * keeps `--muted`, which is the line that IS a hint.
+   *
+   * 15.58:1 light and 14.88:1 dark, up from 6.58:1 and 9.08:1.
+   */
+  color: var(--ink);
+  /*
+   * The native picker is Chromium's own, and `accent-color` is the one hook it
+   * gives a page: the selected day, the focus ring and the spin controls all
+   * follow it. Without this the calendar the board opens is system blue — the
+   * one surface in the product that had never heard of the brand.
+   */
+  accent-color: var(--brand-fill);
   font-size: 8px;
   text-align: center;
 }
@@ -6341,6 +6388,20 @@ th.sheet-column--name {
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * A timeline with dates on it wears the brand; an empty one keeps the neutral
+ * chip above, which is what that token means. See `--chip-dated-bg`.
+ *
+ * `--control-own-fg` moves with the pair because the dark blanket rule on
+ * `.portal-main button` would otherwise repaint the label `--ink` and undo the
+ * contrast this was measured for — the same opt-out the neutral state uses.
+ */
+.sheet-timeline > button[data-state="set"] {
+  --control-own-fg: var(--chip-dated-fg);
+  background: var(--chip-dated-bg);
+  color: var(--chip-dated-fg);
 }
 
 .sheet-timeline-popover {

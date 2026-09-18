@@ -84,6 +84,10 @@ export function TimelineRangeButton({
            cannot fall below — it survives a portal that failed to mount and it
            is what a browser reads out when nothing else does. */
         title={sentence}
+        /* Set or unset, so the strip can carry the brand treatment when it has
+           dates and stay the quiet neutral chip when it has none. `start` and
+           `end` are the SAVED dates, which is what the strip draws. */
+        data-state={start || end ? "set" : "empty"}
         aria-describedby={open ? tipId : undefined}
         onMouseEnter={() => setShowing(true)}
         onMouseLeave={() => setShowing(false)}
