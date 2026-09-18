@@ -29,9 +29,6 @@ const OWNER = {
   email: process.env.MAINTSUPP_EMAIL ?? "owner@maintsupp.com",
   password: process.env.MAINTSUPP_PASSWORD ?? "Sunnamusk-Owner-2026",
 };
-/** Seeded demo account. Its password is restored at the end of the live test. */
-const TARGET_USER_ID = "user-sample-client-maintsupp-local";
-
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 
 /* ------------------------------------------------------------------ */
@@ -280,6 +277,72 @@ async function issue(cookie, userId) {
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
+/*
+ * THE ACCOUNT BEING RESET IS ONE THESE TESTS MAKE.
+ *
+ * It used to be `user-sample-client-maintsupp-local`, which no migrated
+ * database has. That row comes from `seedWorkspaceIfEmpty` in
+ * `app/api/workspace/route.ts`, which only fills a workspace holding NO users —
+ * and `db/init.ts` seeds testing identities into every workspace, so the
+ * condition is false on any estate built since. The account survived only on
+ * long-lived local databases, created back when that seeding did not exist. So
+ * these two tests passed for whoever had an old database and failed on a fresh
+ * one, for a reason with nothing to do with resets.
+ *
+ * A reset is scoped to the workspace the caller administers, so the target has
+ * to be IN it. Rather than hope one is, the fixture invites an account into the
+ * caller's own workspace and accepts the invitation to give it a password, then
+ * switches it off afterwards. The flow below then has a real account to work
+ * on: one that can sign in, hold a session, and lose it.
+ */
+async function inviteResetTarget(cookie, role = "client") {
+  const context = await (await fetch(`${BASE_URL}/api/context`, { headers: { cookie } })).json();
+  const organisationId = context?.context?.currentOrganisation?.id;
+  const clientCompanyId = (context?.context?.organisations ?? []).find(
+    (organisation) => organisation.id === organisationId,
+  )?.clientCompanyId;
+  if (!organisationId || !clientCompanyId) return null;
+
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const email = `stage23-reset-${stamp}@accounts.test.maintsupp.com`;
+  const password = `stage23 fixture ${stamp} passphrase`;
+  const invited = await fetch(`${BASE_URL}/api/auth/invitations`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ email, role, clientCompanyId, workspaceIds: [organisationId] }),
+  });
+  if (invited.status !== 201) return null;
+  const token = String((await invited.json()).inviteUrl ?? "").split("/invite/")[1];
+  if (!token) return null;
+
+  const accepted = await fetch(`${BASE_URL}/api/auth/invitations/${token}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ password, fullName: `Stage 23 ${role} fixture` }),
+  });
+  if (!accepted.ok) return null;
+
+  /* Acceptance answers with where the person landed, not who they now are, so
+     the id is read back from the roster the caller can already see. */
+  const roster = await (
+    await fetch(`${BASE_URL}/api/admin/users`, { headers: { cookie } })
+  ).json();
+  const row = (roster.users ?? []).find(
+    (user) => user.email.toLowerCase() === email.toLowerCase(),
+  );
+  return row ? { userId: row.id, email, password, role } : null;
+}
+
+/** Switched off rather than deleted — the product has no delete, and an
+    account that is off opens nothing with whatever password it ended on. */
+async function retireResetTarget(cookie, userId) {
+  await fetch(`${BASE_URL}/api/admin/users`, {
+    method: "PATCH",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ action: "deactivate", userId }),
+  });
+}
+
 test("issue, spend, and every session on that account dies", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
@@ -291,14 +354,21 @@ test("issue, spend, and every session on that account dies", async (t) => {
     return;
   }
 
-  const first = await issue(cookie, TARGET_USER_ID);
-  assert.equal(first.status, 201);
+  const target = await inviteResetTarget(cookie);
+  if (!target) {
+    t.skip("this workspace would not take an invited fixture account");
+    return;
+  }
+
+  try {
+  const first = await issue(cookie, target.userId);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
   assert.ok(first.body.resetUrl, "the link comes back to the administrator who issued it");
   const firstToken = tokenOf(first.body.resetUrl);
 
   const described = await fetch(`${BASE_URL}/api/auth/password-resets/${firstToken}`);
   assert.equal(described.status, 200);
-  assert.equal((await described.json()).account.email, "sample-client@maintsupp.local");
+  assert.equal((await described.json()).account.email, target.email);
 
   // A rejected password must NOT burn the link.
   const weak = await fetch(`${BASE_URL}/api/auth/password-resets/${firstToken}`, {
@@ -314,7 +384,7 @@ test("issue, spend, and every session on that account dies", async (t) => {
   );
 
   // Issuing again retires the first, so there is never more than one live link.
-  const second = await issue(cookie, TARGET_USER_ID);
+  const second = await issue(cookie, target.userId);
   assert.equal(second.status, 201);
   const secondToken = tokenOf(second.body.resetUrl);
   assert.equal((await fetch(`${BASE_URL}/api/auth/password-resets/${firstToken}`)).status, 410);
@@ -332,11 +402,11 @@ test("issue, spend, and every session on that account dies", async (t) => {
     "single use",
   );
 
-  const held = await signIn("sample-client@maintsupp.local", chosen);
+  const held = await signIn(target.email, chosen);
   assert.ok(held, "the new password signs in");
 
   // Now reset again and prove the session that was live at the time is dead.
-  const third = await issue(cookie, TARGET_USER_ID);
+  const third = await issue(cookie, target.userId);
   const replacement = `stage23-reset-${Date.now()}-second-passphrase`;
   await fetch(`${BASE_URL}/api/auth/password-resets/${tokenOf(third.body.resetUrl)}`, {
     method: "POST",
@@ -345,7 +415,7 @@ test("issue, spend, and every session on that account dies", async (t) => {
   });
 
   assert.equal(
-    await signIn("sample-client@maintsupp.local", chosen),
+    await signIn(target.email, chosen),
     null,
     "the previous password stops working",
   );
@@ -366,6 +436,9 @@ test("issue, spend, and every session on that account dies", async (t) => {
     401,
     "the session that was live when the reset happened no longer authenticates",
   );
+  } finally {
+    await retireResetTarget(cookie, target.userId);
+  }
 });
 
 test("the guard rails hold against a real caller", async (t) => {
@@ -386,30 +459,58 @@ test("the guard rails hold against a real caller", async (t) => {
       body: JSON.stringify(body),
     });
 
-  const byClient = await as("sample-client@maintsupp.local", {
-    userId: "user-owner-maintsupp-com",
-  });
-  assert.equal(byClient.status, 403);
-  assert.equal((await byClient.json()).capability, "users.edit");
+  /*
+   * THE CALLERS AND THE TARGET ARE THIS TEST'S OWN, for the same reason the
+   * reset target above is: the two accounts it used to name (`sample-client@`
+   * and `sample-admin@`) exist only on a database old enough to predate the
+   * seeded testing identities, and a request made as nobody answers 404 —
+   * which would pass a "refused" assertion for entirely the wrong reason.
+   *
+   * The target is an Admin rather than the platform's own account, and that is
+   * the rule as it now stands: platform authority is not a membership, so a
+   * Platform Super Admin is not IN the workspace and an admin asking to reset
+   * one is told no such account is here. What an Admin must not be able to do
+   * inside the workspace is reset another Admin, and that is what this asks.
+   */
+  const clientCaller = await inviteResetTarget(cookie, "client");
+  const adminCaller = await inviteResetTarget(cookie, "admin");
+  const adminTarget = await inviteResetTarget(cookie, "admin");
+  if (!clientCaller || !adminCaller || !adminTarget) {
+    t.skip("this workspace would not take the invited fixture accounts");
+    return;
+  }
 
-  const upward = await as("sample-admin@maintsupp.local", {
-    userId: "user-owner-maintsupp-com",
-  });
-  assert.equal(upward.status, 403, "an admin cannot reset the super admin");
+  try {
+    const byClient = await as(clientCaller.email, { userId: adminTarget.userId });
+    assert.equal(byClient.status, 403, "a client holds no users.edit");
+    assert.equal((await byClient.json()).capability, "users.edit");
 
-  const self = await fetch(`${BASE_URL}/api/admin/users/password-reset`, {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-    body: JSON.stringify({ userId: "user-owner-maintsupp-com" }),
-  });
-  assert.equal(self.status, 400, "use account settings, which asks for the current password");
+    const sideways = await as(adminCaller.email, { userId: adminTarget.userId });
+    assert.equal(sideways.status, 403, "an admin cannot reset another admin");
 
-  const nowhere = await fetch(`${BASE_URL}/api/admin/users/password-reset`, {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-    body: JSON.stringify({ userId: "user-does-not-exist" }),
-  });
-  assert.equal(nowhere.status, 404);
+    const ownAccount = await as(adminCaller.email, { userId: adminCaller.userId });
+    assert.equal(
+      ownAccount.status,
+      400,
+      "use account settings, which asks for the current password",
+    );
+
+    const nowhere = await fetch(`${BASE_URL}/api/admin/users/password-reset`, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ userId: "user-does-not-exist" }),
+    });
+    assert.equal(nowhere.status, 404);
+
+    /* And the authority that DOES hold still works, so none of the above is
+       passing because issuing is broken for everybody. */
+    const allowed = await issue(cookie, adminTarget.userId);
+    assert.equal(allowed.status, 201, "the platform may still issue a link in its own workspace");
+  } finally {
+    for (const fixture of [clientCaller, adminCaller, adminTarget]) {
+      await retireResetTarget(cookie, fixture.userId);
+    }
+  }
 });
 
 test("live: a valid link renders two revealable fields; a dead one still refuses", async (t) => {
