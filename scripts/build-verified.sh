@@ -28,6 +28,12 @@ fi
 # vercel/build-output.mjs re-checks this; see the note there.
 export D1_NODE_SHIM=1
 
+# public/ is copied verbatim into the build output, so the sitemap has to be
+# regenerated BEFORE the bundler reads it. See scripts/generate-sitemap.mjs for
+# why the dates come from git rather than the build clock.
+echo "Generating sitemap..."
+node "${SITES_PROJECT_ROOT}/scripts/generate-sitemap.mjs"
+
 echo "Running bounded vinext build..."
 "${timeout_bin}" \
   --signal=TERM \
