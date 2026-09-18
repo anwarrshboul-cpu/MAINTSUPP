@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { PasswordInput } from "../../password-input";
 
 /**
  * The set-a-new-password form.
@@ -10,6 +11,14 @@ import { useState } from "react";
  * a reset is not a chance to edit somebody's profile — and no email field,
  * because the account is fixed on the token and nothing typed here could
  * point it somewhere better.
+ *
+ * Both fields can be revealed, each on its own control, through the same
+ * `PasswordInput` the invitation page uses — the person setting a password
+ * they cannot see is exactly the person who most needs to check it. That
+ * component is uncontrolled, so the passwords are read from the inputs at
+ * submit time and are never held in React state, rendered, logged or put in a
+ * URL; they were in state here before, which put the value into the markup.
+ * Both go back to hidden before the form sends and when the server refuses it.
  *
  * On success it does NOT navigate into the dashboard, because the server does
  * not issue a session. Being made to sign in with the password just chosen is
@@ -23,23 +32,37 @@ export default function SetPasswordForm({
   token: string;
   email: string;
 }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmRef = useRef<HTMLInputElement>(null);
+  const [shown, setShown] = useState({ password: false, confirm: false });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
+
+  function clearPasswords() {
+    if (passwordRef.current) passwordRef.current.value = "";
+    if (confirmRef.current) confirmRef.current.value = "";
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
 
+    const password = passwordRef.current?.value ?? "";
+    const confirm = confirmRef.current?.value ?? "";
+
     // Checked here purely so the person is told immediately. The server never
-    // receives this field — it only ever sees one password.
+    // receives this field — it only ever sees one password. A mismatch leaves
+    // both fields exactly as they were, revealed or not: reading the two is how
+    // a person spots the typo.
     if (password !== confirm) {
       setError("Those passwords do not match.");
       return;
     }
 
+    // Hidden again before anything leaves, so the submission is of two password
+    // fields — what a password manager expects to see.
+    setShown({ password: false, confirm: false });
     setPending(true);
     setError(null);
 
@@ -60,8 +83,8 @@ export default function SetPasswordForm({
         setError(payload.error ?? "This password could not be set.");
         // Cleared on failure so a rejected password is not left on screen for
         // whoever walks past next.
-        setPassword("");
-        setConfirm("");
+        clearPasswords();
+        setShown({ password: false, confirm: false });
         setPending(false);
         return;
       }
@@ -110,38 +133,33 @@ export default function SetPasswordForm({
         hidden
       />
 
-      <div className="invite__field">
-        <label htmlFor="reset-password">New password</label>
-        <input
-          id="reset-password"
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          disabled={pending}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          aria-describedby="reset-password-hint"
-        />
+      <PasswordInput
+        id="reset-password"
+        name="password"
+        label="New password"
+        revealLabel="password"
+        shown={shown.password}
+        onToggle={() => setShown((current) => ({ ...current, password: !current.password }))}
+        disabled={pending}
+        inputRef={passwordRef}
+        describedBy="reset-password-hint"
+      >
         <span className="invite__hint" id="reset-password-hint">
           At least 12 characters. Length beats symbols — a short phrase you can
           remember is stronger than a mangled word.
         </span>
-      </div>
+      </PasswordInput>
 
-      <div className="invite__field">
-        <label htmlFor="reset-confirm">Confirm password</label>
-        <input
-          id="reset-confirm"
-          name="confirmPassword"
-          type="password"
-          autoComplete="new-password"
-          required
-          disabled={pending}
-          value={confirm}
-          onChange={(event) => setConfirm(event.target.value)}
-        />
-      </div>
+      <PasswordInput
+        id="reset-confirm"
+        name="confirmPassword"
+        label="Confirm password"
+        revealLabel="password confirmation"
+        shown={shown.confirm}
+        onToggle={() => setShown((current) => ({ ...current, confirm: !current.confirm }))}
+        disabled={pending}
+        inputRef={confirmRef}
+      />
 
       <button className="invite__submit" type="submit" disabled={pending}>
         {pending ? "Setting…" : "Set new password"}

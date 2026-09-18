@@ -597,19 +597,46 @@ test("live: none of the withdrawn strings reaches a reader", async (t) => {
   assert.ok(!html.includes("Book My Portfolio Review"), "nor offers a submit that cannot book");
 });
 
+/*
+ * The destination this page is SUPPOSED to offer, read from the one place that
+ * decides it.
+ *
+ * This used to be a second typed copy of the slug, and it went stale the moment
+ * the booking URL was corrected: the constant became
+ * `portfolio-review-30-minutes` and this test still demanded the old
+ * `portfolio-review`, so it failed while the product was right. A copy of a
+ * value cannot check that value. It reads `BOOKING_URL` from `content.ts`
+ * instead — including the deployment's override, which is how the URL is meant
+ * to be changed — so it now asks the only question worth asking: does every
+ * booking link on the page go where the configuration says?
+ */
+async function bookingDestination() {
+  const override = process.env.NEXT_PUBLIC_BOOKING_URL?.trim();
+  if (override) return override;
+  const content = await read(`${SECTIONS}/content.ts`);
+  const [, url] =
+    content.match(/export const BOOKING_URL =[\s\S]*?\|\|\s*"([^"]+)";/) ?? [];
+  assert.ok(url, "content.ts must still declare a default BOOKING_URL");
+  return url;
+}
+
 test("live: the page offers the booking link and the enquiry form both", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
     return;
   }
   const html = await page("/");
-  const booking = [
-    ...html.matchAll(/href="https:\/\/cal\.com\/maintsupp\/portfolio-review"[^>]*/g),
-  ].map((m) => m[0]);
-  assert.equal(booking.length, 2, "the hero and the final panel, and nowhere else");
-  for (const link of booking) {
-    assert.match(link, /target="_blank"/);
-    assert.match(link, /rel="noopener noreferrer"/);
+  const expected = await bookingDestination();
+
+  /* Every calendar link on the page, whatever it points at — so a second,
+     stale URL left behind somewhere fails this rather than hiding behind the
+     one that is correct. */
+  const calendarLinks = [...html.matchAll(/href="(https:\/\/cal\.com\/[^"]*)"[^>]*/g)];
+  assert.ok(calendarLinks.length >= 2, "the hero and the final panel both book");
+  for (const [tag, href] of calendarLinks) {
+    assert.equal(href, expected, "every booking link is the configured destination");
+    assert.match(tag, /target="_blank"/);
+    assert.match(tag, /rel="noopener noreferrer"/);
   }
   assert.ok(html.includes("Send My Enquiry"), "the form is still there, honestly labelled");
   assert.ok(html.includes('href="/contractors"'), "and the nav carries Contractors");

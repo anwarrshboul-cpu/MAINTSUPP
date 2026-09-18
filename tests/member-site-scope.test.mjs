@@ -240,7 +240,7 @@ test("the site-groups read no longer writes for somebody who may not write", asy
 
 /* ── 3. Against the running estate ────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const ADMIN = "admin@sunnamusk-uk.test.maintsupp.com";
 const OTHER_TENANT_ADMIN = "admin@demo-client-ltd.test.maintsupp.com";
 const ORG = "org_000000000000000000000001";

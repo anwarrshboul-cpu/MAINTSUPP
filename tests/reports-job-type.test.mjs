@@ -336,7 +336,7 @@ test("the route reads the job's type and the organisation's types, and names the
 
 /* ── Against the running estate ───────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {

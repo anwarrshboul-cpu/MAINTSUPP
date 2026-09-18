@@ -545,7 +545,11 @@ test("finance stays internal: managers are refused along with clients", async ()
 /* ================================================================== */
 
 test("the invitation page can reveal a password without writing it into the DOM", async () => {
-  const field = await read("app/(public)/invite/[token]/password-input.tsx");
+  /* Re-pointed: the field moved one level up, to `app/(public)/password-input.tsx`,
+     so the reset page can import the same one — Vite reads `[` and `]` as glob
+     syntax, so no route outside `invite/[token]/` could import it where it was.
+     The contract this pin protects is unchanged; it now guards both pages. */
+  const field = await read("app/(public)/password-input.tsx");
   const form = await read("app/(public)/invite/[token]/accept-invite-form.tsx");
 
   assert.match(field, /type=\{shown \? "text" : "password"\}/);

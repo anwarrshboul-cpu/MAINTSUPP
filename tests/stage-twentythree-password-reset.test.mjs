@@ -137,6 +137,57 @@ test("issuing a link is gated, scoped, and refuses upward and self", async () =>
   );
 });
 
+/*
+ * SOMEBODY SETTING A PASSWORD THEY CANNOT SEE IS THE PERSON WHO MOST NEEDS TO
+ * CHECK IT. These two fields were plain masked inputs with no way to reveal
+ * them, while the invitation page next door — the same reader, holding the same
+ * kind of handed-out link — had a reveal control on both of its own. This pins
+ * the second half of that: one implementation, used by both pages.
+ */
+test("both fields on the reset page reveal, through the invitation's own control", async () => {
+  const form = await read("app/(public)/reset/[token]/set-password-form.tsx");
+  const invite = await read("app/(public)/invite/[token]/accept-invite-form.tsx");
+  const field = await read("app/(public)/password-input.tsx");
+
+  // The same module, not a second copy of it.
+  assert.match(form, /import \{ PasswordInput \} from "\.\.\/\.\.\/password-input";/);
+  assert.match(invite, /import \{ PasswordInput \} from "\.\.\/\.\.\/password-input";/);
+  assert.match(form, /revealLabel="password"/);
+  assert.match(form, /revealLabel="password confirmation"/, "each control says what it reveals");
+  assert.match(form, /id="reset-password"/);
+  assert.match(form, /id="reset-confirm"/);
+  // Each field has its own state, so revealing one does not reveal the other.
+  assert.match(form, /shown=\{shown\.password\}/);
+  assert.match(form, /shown=\{shown\.confirm\}/);
+
+  // Uncontrolled, like the invitation's: a controlled password field keeps the
+  // typed value in the markup. This form used to hold both in React state.
+  assert.doesNotMatch(form, /value=\{password\}|value=\{confirm\}/);
+  assert.match(form, /passwordRef\.current\?\.value/);
+  assert.match(form, /confirmRef\.current\?\.value/);
+  assert.match(form, /password !== confirm/, "mismatch is still caught before sending");
+  assert.match(
+    form,
+    /setShown\(\{ password: false, confirm: false \}\);\s*setPending\(true\);/,
+    "both fields are hidden again before anything is sent",
+  );
+  assert.match(form, /clearPasswords\(\);/, "a refused password is not left on screen");
+  assert.doesNotMatch(form, /console\.|localStorage|sessionStorage|searchParams/);
+
+  // The control itself: a real button that cannot submit, named for what it
+  // will do, with no password in any attribute.
+  assert.match(field, /type=\{shown \? "text" : "password"\}/);
+  assert.match(field, /<button\s+type="button"/);
+  assert.match(field, /aria-label=\{`\$\{shown \? "Hide" : "Show"\} \$\{revealLabel\}`\}/);
+  assert.match(field, /defaultValue=""/);
+  assert.match(field, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/, "the caret stays put");
+
+  // And the page reaches the styles for it: its stylesheet is the invitation's,
+  // which is where `.invite__reveal` is drawn.
+  assert.match(await read("app/(public)/reset/reset.css"), /@import "\.\.\/invite\/\[token\]\/invite\.css";/);
+  assert.match(await read("app/(public)/invite/[token]/invite.css"), /\.invite__reveal/);
+});
+
 test("the reset page refuses to leak, and does not sign anybody in", async () => {
   const page = await read("app/(public)/reset/[token]/page.tsx");
   const form = await read("app/(public)/reset/[token]/set-password-form.tsx");
@@ -318,4 +369,74 @@ test("the guard rails hold against a real caller", async (t) => {
     body: JSON.stringify({ userId: "user-does-not-exist" }),
   });
   assert.equal(nowhere.status, 404);
+});
+
+test("live: a valid link renders two revealable fields; a dead one still refuses", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+  const cookie = await signIn(OWNER.email, OWNER.password);
+  if (!cookie) {
+    t.skip("the seeded owner could not sign in");
+    return;
+  }
+
+  /*
+   * A target read from the caller's own roster rather than a fixed seeded id:
+   * a reset is scoped to the workspace the caller is in, and which seeded
+   * account sits in it differs between a fresh database and a long-lived one.
+   * Only a test address, and only one this caller may already manage.
+   */
+  const roster = await (
+    await fetch(`${BASE_URL}/api/admin/users`, { headers: { cookie } })
+  ).json();
+  const target = (roster.users ?? []).find(
+    (user) =>
+      user.manageable &&
+      user.active &&
+      !user.isSelf &&
+      /(@|\.)(test|local)\b|\.test\./i.test(user.email),
+  );
+  if (!target) {
+    t.skip("no manageable test account in this workspace");
+    return;
+  }
+
+  /* Issued, never spent: this test is about what the page offers, so no
+     account's password is touched and the link simply expires. */
+  const issued = await issue(cookie, target.id);
+  assert.equal(issued.status, 201, JSON.stringify(issued.body));
+  const token = tokenOf(issued.body.resetUrl);
+
+  const response = await fetch(`${BASE_URL}/reset/${token}`);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+
+  for (const [id, label] of [
+    ["reset-password", "Show password"],
+    ["reset-confirm", "Show password confirmation"],
+  ]) {
+    const input = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
+    assert.ok(input, `${id} is on the page`);
+    assert.match(input, /type="password"/, "masked until the reader asks otherwise");
+    assert.match(input, /autocomplete="new-password"/i);
+    /* The field is uncontrolled, so the only `value` the markup can carry is
+       the empty one React renders for `defaultValue` — never anything typed.
+       That typing leaves the attribute alone is proved in a real browser. */
+    assert.doesNotMatch(input, /\svalue="[^"]+"/, "no password can reach the markup");
+
+    const button = html.match(new RegExp(`<button[^>]*aria-controls="${id}"[^>]*>`))?.[0];
+    assert.ok(button, `${id} has a reveal control`);
+    assert.match(button, /type="button"/, "it cannot submit the form");
+    assert.match(button, new RegExp(`aria-label="${label}"`), "named for what it will do");
+  }
+
+  // The page it was served from still says nothing about the account to
+  // anybody holding a spent or invented link.
+  const dead = await fetch(`${BASE_URL}/reset/${"f".repeat(64)}`);
+  assert.equal(dead.status, 200);
+  const deadHtml = await dead.text();
+  assert.match(deadHtml, /This link cannot be used/);
+  assert.doesNotMatch(deadHtml, /id="reset-password"/, "and offers no form");
 });

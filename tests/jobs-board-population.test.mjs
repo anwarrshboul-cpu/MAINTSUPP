@@ -35,7 +35,7 @@ const { JOBS_BOARD_KEY, isOnJobsBoard } = await import("../app/lib/job-metrics.t
 const { drawnGroupId } = await import("../app/(app)/portal/board-group-fallback.ts");
 const { readDrillFilter } = await import("../app/(app)/portal/board-drill-filter.ts");
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {

@@ -985,7 +985,7 @@ test("no new CSS was put into globals.css", async () => {
 
 /* ── The live route, when a dev server is answering ──────────────────────── */
 
-const ORIGIN = process.env.PORTAL_ORIGIN ?? "http://localhost:5173";
+const ORIGIN = process.env.MAINTSUPP_BASE_URL ?? process.env.PORTAL_ORIGIN ?? "http://localhost:5173";
 
 async function serverAnswers() {
   try {
