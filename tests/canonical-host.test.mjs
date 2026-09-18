@@ -3,7 +3,7 @@
  * that declare one.
  *
  * Measured on Production on 15 September 2026, it declared two at once. The
- * rendered page said `https://www.maintsupp.com` in its canonical link and its
+ * rendered page said `https://maintsupp.com` in its canonical link and its
  * `og:url`; the `robots.txt` it pointed crawlers at said `https://maintsupp.com`
  * in its self-reference AND in its `Sitemap:` line; all six `<loc>` entries in
  * that sitemap said the apex; and `metadataBase` — the base every relative
@@ -18,7 +18,7 @@
  * fails here ONCE, in one place, with the list of everything that has to move
  * with it.
  *
- * `maintsupp-homepage-update-prompt.md` §10.3 names `https://www.maintsupp.com/`
+ * `maintsupp-homepage-update-prompt.md` §10.3 names `https://maintsupp.com/`
  * and that is the host below. Changing it is a real decision — it must be made
  * together with the Vercel primary-domain setting, or the site will publish a
  * canonical URL that redirects.
@@ -35,7 +35,7 @@ const load = async (file) =>
   (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
 /** The one host. Everything below is measured against this and nothing else. */
-const CANONICAL = "https://www.maintsupp.com";
+const CANONICAL = "https://maintsupp.com";
 
 /**
  * Every file that states an absolute public URL for this site.
@@ -70,7 +70,7 @@ const NOT_A_DECLARATION = /(^|[@./])test\.maintsupp\.com|portal\.maintsupp\.com/
  * origin.
  *
  * Two shapes count. A full URL is the obvious one. The other is a hostname in
- * quotes with no scheme — `const HOST = "www.maintsupp.com"` is how the
+ * quotes with no scheme — `const HOST = "maintsupp.com"` is how the
  * pre-deploy harness names the host it probes, and reading only full URLs made
  * that file look as though it declared nothing. A bare hostname in PROSE is
  * deliberately not matched: comments discuss both hosts by name, and they

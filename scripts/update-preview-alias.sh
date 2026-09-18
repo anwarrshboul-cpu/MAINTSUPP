@@ -68,7 +68,7 @@ ALIAS="${ALIAS:-maintsupp-preview.vercel.app}"
 # written: nothing in this file can create, promote or retarget a production
 # deployment. Override it on the day the domain legitimately changes, so that
 # the change is stated by whoever makes it rather than discovered later.
-EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://www.maintsupp.com}"
+EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://maintsupp.com}"
 # The apex is the same project and stays acceptable, so that this guard
 # does not fire on the day the primary domain is switched between the two.
 EXPECTED_PRODUCTION_ALT="${EXPECTED_PRODUCTION_ALT:-https://maintsupp.com}"
