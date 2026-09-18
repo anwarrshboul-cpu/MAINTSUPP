@@ -504,6 +504,73 @@ async function removeFixture() {
   await call(`/api/workspace-sections?key=${KEY}&purge=1`, { method: "DELETE" }, SUPER);
 }
 
+/*
+ * THE VIEWS THESE TESTS CHOOSE BETWEEN ARE NOW THEIR OWN FIXTURE.
+ *
+ * Choosing a view for a section only means anything if the board OFFERS views,
+ * and the two tests below took that for granted: one asked a client to save
+ * `view: "main"`, the other needed three to pick from. Neither made any. On a
+ * database that had been worked over by the rest of the suite there were views
+ * lying about and both passed; on a freshly migrated one there are none, the
+ * route correctly refuses a view the board does not have, and both failed —
+ * for a reason that had nothing to do with what they are testing.
+ *
+ * So the board gets exactly as many views as the test needs, made here and
+ * removed afterwards, and the tests read the keys back rather than naming one
+ * they hope exists. Only the shortfall is created, so a real estate that
+ * already has views is left exactly as it was.
+ */
+const VIEW_FIXTURE = "Sections fixture view";
+const madeViews = [];
+
+async function boardViews() {
+  const response = await call("/api/board/views?board=maintenance");
+  return response.ok ? ((await response.json()).views ?? []) : [];
+}
+
+async function makeView(name) {
+  const response = await call("/api/board/views", {
+    method: "POST",
+    body: JSON.stringify({ board: "maintenance", name, type: "table" }),
+  });
+  if (!response.ok) return null;
+  const made = await response.json();
+  madeViews.push(made.id);
+  return made;
+}
+
+async function ensureBoardViews(minimum) {
+  let views = await boardViews();
+  for (let index = views.length; index < minimum; index += 1) {
+    if (!(await makeView(`${VIEW_FIXTURE} ${index + 1}`))) break;
+  }
+  views = await boardViews();
+
+  /*
+   * One of them has to be the board's DEFAULT, or the section resolves its view
+   * by falling back to the first — `source: "first"` rather than `"board"`. The
+   * default this test needs is one of its own, never an estate's existing view
+   * re-flagged: made here and deleted in teardown, which puts the board back.
+   */
+  if (views.length && !views.some((view) => view.isDefault)) {
+    const own = madeViews.length ? madeViews[0] : (await makeView(`${VIEW_FIXTURE} default`))?.id;
+    if (own) {
+      await call("/api/board/views", {
+        method: "PATCH",
+        body: JSON.stringify({ board: "maintenance", id: own, isDefault: true }),
+      });
+      views = await boardViews();
+    }
+  }
+  return views.map((view) => view.key);
+}
+
+async function removeMadeViews() {
+  while (madeViews.length) {
+    await call(`/api/board/views?id=${encodeURIComponent(madeViews.pop())}`, { method: "DELETE" });
+  }
+}
+
 test("the API adds, shows, renames, reorders and removes a section", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no server at ${BASE_URL}`);
@@ -636,10 +703,14 @@ test("a client may read the sections and is refused every write, by name", async
     assert.equal(read.status, 200, "a client still has to be able to draw a sidebar");
     assert.equal((await read.json()).canEdit, false);
 
-    // Their own last view is their screen, and grants nothing.
+    // Their own last view is their screen, and grants nothing. The view is one
+    // the board actually offers — a key typed in here is only ever this board's
+    // on an estate that happens to have it.
+    const [offered] = await ensureBoardViews(1);
+    assert.ok(offered, "the board offers a view to choose");
     const mine = await call(
       "/api/workspace-sections/view",
-      { method: "PUT", body: JSON.stringify({ section: KEY, view: "main" }) },
+      { method: "PUT", body: JSON.stringify({ section: KEY, view: offered }) },
       CLIENT,
     );
     assert.equal(mine.status, 200);
@@ -648,6 +719,7 @@ test("a client may read the sections and is refused every write, by name", async
     assert.equal(unchanged.sections.find((entry) => entry.key === KEY).label, "CCTV test");
   } finally {
     await removeFixture();
+    await removeMadeViews();
   }
 });
 
@@ -661,10 +733,13 @@ test("the section opens on the view the owner chose, until you choose your own",
     method: "POST",
     body: JSON.stringify({ label: "CCTV test", key: KEY, surface: "maintenance" }),
   });
+  /* Three, because this test picks a board default, another view for the
+     workspace, and a third for one person only. */
+  await ensureBoardViews(3);
 
   try {
     const initial = await (await call(`/api/workspace-sections/view?section=${KEY}`)).json();
-    assert.ok(initial.views.length > 1, "the job board has views to choose between");
+    assert.ok(initial.views.length > 2, "the job board has views to choose between");
     assert.equal(initial.source, "board", "with nothing set, the board's own default answers");
     const boardDefault = initial.view;
     const other = initial.views.find((view) => view.key !== boardDefault).key;
@@ -718,6 +793,7 @@ test("the section opens on the view the owner chose, until you choose your own",
     assert.equal(forgotten.source, "workspace");
   } finally {
     await removeFixture();
+    await removeMadeViews();
   }
 });
 
