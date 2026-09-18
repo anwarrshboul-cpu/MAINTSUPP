@@ -91,6 +91,105 @@ test("the browser's picker button is hidden, so its popup cannot be summoned", a
 });
 
 /* ------------------------------------------------------------------ */
+/* 1b. The Timeline editor opens the same picker                       */
+/* ------------------------------------------------------------------ */
+
+test("Set timeline's Start and End open the board's calendar, not the browser's", async () => {
+  const cells = codeOnly(await source("app/(app)/portal/board-cells.tsx"));
+  const editor = cells.slice(
+    cells.indexOf('className="sheet-timeline-popover"'),
+    /* The mobile sheet's own class — an unambiguous end for this slice, where
+       "open && mobile" also appears in DateCell far above. */
+    cells.indexOf("mobile-timeline-sheet"),
+  );
+  assert.match(editor, /<TimelineDateField[\s\S]{0,200}label="Start date"/);
+  assert.match(editor, /<TimelineDateField[\s\S]{0,200}label="End date"/);
+  assert.doesNotMatch(
+    editor,
+    /<input[\s\S]{0,80}type="date"/,
+    "a date input here is what opened Chromium's grey popup on this panel",
+  );
+});
+
+test("the Timeline field is the same component the date columns use", async () => {
+  const picker = codeOnly(await source("app/(app)/portal/cells/board-date-picker.tsx"));
+  const tail = picker.slice(picker.indexOf("export function TimelineDateField"));
+  /* The field's own body, not the rest of the file — `BoardDatePicker` below it
+     legitimately draws the grid, and an unbounded slice would include it. */
+  const field = tail.slice(0, tail.indexOf("export function BoardDatePicker"));
+  assert.match(
+    field,
+    /<BoardDatePicker/,
+    "the field must open the SAME panel, not a second calendar",
+  );
+  // One calendar in the product: the field owns no grid of its own.
+  assert.doesNotMatch(field, /MobileBoardCalendar|boardCalendarDays/);
+});
+
+test("the Timeline editor is not dismissed by a press inside the calendar", async () => {
+  /*
+   * THE NESTED-POPOVER TRAP. `BoardDatePicker` portals its panel into the
+   * shared layer host, so a press on a day is a press OUTSIDE the timeline
+   * popover — and this editor closes on any outside press. Left alone, picking
+   * a date closed the whole editor before the date could be taken.
+   * `LayerPortal` stamps `data-board-popover` on that host for exactly this,
+   * and the rest of the board already skips it.
+   */
+  const cells = codeOnly(await source("app/(app)/portal/board-cells.tsx"));
+  const timeline = cells.slice(cells.indexOf("export function TimelineCell("));
+  assert.match(
+    timeline.slice(0, 2000),
+    /closest\("\[data-board-popover\]"\)/,
+    "the dismissal must skip anything inside a portalled board popover",
+  );
+});
+
+test("the end-before-start rule is untouched, and nothing is silently swapped", async () => {
+  const cells = codeOnly(await source("app/(app)/portal/board-cells.tsx"));
+  const save = cells.slice(cells.indexOf("const saveTimeline = () =>"));
+  assert.match(
+    save.slice(0, 420),
+    /if \(draftStart && endToSave && endToSave < draftStart\) \{\s*setError\(/,
+    "an end before the start is refused, not reordered",
+  );
+  assert.match(cells, /The end date must be on or after the start date\./);
+  // The fields write the draft only; "Save dates" is still what commits.
+  const editor = cells.slice(
+    cells.indexOf('className="sheet-timeline-popover"'),
+    /* The mobile sheet's own class — an unambiguous end for this slice, where
+       "open && mobile" also appears in DateCell far above. */
+    cells.indexOf("mobile-timeline-sheet"),
+  );
+  assert.match(editor, /onClick=\{saveTimeline\}/);
+  assert.doesNotMatch(editor, /onSave\(/, "a field must not commit behind the Save button");
+});
+
+test("the strip still reads the saved dates, so the sync fix is not undone", async () => {
+  const cells = codeOnly(await source("app/(app)/portal/board-cells.tsx"));
+  const timeline = cells.slice(cells.indexOf("export function TimelineCell("));
+  assert.match(timeline, /const savedStart = dateInputValue\(start\);/);
+  assert.match(timeline, /const savedEnd = dateInputValue\(end\);/);
+  const label = timeline.slice(timeline.indexOf("const label ="), timeline.indexOf("const saveTimeline"));
+  assert.doesNotMatch(label, /draftStart|draftEnd/, "no draft state in the strip's label");
+});
+
+test("the picker's stylesheet ships whether or not a panel is open", async () => {
+  /*
+   * IT DID NOT, AND EVERY DATE CELL PAID FOR IT. The stylesheet also carries
+   * `.sheet-date__trigger`, and the component returned `null` before reaching
+   * the `<link>` — so on first paint the board's date cells were unstyled and
+   * only snapped into shape once a reader opened a picker. Measured in a
+   * browser: `display: block` before, `display: flex` after.
+   */
+  const picker = codeOnly(await source("app/(app)/portal/cells/board-date-picker.tsx"));
+  const closed = picker.indexOf("if (!open) return");
+  const link = picker.indexOf("rel=\"stylesheet\"");
+  assert.ok(link !== -1, "the picker must ship its stylesheet");
+  assert.ok(link < closed, "the stylesheet must be built BEFORE the closed early return");
+  assert.match(picker, /if \(!open\) return stylesheet;/);
+});
+
+/* ------------------------------------------------------------------ */
 /* 2. Navigation, keyboard and the rules the cell already had          */
 /* ------------------------------------------------------------------ */
 

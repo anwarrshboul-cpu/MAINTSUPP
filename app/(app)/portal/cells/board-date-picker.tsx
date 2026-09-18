@@ -32,7 +32,7 @@
  * clear.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { MobileBoardCalendar, shiftBoardCalendarYear } from "../board-calendar";
 import {
   boardCalendarMonth,
@@ -41,8 +41,63 @@ import {
   todayBoardDate,
 } from "../board-format";
 import { AnchoredPopover } from "../overlay/anchored";
+import { formatDate } from "../../../lib/format-date";
 import { Icon } from "../../../components";
 import boardDatePickerCss from "./board-date-picker.css?url";
+
+/**
+ * A labelled date field that opens the picker above — the Timeline editor's
+ * Start date and End date.
+ *
+ * Here rather than in `board-cells.tsx` because that file is at its 1,300-line
+ * ceiling, and because "the control that opens this panel" belongs beside the
+ * panel: the two share the trigger's wording, its empty state and its
+ * accessible name, and a copy of them in another file is how the two fields
+ * come to disagree with the date columns they are meant to match.
+ *
+ * It owns the DRAFT only. The Timeline editor still commits on "Save dates",
+ * so the end-before-start rule stays exactly where it was.
+ */
+export function TimelineDateField({
+  label,
+  value,
+  open,
+  onOpenChange,
+  onPick,
+}: {
+  label: string;
+  value: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPick: (value: string) => void;
+}) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  return (
+    <span className="sheet-timeline-popover__field">
+      {label}
+      <button
+        ref={anchorRef}
+        type="button"
+        className={`sheet-timeline-popover__date${value ? "" : " is-empty"}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${label}: ${value ? formatDate(value) : "no date"}`}
+        onClick={() => onOpenChange(!open)}
+      >
+        {value ? formatDate(value) : "—"}
+      </button>
+      <BoardDatePicker
+        open={open}
+        anchorRef={anchorRef}
+        onClose={() => onOpenChange(false)}
+        title={label}
+        value={value}
+        clearable
+        onPick={(next) => onPick(next ?? "")}
+      />
+    </span>
+  );
+}
 
 export function BoardDatePicker({
   open,
@@ -72,9 +127,26 @@ export function BoardDatePicker({
    */
   const [month, setMonth] = useState(() => boardCalendarMonth(value));
 
-  /* The cell mounts this only while it is open, so the seed above runs on
-     every open and a second edit lands on the month it was left showing. */
-  if (!open) return null;
+  /*
+   * THE STYLESHEET SHIPS WHETHER OR NOT THE PANEL IS OPEN.
+   *
+   * It also carries `.sheet-date__trigger` — the cell's own button — and this
+   * component used to return `null` before reaching the `<link>`. So on first
+   * paint every date cell on the board was UNSTYLED, and only snapped into
+   * shape once a reader happened to open a picker: measured at
+   * `display: block` before, `display: flex` after. `expiry-cell.tsx` renders
+   * its link unconditionally for exactly this reason; this now does too.
+   *
+   * React 19 hoists and de-duplicates by href, so one `<link>` per date cell
+   * costs nothing.
+   */
+  const stylesheet = (
+    <link rel="stylesheet" href={boardDatePickerCss} precedence="board" />
+  );
+
+  /* Closed: the styles, and nothing else. Mounting the panel only while it is
+     open is what re-seeds the month above on every open. */
+  if (!open) return stylesheet;
 
   const step = (amount: number, unit: "month" | "year") =>
     setMonth((current) =>
@@ -85,9 +157,7 @@ export function BoardDatePicker({
 
   return (
     <>
-      {/* React 19 hoists and de-duplicates this, so the picker ships its own
-          stylesheet without any existing sheet having to change. */}
-      <link rel="stylesheet" href={boardDatePickerCss} precedence="board" />
+      {stylesheet}
       <AnchoredPopover
         open={open}
         anchorRef={anchorRef}
