@@ -12,10 +12,20 @@
  * the page. Not the build clock — stamping today onto all six pages on every
  * deploy is the same lie told faster, and Google distrusts that shape too.
  *
- * WHEN GIT IS NOT THERE. A build container without `.git` cannot answer the
- * question, so this REUSES THE DATE ALREADY IN THE FILE rather than inventing
- * one. The sitemap then ages instead of lying, and the warning below says so
- * in the build log. It never writes a date it cannot justify.
+ * WHEN GIT CANNOT ANSWER. Two cases, one behaviour: no `.git` at all, and a
+ * SHALLOW clone. The second is the one that nearly shipped. Vercel clones at
+ * depth 1, and `git log -1 -- <file>` in a shallow repository does not fail —
+ * it cheerfully returns the boundary commit, so every page that had not been
+ * touched since the clone horizon reported the same recent date. Measured on
+ * the first deploy of this script: /faqs, /terms and /cookies came back
+ * 2026-09-17 when their real dates are 2026-08-14. Wrong dates that look
+ * plausible are worse than the frozen ones they replaced.
+ *
+ * So both cases REUSE THE DATE ALREADY IN THE FILE rather than inventing one.
+ * The committed sitemap is the record, written by a full clone; a shallow
+ * build republishes it untouched and says so in the build log.
+ * tests/sitemap-lastmod.test.mjs keeps that record honest by regenerating it
+ * wherever full history IS available.
  */
 import { execFileSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -45,6 +55,26 @@ const ROUTES = [
   { path: "/terms",       changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/terms/page.tsx"] },
   { path: "/cookies",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/cookies/page.tsx"] },
 ];
+
+/**
+ * Whether git's history here is too shallow to be asked about a file's age.
+ *
+ * `--is-shallow-repository` is the only reliable tell. A truncated history
+ * answers `git log` without complaint and without saying the answer is a
+ * horizon rather than a commit, which is precisely how the boundary date
+ * reached six pages of a published sitemap.
+ */
+function historyIsTruncated() {
+  try {
+    return execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() !== "false";
+  } catch {
+    /* No git, no repository, no answer — same conclusion. */
+    return true;
+  }
+}
 
 /** The last commit date touching any of `paths`, as YYYY-MM-DD, or null. */
 function lastCommitDate(paths) {
@@ -81,10 +111,11 @@ async function previousDates() {
 }
 
 const previous = await previousDates();
+const truncated = historyIsTruncated();
 const unresolved = [];
 
 const entries = ROUTES.map((route) => {
-  const dated = lastCommitDate(route.sources);
+  const dated = truncated ? null : lastCommitDate(route.sources);
   if (!dated) unresolved.push(route.path);
   return { ...route, lastmod: dated ?? previous.get(route.path) ?? null };
 });
@@ -116,10 +147,14 @@ ${entries
 
 await writeFile(OUT, xml);
 
-if (unresolved.length) {
+if (truncated) {
   console.warn(
-    `generate-sitemap: git could not date ${unresolved.join(", ")} — kept the published date. ` +
-      `Expected in a build container without .git; not expected locally.`,
+    "generate-sitemap: history is shallow or absent, so every date was kept as published. " +
+      "Expected on Vercel, which clones at depth 1. Run this in a full clone to refresh them.",
+  );
+} else if (unresolved.length) {
+  console.warn(
+    `generate-sitemap: git knows of no commit touching ${unresolved.join(", ")} — kept the published date.`,
   );
 }
 console.log(

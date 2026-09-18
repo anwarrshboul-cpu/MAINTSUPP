@@ -7,7 +7,8 @@
  * the apex. Both were invisible — the XML parsed, the build passed, and the
  * only symptom was five of six pages never being indexed.
  */
-import { readdir, readFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -71,4 +72,35 @@ test("every lastmod is a real date that has already happened", () => {
        reading history, and it is the one value a crawler will not believe. */
     assert.ok(lastmod <= today, `${loc} claims to have been modified in the future`);
   }
+});
+
+test("the committed file is what full history would produce", async (t) => {
+  /*
+   * The published sitemap is the RECORD: on Vercel, which clones at depth 1,
+   * the generator cannot date anything and simply republishes this file. So a
+   * stale record is a stale sitemap, and nothing else would notice.
+   *
+   * Only a full clone can check that, and the environments that matter here
+   * are the ones that have one.
+   */
+  const shallow = execFileSync("git", ["rev-parse", "--is-shallow-repository"], {
+    encoding: "utf8",
+  }).trim();
+  if (shallow !== "false") {
+    t.skip("shallow clone — no history to check the record against");
+    return;
+  }
+
+  const before = await readFile("public/sitemap.xml", "utf8");
+  execFileSync("node", ["scripts/generate-sitemap.mjs"], { stdio: "ignore" });
+  const after = await readFile("public/sitemap.xml", "utf8");
+  /* Put it back before asserting, so a failure does not also leave a dirty
+     tree behind for whoever runs the suite next. */
+  if (before !== after) await writeFile("public/sitemap.xml", before);
+
+  assert.equal(
+    after,
+    before,
+    "public/sitemap.xml is behind the commits it describes — run node scripts/generate-sitemap.mjs and commit the result",
+  );
 });
