@@ -452,12 +452,24 @@ test("the guard rails hold against a real caller", async (t) => {
     return;
   }
 
-  const as = (identity, body) =>
-    fetch(`${BASE_URL}/api/admin/users/password-reset`, {
+  /*
+   * The callers SIGN IN rather than name themselves in a header.
+   * `x-maintsupp-identity` is a development affordance: against a deployed
+   * build it is ignored, the request is nobody's, and the answer is 401 — which
+   * a test asserting "refused" would happily accept while proving nothing about
+   * roles. Measured on a Preview before this changed. The fixtures below are
+   * invited with passwords, so they can just sign in, and the refusals are then
+   * about the role rather than about who is asking.
+   */
+  const as = async (account, body) => {
+    const theirs = await signIn(account.email, account.password);
+    assert.ok(theirs, `${account.role} fixture could not sign in`);
+    return fetch(`${BASE_URL}/api/admin/users/password-reset`, {
       method: "POST",
-      headers: { "x-maintsupp-identity": identity, "content-type": "application/json" },
+      headers: { cookie: theirs, "content-type": "application/json" },
       body: JSON.stringify(body),
     });
+  };
 
   /*
    * THE CALLERS AND THE TARGET ARE THIS TEST'S OWN, for the same reason the
@@ -481,14 +493,14 @@ test("the guard rails hold against a real caller", async (t) => {
   }
 
   try {
-    const byClient = await as(clientCaller.email, { userId: adminTarget.userId });
+    const byClient = await as(clientCaller, { userId: adminTarget.userId });
     assert.equal(byClient.status, 403, "a client holds no users.edit");
     assert.equal((await byClient.json()).capability, "users.edit");
 
-    const sideways = await as(adminCaller.email, { userId: adminTarget.userId });
+    const sideways = await as(adminCaller, { userId: adminTarget.userId });
     assert.equal(sideways.status, 403, "an admin cannot reset another admin");
 
-    const ownAccount = await as(adminCaller.email, { userId: adminCaller.userId });
+    const ownAccount = await as(adminCaller, { userId: adminCaller.userId });
     assert.equal(
       ownAccount.status,
       400,
