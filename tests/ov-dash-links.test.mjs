@@ -113,10 +113,18 @@ test("a grouped bucket carries every label it stands for", async (t) => {
     return;
   }
   /*
-   * The trap this closes: this estate has a category literally named "Other"
+   * The trap this closes: an estate can have a category literally named "Other"
    * AND a grouped remainder. A link that sent the display word would open one
    * of them and claim to be both. Each slice therefore carries the SOURCE
    * labels it folded together, and the drill sends the list.
+   *
+   * WHICH "Other" THIS IS DECIDES WHAT THE LABELS MUST HOLD, and reading the
+   * word alone cannot tell them apart — `key` can. `overview-metrics.ts` folds
+   * the tail INTO the real category when the estate has one (so its labels then
+   * include "Other" itself), and otherwise emits the remainder as its own slice
+   * keyed `__other__`, whose labels are only the small categories it folded.
+   * This test used to demand "Other" in both cases, so on an estate with no
+   * such category it asked for a label that by definition does not exist.
    */
   const metrics = await (await fetch(`${BASE}/api/overview/metrics`, { headers })).json();
   const other = metrics.categories.find((slice) => slice.label === "Other");
@@ -125,12 +133,26 @@ test("a grouped bucket carries every label it stands for", async (t) => {
     return;
   }
   assert.ok(other.labels.length >= 1);
-  if (other.labels.length > 1) {
+  if (other.key === "__other__") {
+    assert.ok(
+      !other.labels.includes("Other"),
+      "the remainder keeps the name only when no category owns it",
+    );
+  } else if (other.labels.length > 1) {
     assert.ok(
       other.labels.includes("Other"),
       "the real category is inside the bucket that took its name",
     );
   }
+
+  /* Whatever folded where, the ring is a partition: no label counted twice,
+     and none dropped between the slices and the labels they stand for. */
+  const everyLabel = metrics.categories.flatMap((slice) => slice.labels);
+  assert.equal(
+    new Set(everyLabel).size,
+    everyLabel.length,
+    "no source label is counted by two slices",
+  );
 
   const rows = (await (await fetch(`${BASE}/api/maintenance?limit=1000`, { headers })).json())
     .requests ?? [];

@@ -180,12 +180,53 @@ test("both fields on the reset page reveal, through the invitation's own control
   assert.match(field, /<button\s+type="button"/);
   assert.match(field, /aria-label=\{`\$\{shown \? "Hide" : "Show"\} \$\{revealLabel\}`\}/);
   assert.match(field, /defaultValue=""/);
-  assert.match(field, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/, "the caret stays put");
+  assert.match(field, /onMouseDown=\{\(event\) => event\.preventDefault\(\)\}/, "focus stays in the field");
 
   // And the page reaches the styles for it: its stylesheet is the invitation's,
   // which is where `.invite__reveal` is drawn.
   assert.match(await read("app/(public)/reset/reset.css"), /@import "\.\.\/invite\/\[token\]\/invite\.css";/);
   assert.match(await read("app/(public)/invite/[token]/invite.css"), /\.invite__reveal/);
+});
+
+/*
+ * THE CARET SURVIVES THE TOGGLE, AND WHY THIS PIN IS SHAPED LIKE THIS.
+ *
+ * Changing an input's `type` makes the browser drop the selection: the caret
+ * went to 0, so the next character typed after pressing the eye landed at the
+ * FRONT of the password ("abcdef|123456" became "Xabcdef123456"). Preventing
+ * `mousedown` keeps focus in the field, which is why it looked fine until
+ * somebody typed.
+ *
+ * Chromium clears the selection AFTER the type change, so a restore made
+ * synchronously is itself undone — measured, not assumed. The component
+ * therefore restores twice: once for the frame being painted, and again on the
+ * next animation frame, which is the one that holds. Both halves are pinned
+ * because dropping either brings the bug back, and the browser proof that
+ * shows it lives in this batch's scratchpad script, `caret_check.py`
+ * (183 checks across both pages, both fields and three widths; 111 of them
+ * fail on the implementation this replaced).
+ */
+test("the reveal control gives the caret back exactly where it was", async () => {
+  const field = await read("app/(public)/password-input.tsx");
+
+  assert.match(field, /const \{ selectionStart, selectionEnd, selectionDirection \} = node;/,
+    "the position is read from the input as the control is pressed");
+  assert.match(field, /direction: selectionDirection \?\? "none"/, "including which way a selection runs");
+  assert.match(field, /focused: document\.activeElement === node/, "and whether the field had focus at all");
+  assert.match(field, /node\.setSelectionRange\(saved\.start, saved\.end, saved\.direction\)/,
+    "the whole range goes back, not a collapsed caret");
+  assert.match(field, /const frame = requestAnimationFrame\(restore\);/,
+    "the restore that survives the browser's own reset");
+  assert.match(field, /return \(\) => cancelAnimationFrame\(frame\);/, "and it is cancelled if this unmounts");
+  assert.match(field, /\}, \[shown, id\]\);/, "it runs when, and only when, the visibility changes");
+  assert.match(field, /if \(saved\.focused && document\.activeElement !== node\) node\.focus\(\{ preventScroll: true \}\);/,
+    "a keyboard user is left on the control they pressed");
+  // Selection APIs are not available on every input in every browser, and a
+  // reader pressing an eye is not a reason to throw.
+  assert.equal((field.match(/\} catch \{/g) ?? []).length, 2, "both selection calls fail safely");
+  // Still nothing about the password itself leaves the component.
+  assert.doesNotMatch(field, /console\.|localStorage|sessionStorage|fetch\(/);
+  assert.doesNotMatch(field, /value=\{/, "and it stays uncontrolled");
 });
 
 test("the reset page refuses to leak, and does not sign anybody in", async () => {
