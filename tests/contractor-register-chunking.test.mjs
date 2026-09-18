@@ -88,7 +88,7 @@ test("the route's three tallies and the alias read are chunked", async () => {
   assert.match(aliases.slice(0, 1200), /inArray\(contractorNameAliases\.contractorId, chunk\)/);
 });
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 test("LIVE registers=all answers whatever the register's size", async (t) => {

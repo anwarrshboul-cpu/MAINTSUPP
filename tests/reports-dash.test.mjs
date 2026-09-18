@@ -566,7 +566,7 @@ test("the route counts the Overview's jobs with the Overview's spend query — a
 
 /* ── Against the running estate ───────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {

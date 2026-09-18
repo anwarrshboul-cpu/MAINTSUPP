@@ -160,7 +160,7 @@ test("every door that writes a cost goes through the one normaliser", async () =
 
 /* ── 3. Against the running estate ────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const MARKER = "MWQA-";
 
 async function serverIsUp() {

@@ -128,7 +128,7 @@ test("a fixed-fee invoice is the site fees and VAT — the same whatever the job
 
 /* ── Against the running estate ───────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 
 async function serverIsUp() {
   try {

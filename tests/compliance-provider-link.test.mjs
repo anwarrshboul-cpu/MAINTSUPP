@@ -200,7 +200,7 @@ test("the workspace create and edit validate the same link, and the purge clears
 
 /* ── Against the running estate ───────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const ADMIN = "admin@sunnamusk-uk.test.maintsupp.com";
 const CLIENT = "client@sunnamusk-uk.test.maintsupp.com";
 

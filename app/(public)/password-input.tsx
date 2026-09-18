@@ -3,7 +3,15 @@
 import type { Ref } from "react";
 
 /**
- * A password field with a show/hide control — the invitation page's two.
+ * A password field with a show/hide control — the two on the invitation page,
+ * and the two on the reset page.
+ *
+ * IT LIVES HERE, ONE LEVEL ABOVE BOTH ROUTES, because Vite reads `[` and `]` as
+ * glob syntax: an import that crosses `invite/[token]/` from another route does
+ * not resolve, so the reset page could not have reached it in its old home. The
+ * same constraint already put `reset.css` a level up. One implementation rather
+ * than two is the point — a second copy is how two password fields end up with
+ * different keyboard behaviour and different accessible names.
  *
  * UNCONTROLLED, ON PURPOSE. React keeps a controlled input's `value` ATTRIBUTE
  * in step with what is typed, so a controlled password field writes the

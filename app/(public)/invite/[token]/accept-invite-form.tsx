@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { PasswordInput } from "./password-input";
+import { PasswordInput } from "../../password-input";
 
 /**
  * The accept-invitation form — Stage 20.

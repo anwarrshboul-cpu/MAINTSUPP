@@ -778,7 +778,7 @@ test("SOT the frozen rule and the move rule have exactly one definition", async 
 
 /* ── The live register answers with the shape all of this is derived from ─ */
 
-const BASE_URL = process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
+const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
 
 async function serverIsUp() {
   try {

@@ -48,7 +48,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) => readFile(path.join(root, file), "utf8");
 
-const BASE_URL = process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
+const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
 
 /**
  * The workspace that owns the fixtures, and one that must never see them.

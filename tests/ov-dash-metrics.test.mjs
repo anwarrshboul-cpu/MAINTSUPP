@@ -267,7 +267,7 @@ test("the metrics SQL obeys the dual-dialect rules", async () => {
 
 /* ── Against real rows ────────────────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const IDENTITY = "admin@sunnamusk-uk.test.maintsupp.com";
 
 async function metrics(query = "") {

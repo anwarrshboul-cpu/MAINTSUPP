@@ -216,7 +216,7 @@ test("no route sends anything anywhere — store and download only", async () =>
 
 /* ────────────────────────────────────────────────── the live draft lifecycle ─ */
 
-const BASE_URL = process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
+const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? process.env.PORTAL_BASE_URL ?? "http://localhost:5173";
 
 async function serverIsUp() {
   try {

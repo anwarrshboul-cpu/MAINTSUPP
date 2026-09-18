@@ -43,7 +43,7 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = async (file) => (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const IDENTITY = "admin@sunnamusk-uk.test.maintsupp.com";
 const headers = { "x-maintsupp-identity": IDENTITY, Accept: "application/json" };
 

@@ -450,7 +450,7 @@ test("the route reuses the register, the rows builder and the canonical classifi
 
 /* ── Against the running estate ───────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {

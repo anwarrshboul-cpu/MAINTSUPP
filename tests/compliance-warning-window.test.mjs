@@ -196,7 +196,7 @@ test("a settings save merges into the stored blob and validates the window", asy
 
 /* ── 4. Against the running estate ────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 
 async function serverIsUp() {
   try {

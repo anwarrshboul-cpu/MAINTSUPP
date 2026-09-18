@@ -431,7 +431,7 @@ test("the island stays dark on a light profile", async () => {
 
 /* ── Against the live estate ──────────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {

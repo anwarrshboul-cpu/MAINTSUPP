@@ -361,7 +361,7 @@ test("the Settings card is an administrator's, and tells the page when it has wr
 
 /* ── 4. Against the running estate ────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 /** Every fixture this file makes carries it, so a sweep can find them all. */
 const MARKER = "JTQA-";
 /** The one custom type the live test reuses, so runs cannot litter the estate. */

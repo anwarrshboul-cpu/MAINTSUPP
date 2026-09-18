@@ -366,7 +366,7 @@ test("breach risk: High or Tier 1, not yet late, due today or tomorrow — or wi
 
 /* ── 3. Live ──────────────────────────────────────────────────────────────── */
 
-const BASE = "http://localhost:5173";
+const BASE = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
 const headers = { "x-maintsupp-identity": "admin@sunnamusk-uk.test.maintsupp.com", Accept: "application/json" };
 
 async function serverIsUp() {
