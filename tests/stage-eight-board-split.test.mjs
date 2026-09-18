@@ -193,8 +193,14 @@ test("no board file exceeds a reviewable size", async () => {
     /*
      * The board's date popover — the branded calendar that replaced Chromium's
      * own, which no stylesheet can reach. Capped on the same argument.
+     *
+     * Raised from 250 when the Timeline editor's Start and End fields were
+     * given the same picker: the labelled trigger that OPENS the panel now
+     * lives beside it as `TimelineDateField`, rather than being written twice
+     * in board-cells.tsx — which was at 1,300 of 1,300 with the fields inline.
+     * Still capped, and still for the reason every note above gives.
      */
-    "app/(app)/portal/cells/board-date-picker.tsx": 250,
+    "app/(app)/portal/cells/board-date-picker.tsx": 300,
     /*
      * Split out of board-model when it reached 600 — the two column
      * derivations that turn a board's stored lists into what the grid draws.

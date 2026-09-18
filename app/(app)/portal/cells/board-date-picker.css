@@ -266,6 +266,59 @@
   color: var(--muted);
 }
 
+/* ── The Timeline editor's two fields ─────────────────────────────────────── */
+
+/*
+ * Start date and End date inside "Set timeline". They replaced two native
+ * `<input type="date">`, so they are sized and spaced like the inputs they
+ * replaced — the editor's two-column grid is unchanged — and coloured from the
+ * same tokens as the panel they open, so the whole control reads as one thing.
+ */
+.sheet-timeline-popover__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.sheet-timeline-popover__date {
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-timeline-popover__date:hover {
+  border-color: var(--border-active);
+  background: var(--brand-wash);
+}
+
+.sheet-timeline-popover__date:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.sheet-timeline-popover__date[aria-expanded="true"] {
+  border-color: var(--border-active);
+}
+
+.sheet-timeline-popover__date.is-empty {
+  color: var(--muted);
+}
+
 /* ── The cell's own trigger ───────────────────────────────────────────────── */
 
 /*

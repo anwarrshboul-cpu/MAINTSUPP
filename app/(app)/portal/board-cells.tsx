@@ -43,7 +43,7 @@ import {
 } from "./board-primitives";
 /* The branded calendar the desktop date cells open. In its own file for the
    same reason the calendar is: this one is at its enforced ceiling. */
-import { BoardDatePicker } from "./cells/board-date-picker";
+import { BoardDatePicker, TimelineDateField } from "./cells/board-date-picker";
 import { formatDate } from "../../lib/format-date";
 /* The Timeline strip and the duration card it shows on hover or focus. In its
    own file because this one is at its enforced ceiling, and because a hover
@@ -1075,13 +1075,28 @@ export function TimelineCell({
   );
   const ref = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  /* Which endpoint's calendar is open, if either. See `TimelineDateField`. */
+  const [picking, setPicking] = useState<"start" | "end" | null>(null);
 
   useRevealBoardPopover(open && !mobile, ref);
 
   useEffect(() => {
     if (!open || mobile) return;
     const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (ref.current?.contains(target)) return;
+      /*
+       * THE CALENDAR IS NOT INSIDE THIS ELEMENT.
+       *
+       * `BoardDatePicker` portals its panel into the shared layer host, so a
+       * press on a day is a press OUTSIDE this popover and closed the whole
+       * timeline editor before the day could be taken. `LayerPortal` stamps
+       * `data-board-popover` on that host for exactly this case, and the rest
+       * of the board already skips it — see assignee-cell.tsx.
+       */
+      if (target instanceof Element && target.closest("[data-board-popover]")) return;
+      setOpen(false);
+      setPicking(null);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
@@ -1154,22 +1169,38 @@ export function TimelineCell({
       {open && !mobile && (
         <div className="sheet-timeline-popover">
           <strong>Set timeline</strong>
-          <label>
-            Start date
-            <input
-              type="date"
-              value={draftStart}
-              onChange={(event) => setDraftStart(event.target.value)}
-            />
-          </label>
-          <label>
-            End date
-            <input
-              type="date"
-              value={draftEnd}
-              onChange={(event) => setDraftEnd(event.target.value)}
-            />
-          </label>
+          {/*
+            THE SAME PICKER THE DATE COLUMNS OPEN.
+
+            These were two bare `<input type="date">`, so the one place on this
+            board still opening Chromium's grey popup was the timeline editor —
+            a different calendar from the Date Requested cell two columns away.
+            They are triggers now, and the panel is `BoardDatePicker`: the same
+            component, the same grid, the same tokens and the same keyboard.
+
+            The draft is what changes here; "Save dates" still commits, so the
+            end-before-start rule below is untouched.
+          */}
+          <TimelineDateField
+            label="Start date"
+            value={draftStart}
+            open={picking === "start"}
+            onOpenChange={(next) => setPicking(next ? "start" : null)}
+            onPick={(value) => {
+              setDraftStart(value);
+              setError(null);
+            }}
+          />
+          <TimelineDateField
+            label="End date"
+            value={draftEnd}
+            open={picking === "end"}
+            onOpenChange={(next) => setPicking(next ? "end" : null)}
+            onPick={(value) => {
+              setDraftEnd(value);
+              setError(null);
+            }}
+          />
           <button
             className="primary-button"
             type="button"
