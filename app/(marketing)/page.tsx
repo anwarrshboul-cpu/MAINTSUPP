@@ -69,12 +69,12 @@ export const metadata: Metadata = {
   title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
   description:
     "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio. Vetted UK contractor network, verified close-outs, per-store pricing.",
-  alternates: { canonical: "https://www.maintsupp.com/" },
+  alternates: { canonical: "https://maintsupp.com/" },
   openGraph: {
     title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
     description:
       "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio.",
-    url: "https://www.maintsupp.com/",
+    url: "https://maintsupp.com/",
     siteName: "Maintsupp",
     locale: "en_GB",
     type: "website",
@@ -144,7 +144,7 @@ export default function HomePage() {
             "@type": "Organization",
             name: "Maintsupp",
             legalName: "Maintauk Ltd",
-            url: "https://www.maintsupp.com/",
+            url: "https://maintsupp.com/",
             telephone: "+44 7852 224644",
             email: "info@maintsupp.com",
             identifier: "17262302",

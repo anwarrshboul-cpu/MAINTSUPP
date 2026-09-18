@@ -69,7 +69,7 @@ const origin = `http://127.0.0.1:${port}`;
  * probes is pinned by `tests/homepage-commercial-update.test.mjs` against the
  * redirect's own constant: if one moves, the test says so.
  */
-const HOST = "www.maintsupp.com";
+const HOST = "maintsupp.com";
 
 /*
  * Optional. `maintsupp_session` holds a 256-bit token whose SHA-256 is what the

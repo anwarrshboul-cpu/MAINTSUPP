@@ -39,7 +39,7 @@ export const metadata: Metadata = {
    * THEY ARE <link> TAGS AND NOT `metadata.icons`, WHICH IS THE WHOLE POINT.
    *
    * `metadataBase` below is required for Open Graph and resolves every
-   * RELATIVE metadata URL against https://www.maintsupp.com — icons included. So
+   * RELATIVE metadata URL against https://maintsupp.com — icons included. So
    * through `metadata.icons` these came out as absolute production URLs on
    * every host, and a deployment served its tab icon from a different origin
    * than the one it was built from. Measured on the branch Preview: three of
@@ -57,7 +57,7 @@ export const metadata: Metadata = {
    * dropped, which is the failure that leaves a shared link showing a blank
    * card.
    */
-  metadataBase: new URL("https://www.maintsupp.com"),
+  metadataBase: new URL("https://maintsupp.com"),
   alternates: {
     canonical: "/",
   },
@@ -65,7 +65,7 @@ export const metadata: Metadata = {
     type: "website",
     siteName: "MAINTSUPP",
     locale: "en_GB",
-    url: "https://www.maintsupp.com",
+    url: "https://maintsupp.com",
     title: "MAINTSUPP | Maintenance coordination, done right",
     description:
       "MAINTSUPP coordinates maintenance, compliance, contractors and property operations across multi-site portfolios.",

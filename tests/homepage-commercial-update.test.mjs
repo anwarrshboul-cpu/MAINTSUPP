@@ -462,7 +462,7 @@ test("the duplicate Vercel hostname redirects, and Preview deployments do not", 
   const host = /const HOST = "([^"]+)";/.exec(check);
   assert.ok(host, "local-check must declare the host it probes");
   assert.notEqual(host[1], "maintsupp-portal.vercel.app", "the harness must not probe the redirected host");
-  assert.equal(host[1], "www.maintsupp.com", "it probes the canonical host");
+  assert.equal(host[1], "maintsupp.com", "it probes the canonical host");
   assert.match(worker, /const CANONICAL_ORIGIN = "https:\/\/www\.maintsupp\.com";/);
   assert.match(worker, /url\.hostname === DUPLICATE_HOST/, "an exact host match, never a suffix");
   /* Comments stripped: the note above the constant has to name the mistake it
@@ -487,7 +487,7 @@ test("the duplicate Vercel hostname redirects, and Preview deployments do not", 
 });
 
 test("the homepage canonical is the address the brief names", async () => {
-  /* §7.3. Recorded with its caveat: `www.maintsupp.com` currently 307s to the
+  /* §7.3. Recorded with its caveat: `maintsupp.com` currently 307s to the
      apex, so this canonical names a host that redirects. That is a Vercel
      domain setting rather than a code change, and it is flagged in the release
      notes rather than guessed at here. */

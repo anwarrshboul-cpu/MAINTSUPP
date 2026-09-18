@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   title: { absolute: "Join the Contractor Network — Maintsupp" },
   description:
     "Maintsupp allocates multi-site commercial maintenance to vetted independent contractors across the UK. Apply to join the network.",
-  alternates: { canonical: "https://www.maintsupp.com/contractors" },
+  alternates: { canonical: "https://maintsupp.com/contractors" },
 };
 
 /**
