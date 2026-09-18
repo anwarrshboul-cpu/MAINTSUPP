@@ -10,8 +10,13 @@
  * ONE FETCH, NOT ONE PER BUTTON. The board draws four export controls, the
  * ticket dialog asks about `board.edit`, and a column menu asks again per
  * column; each mounting its own request would be a dozen identical round trips
- * on every page load. The promise is memoised the same way `raise-ticket.tsx`
- * already memoises its own access read, and a REJECTED promise is dropped
+ * on every page load.
+ *
+ * THAT MEMO NOW LIVES IN `app/lib/runtime-context.ts`, one level up. It used to
+ * live here, which was correct as far as it went and still fetched
+ * `/api/context` a second time on every dashboard load, because `portal-app`
+ * memoised the same endpoint separately for the rest of the payload. Sharing
+ * one promise is what removes the duplicate; a rejected read is still dropped
  * rather than cached, so one transient failure does not permanently disable
  * every control on the page.
  *
@@ -28,31 +33,15 @@
  */
 
 import { useEffect, useState } from "react";
+import { fetchRuntimeContext, forgetRuntimeContext } from "./runtime-context";
 
 export type CapabilityMap = Record<string, boolean>;
 
-let pending: Promise<CapabilityMap> | null = null;
-
-async function read(): Promise<CapabilityMap> {
-  const response = await fetch("/api/context", {
-    headers: { accept: "application/json" },
-  });
-  if (!response.ok) throw new Error("The workspace context could not be read.");
-  const payload = (await response.json()) as {
-    context?: { capabilities?: CapabilityMap };
-  };
-  return payload.context?.capabilities ?? {};
-}
-
 /** The memoised read. Callers that only need the answer once can await this. */
 export function fetchCapabilities(): Promise<CapabilityMap> {
-  if (!pending) {
-    pending = read().catch((error) => {
-      pending = null;
-      throw error;
-    });
-  }
-  return pending;
+  return fetchRuntimeContext().then(
+    (context) => (context.capabilities as CapabilityMap | undefined) ?? {},
+  );
 }
 
 /**
@@ -62,7 +51,7 @@ export function fetchCapabilities(): Promise<CapabilityMap> {
  * previous workspace's answer is not merely stale, it is about somewhere else.
  */
 export function forgetCapabilities() {
-  pending = null;
+  forgetRuntimeContext();
 }
 
 /**

@@ -177,6 +177,8 @@ import { AnchoredPopover } from "./overlay/anchored";
 import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
 import { installSessionGuard } from "./session-guard";
 import { useGreeting } from "./use-greeting";
+import { fetchRuntimeContext } from "../../lib/runtime-context";
+import { fetchNavigation } from "./navigation-store";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
 import { priorityOptions } from "./board-model";
@@ -1291,20 +1293,19 @@ export default function PortalApp({
   const documentsLoadRef = useRef(0);
 
 
-  const loadRuntimeContext = useCallback(async () => {
-    const response = await fetch("/api/context", {
-      headers: { Accept: "application/json" },
-    });
-    const payload = (await response.json()) as {
-      context?: RuntimeWorkspaceContext;
-      error?: string;
-    };
-    if (!response.ok || !payload.context) {
-      throw new Error(payload.error || "The client workspace could not be loaded.");
-    }
-    setRuntimeContext(payload.context);
-    setDemoRole(payload.context.actor.role);
-    return payload.context;
+  /*
+   * Shared with `client-capabilities.ts`, which reads `capabilities` off the
+   * same response — see app/lib/runtime-context.ts. Both used to memoise their
+   * own read of /api/context, so the dashboard fetched it twice on every load.
+   *
+   * `force` only where the workspace itself changed: a context that describes
+   * somewhere else is wrong, not stale.
+   */
+  const loadRuntimeContext = useCallback(async (options?: { force?: boolean }) => {
+    const context = (await fetchRuntimeContext(options)) as unknown as RuntimeWorkspaceContext;
+    setRuntimeContext(context);
+    setDemoRole(context.actor.role);
+    return context;
   }, []);
 
   useEffect(() => {
@@ -1971,13 +1972,11 @@ export default function PortalApp({
    * dependencies because it reads nothing from the render — the filter is
    * against two module constants.
    */
-  const reloadWorkspaceSections = useCallback(async () => {
+  const reloadWorkspaceSections = useCallback(async (options?: { force?: boolean }) => {
     try {
-      const response = await fetch("/api/navigation", {
-        headers: { Accept: "application/json" },
-      });
-      if (!response.ok) return;
-      const payload = (await response.json()) as {
+      /* Shared with the sidebar, which wants `arrangement` off the same
+         response — see ./navigation-store. `force` only after a write. */
+      const payload = (await fetchNavigation(options)) as {
         sections?: WorkspaceSectionEntry[];
       };
       setWorkspaceSections(
@@ -3858,7 +3857,7 @@ export default function PortalApp({
           {activeSurface === "admin-users" && <AdminUsersView />}
           {activeSurface === "admin-roles" && <AdminRolesView />}
           {activeSurface === "admin-clients" && (
-            <AdminClientsView onSwitched={() => void loadRuntimeContext()} />
+            <AdminClientsView onSwitched={() => void loadRuntimeContext({ force: true })} />
           )}
           {activeSurface === "settings" && (
             <SettingsView
@@ -3966,7 +3965,7 @@ export default function PortalApp({
         open={sectionManagerOpen}
         onClose={() => setSectionManagerOpen(false)}
         onChanged={() => {
-          void reloadWorkspaceSections();
+          void reloadWorkspaceSections({ force: true });
         }}
       />
 

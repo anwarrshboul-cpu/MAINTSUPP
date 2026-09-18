@@ -38,6 +38,7 @@ import {
   type NavArrangementItem,
   type NavCatalogueEntry,
 } from "../../api/navigation/layout";
+import { fetchNavigation, type NavigationPayload } from "./navigation-store";
 
 export type SidebarNavEntry = NavCatalogueEntry & { icon: IconName };
 
@@ -163,10 +164,6 @@ export function SidebarNav({
     null,
   );
 
-  const catalogueKeys = useMemo(
-    () => catalogue.map((entry) => entry.key).join(","),
-    [catalogue],
-  );
   const iconFor = useMemo(() => {
     const map = new Map<string, IconName>();
     for (const entry of catalogue) map.set(entry.key, entry.icon);
@@ -179,13 +176,26 @@ export function SidebarNav({
     return map;
   }, [catalogue]);
 
-  const load = useCallback(async () => {
-    const response = await fetch(
-      `/api/navigation?sections=${encodeURIComponent(catalogueKeys)}`,
-      { headers: { Accept: "application/json" } },
-    );
-    if (!response.ok) return;
-    const payload = (await response.json()) as NavigationResponse;
+  /*
+   * Shared with `portal-app.tsx`, which wants `sections` off the same response
+   * — see ./navigation-store. Both used to fetch /api/navigation separately.
+   *
+   * THE `?sections=` PARAMETER IS GONE AND NOTHING HERE MISSES IT. It only
+   * shaped `layout`, the pre-merged sidebar, which this component never read —
+   * `NavigationResponse` below does not even declare it. The arrangement is
+   * re-resolved against the live catalogue in this browser, which is the whole
+   * reason the unmerged layers are returned.
+   *
+   * `force` after a write, never for a paint.
+   */
+  const load = useCallback(async (options?: { force?: boolean }) => {
+    let payload: NavigationResponse;
+    try {
+      payload = (await fetchNavigation(options)) as NavigationPayload as NavigationResponse;
+    } catch {
+      /* The built-in order is already on screen and simply stays. */
+      return;
+    }
     setArrangement({
       workspace: Array.isArray(payload.arrangement?.workspace)
         ? (payload.arrangement!.workspace as NavArrangementItem[])
@@ -198,7 +208,15 @@ export function SidebarNav({
     setCanEditDefault(payload.canEditDefault === true);
     setCanEditOwn(payload.canEditOwn !== false);
     setCanCustomise(payload.canCustomise === true);
-  }, [catalogueKeys]);
+    /*
+     * NO DEPENDENCIES, AND THAT IS THE FIX. This used to depend on
+     * `catalogueKeys`, so every time portal-app finished loading the
+     * workspace's sections the catalogue changed, `load` got a new identity,
+     * and the mount effect below ran a second time — a second request for an
+     * answer that does not vary by catalogue. The response is the same for
+     * this person whatever the sidebar currently knows about.
+     */
+  }, []);
 
   /* Deferred by a zero-delay timer, matching every other loader in the portal:
      the first paint is the built-in order, and the stored arrangement replaces
@@ -278,7 +296,7 @@ export function SidebarNav({
       onNotify?.(payload.error || "The sidebar layout could not be saved.");
       // The server refused, so the server is right. Re-read rather than leaving
       // the screen showing an arrangement that was never stored.
-      await load().catch(() => {});
+      await load({ force: true }).catch(() => {});
     }
   }, [load, onNotify]);
 
@@ -555,7 +573,7 @@ export function SidebarNav({
       return;
     }
     setScope("user");
-    await load().catch(() => {});
+    await load({ force: true }).catch(() => {});
     setStatus("Sidebar reset to the workspace default.");
     onNotify?.("Sidebar reset to the workspace default.");
   }, [load, onNotify]);
