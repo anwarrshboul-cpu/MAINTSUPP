@@ -8,7 +8,6 @@ import {
   contractors,
   maintenanceBoardColumns,
   maintenanceRequests,
-  memberships,
   plannedMaintenance,
   sites,
   units,
@@ -341,12 +340,6 @@ function databaseError(error: unknown) {
 
 type WorkspaceDb = Awaited<ReturnType<typeof scopedDb>>["db"];
 
-/** The development sample accounts that get a membership, and as what. */
-const SAMPLE_MEMBERSHIPS = [
-  { email: "sample-admin@maintsupp.local", role: "admin" },
-  { email: "sample-client@maintsupp.local", role: "client" },
-] as const;
-
 async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
   await ensureDatabase();
   if (orgId !== PRIMARY_ORGANISATION_ID) return;
@@ -474,59 +467,31 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
     }
   }
 
-  const [userCount] = await db
-    .select({ value: count() })
-    .from(users)
-    .where(eq(users.organisationId, orgId));
-  if (userCount.value === 0) {
-    for (const member of [
-      { name: "Workspace Super Admin", email: "superadmin@test.maintsupp.com", role: "Super Admin" },
-      { name: "Sample Admin", email: "sample-admin@maintsupp.local", role: "Admin" },
-      { name: "Sample Client User", email: "sample-client@maintsupp.local", role: "Client" },
-    ]) {
-      await db.insert(users).values({
-        id: `user-${slug(member.email)}`,
-        organisationId: orgId,
-        fullName: member.name,
-        email: member.email,
-        role: member.role,
-        active: true,
-      }).onConflictDoNothing();
-    }
-  }
   /*
-   * The two sample accounts' memberships, named here with their roles.
+   * NOTHING HERE MAKES PEOPLE, OR GIVES ANYBODY ACCESS. It used to do both.
    *
-   * This used to walk EVERY `users` row of the workspace and turn its display
-   * label into a membership, so a person added from the Team tab with the
-   * label "Admin" became an Admin the next time this ran. A label is a caption,
-   * never authority: only these two fixture accounts get a membership, and
-   * the "Workspace Super Admin" sample above is a directory entry only.
+   * A workspace with no `users` row got three invented accounts —
+   * "Workspace Super Admin" (superadmin@test.maintsupp.com), Sample Admin and
+   * Sample Client — and the two samples were then given memberships. That was
+   * written when a fresh checkout had an empty database and somebody had to be
+   * in it. `db/init.ts` seeds the testing identities now, into this very
+   * workspace, and this function awaits `ensureDatabase()` before it counts —
+   * so by the time the count is taken there are always users, and the branch
+   * has not run on a migrated database since. Measured on a freshly migrated
+   * one: five users and eight memberships in this workspace before the route is
+   * called, none of them created here, and no account by those names anywhere.
+   *
+   * It is not brought back for the workspace that somehow has nobody, either.
+   * Access is a `client_company_members` or `memberships` row written by an
+   * accepted invitation or by Users & access; a GET that quietly manufactures
+   * portal accounts is the opposite of that, and the accounts it made carried
+   * a display label that a later replay could read as authority. An empty
+   * workspace is for the platform to invite somebody into.
+   *
+   * What remains below is sample OPERATIONAL data — sites, contractors,
+   * planned maintenance, default settings — which is what a demonstration
+   * workspace is for, and which grants nobody anything.
    */
-  const memberRows = await db
-    .select({ id: users.id, email: users.email })
-    .from(users)
-    .where(
-      and(
-        eq(users.organisationId, orgId),
-        inArray(users.email, SAMPLE_MEMBERSHIPS.map((sample) => sample.email)),
-      ),
-    );
-  for (const member of memberRows) {
-    const role = SAMPLE_MEMBERSHIPS.find((sample) => sample.email === member.email)?.role;
-    if (!role) continue;
-    await db.insert(memberships).values({
-      id: `membership-${member.id}-${orgId}`,
-      userId: member.id,
-      organisationId: orgId,
-      role,
-      siteScope: null,
-      approvalLimitPence: null,
-      status: "active",
-      acceptedAt: new Date().toISOString(),
-    }).onConflictDoNothing();
-  }
-
   await db.insert(workspaceSettings).values({
     legacyClientId: orgId,
     organisationId: orgId,
@@ -1946,28 +1911,23 @@ function hasVisibleText(value: string): boolean {
  * `users.edit` could store any string at all — and the tab prints that string
  * straight back, so "Owner", "" or a paragraph of markup became a role this
  * workspace appears to have. These three are the whole set: the manage form's
- * select offers exactly them, `ROLE_LABEL` in the invitation tokens writes
- * exactly them, and `seedWorkspaceIfEmpty` above maps exactly them onto the
- * three membership roles.
+ * select offers exactly them, and `ROLE_LABEL` in the invitation tokens writes
+ * exactly them.
  *
  * The column is a LABEL, not authority. Access comes from `memberships`, and
  * `/api/admin/users` is what changes that — behind a rank check, a
  * no-self-promotion rule and a last-super-admin guard-rail this route has none
  * of. Writing "Super Admin" here renames somebody on a screen.
  *
- * The create is guarded as well as the edit, but be clear about what that does
- * and does not buy. `seedWorkspaceIfEmpty` above derives a membership from this
- * label for a member who has none yet, so on a NEW member the label briefly
- * becomes authority — and "Super Admin" is a legitimate entry here, so this
- * list stops a typo reaching that mapping and does not stop somebody choosing
- * the top of it. Closing that properly means the seed not deriving authority
- * from a display column at all, which is a change to the seed and not to this
- * check. An edit cannot reach the mapping either way: the membership already
- * exists by then and the insert leaves it alone.
- *
- * It is also narrower than it looks. The seed returns early outside the primary
- * organisation and outside development, so in production nothing derives a
- * membership from this column and the label really is only a label.
+ * NOTHING MAPS THIS COLUMN ONTO A MEMBERSHIP ANY MORE, and this note used to
+ * carry the caveat that it did: the seed derived a membership from the label
+ * for a member who had none yet, so on a new member the label briefly became
+ * authority, and this list only stopped a typo reaching that mapping rather
+ * than somebody choosing the top of it. It ended by saying that closing it
+ * properly meant the seed not deriving authority from a display column at all.
+ * That is done — `seedWorkspaceIfEmpty` now creates no users and no memberships
+ * — so the label is only ever a label, and this list is about what a workspace
+ * may call somebody.
  */
 const MEMBER_ROLES = ["Super Admin", "Admin", "Client"];
 

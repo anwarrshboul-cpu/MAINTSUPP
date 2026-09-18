@@ -202,10 +202,18 @@ test("an Owner never holds platform billing or permanent delete, whatever the ma
 
 test("the Team tab is a directory: labels are captions and accounts are changed in Users & access", async () => {
   const route = await read("app/api/workspace/route.ts");
-  // The development seed names its two sample memberships; it reads no label.
-  assert.match(route, /const SAMPLE_MEMBERSHIPS = \[/);
+  /* Re-pointed: the development seed named two sample memberships when this was
+     written, which was already a narrowing of "read every label as a role".
+     It now names none — the seed creates no users and no memberships at all —
+     so the contract this pin protects is met by there being nothing to read a
+     label INTO, which is what these three assertions check. */
   assert.doesNotMatch(route, /member\.role\.toLowerCase\(\)/);
   assert.doesNotMatch(route, /const label = member\.role/);
+  assert.doesNotMatch(route, /const SAMPLE_MEMBERSHIPS = \[/, "no sample memberships are seeded");
+  const seed = route.slice(route.indexOf("async function seedWorkspaceIfEmpty"));
+  const seedBody = seed.slice(0, seed.search(/^\}/m) + 1);
+  assert.doesNotMatch(seedBody, /db\.insert\(memberships\)/, "the seed grants nobody access");
+  assert.doesNotMatch(seedBody, /db\.insert\(users\)/, "and invents nobody to grant it to");
   // A person with portal access keeps their switch and their sign-in email.
   assert.match(route, /async function portalAccountRefusal\(/);
   const update = route.slice(route.indexOf("export async function PATCH"), route.indexOf("export async function DELETE"));
@@ -288,9 +296,15 @@ test("nothing derives an Owner or a Super Admin membership from a label any more
   const auth = await read("app/lib/auth-session.ts");
   assert.match(auth, /INSERT OR IGNORE INTO platform_admins \(user_id, status, granted_by\)\s+VALUES \(\?, 'active', 'owner-bootstrap'\)/);
 
+  /* Re-pointed: this asserted that the workspace seed names its two sample
+     memberships — the narrowing that replaced "read every label as a role".
+     The seed now writes no membership and invents no account at all, so the
+     assertion is that neither address, nor any membership insert, is left in
+     the route. Strictly stronger than what it replaced. */
   const workspace = await read("app/api/workspace/route.ts");
-  assert.match(workspace, /\{ email: "sample-admin@maintsupp\.local", role: "admin" \}/);
-  assert.match(workspace, /\{ email: "sample-client@maintsupp\.local", role: "client" \}/);
+  assert.doesNotMatch(workspace, /sample-admin@maintsupp\.local/);
+  assert.doesNotMatch(workspace, /sample-client@maintsupp\.local/);
+  assert.doesNotMatch(workspace, /db\.insert\(memberships\)/, "no route seeds access");
 
   const demo = await read("db/demo-workspace.ts");
   assert.doesNotMatch(demo, /'demo-member-' \|\| m\.user_id/);
