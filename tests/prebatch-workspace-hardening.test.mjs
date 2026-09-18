@@ -947,3 +947,81 @@ test("an archived site is closed in every column the app filters on", async (t) 
     "a site is closed in both columns or neither",
   );
 });
+
+/*
+ * THE WORKSPACE ROUTE SEEDS DATA, NOT PEOPLE.
+ *
+ * `seedWorkspaceIfEmpty` used to invent three accounts — "Workspace Super
+ * Admin", Sample Admin and Sample Client — for a workspace whose `users` table
+ * was empty, and then give two of them memberships. `db/init.ts` seeds the
+ * testing identities into that same workspace, and this function awaits
+ * `ensureDatabase()` before it counts, so the branch has not been reachable on
+ * a migrated database for some time; the accounts survived only where an old
+ * local database still carried them.
+ *
+ * It is gone rather than merely unreachable, because a GET that manufactures
+ * portal accounts is not something to leave one condition away from running:
+ * access is an invitation accepted or a grant written in Users & access.
+ *
+ * What this checks is the pair of promises that replaces it — the route still
+ * fills a demonstration workspace with operational data, and calling it again
+ * creates no people and no access.
+ */
+test("bootstrapping a workspace creates operational data, never accounts", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+  if (!(await signIn())) {
+    t.skip("the seeded owner could not sign in");
+    return;
+  }
+
+  const roster = async () => {
+    const response = await fetch(
+      `${BASE_URL}/api/admin/users?organisationId=${PRIMARY_ORGANISATION_ID}`,
+      { headers: { cookie } },
+    );
+    assert.equal(response.status, 200, "the roster is readable");
+    const body = await response.json();
+    return (body.users ?? []).map((user) => user.email).sort();
+  };
+  const workspace = async () => {
+    const response = await fetch(`${BASE_URL}/api/workspace`, {
+      headers: { cookie: `${cookie}; maintsupp_demo_organisation=${PRIMARY_ORGANISATION_ID}` },
+    });
+    assert.equal(response.status, 200, "the workspace route answers");
+    return response.json();
+  };
+
+  const before = await roster();
+  const first = await workspace();
+  /* The half that still has a job: a demonstration workspace with something in
+     it. Stores, contractors and planned maintenance are the seed's own rows, so
+     an empty one would mean the surviving half had gone with the accounts. */
+  for (const kind of ["stores", "contractors", "planned"]) {
+    assert.ok((first.workspace?.[kind] ?? []).length > 0, `the workspace has ${kind}`);
+  }
+  assert.ok(first.workspace?.settings, "and its default settings");
+
+  await workspace();
+  await workspace();
+  const after = await roster();
+
+  assert.deepEqual(after, before, "bootstrapping again created nobody");
+  for (const invented of [
+    "sample-admin@maintsupp.local",
+    "sample-client@maintsupp.local",
+    "superadmin@test.maintsupp.com",
+  ]) {
+    assert.ok(!after.includes(invented), `${invented} is not created by the seed any more`);
+  }
+
+  // And the source says so, so this cannot come back without the pin moving.
+  const route = await read("app/api/workspace/route.ts");
+  const seed = route.slice(route.indexOf("async function seedWorkspaceIfEmpty"));
+  const body = seed.slice(0, seed.search(/^\}/m) + 1);
+  assert.doesNotMatch(body, /db\.insert\(users\)/, "the seed makes no accounts");
+  assert.doesNotMatch(body, /db\.insert\(memberships\)/, "and grants no access");
+  assert.match(body, /db\.insert\(workspaceSettings\)/, "while still writing the workspace defaults");
+});

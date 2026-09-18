@@ -166,9 +166,17 @@ test("withdrawing board.view actually closes the board", async (t) => {
     .map((value) => value.split(";")[0])
     .join("; ");
 
+  /*
+   * Re-pointed: this asked as `sample-client@maintsupp.local`, an account the
+   * workspace seed invented for a database with no users in it. `db/init.ts`
+   * seeds the testing identities now, so that branch never runs and the address
+   * belongs to nobody — the request was being refused for being unauthenticated
+   * rather than for the capability this test is about. `client@test.maintsupp.com`
+   * is seeded as a Client of this workspace on every estate.
+   */
   const asClient = (path) =>
     fetch(`${BASE_URL}${path}`, {
-      headers: { "x-maintsupp-identity": "sample-client@maintsupp.local" },
+      headers: { "x-maintsupp-identity": "client@test.maintsupp.com" },
     });
 
   // A client holds `board.view` by default, so the board is open to them.
