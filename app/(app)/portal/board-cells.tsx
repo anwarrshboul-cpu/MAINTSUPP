@@ -26,9 +26,7 @@ import {
   boardDateIconOptions,
 } from "./board-model";
 import {
-  boardCalendarDays,
   boardCalendarMonth,
-  boardCalendarMonthLabel,
   boardDateValue,
   dateInputValue,
   formatBoardTime,
@@ -37,14 +35,16 @@ import {
   parseBoardDateMetadata,
   relativeDayLabel,
   serializeBoardDateMetadata,
-  shiftBoardCalendarMonth,
-  todayBoardDate,
 } from "./board-format";
 import {
   MobileBoardContext,
   MobileCellSheet,
   useRevealBoardPopover,
 } from "./board-primitives";
+/* The branded calendar the desktop date cells open. In its own file for the
+   same reason the calendar is: this one is at its enforced ceiling. */
+import { BoardDatePicker } from "./cells/board-date-picker";
+import { formatDate } from "../../lib/format-date";
 /* The Timeline strip and the duration card it shows on hover or focus. In its
    own file because this one is at its enforced ceiling, and because a hover
    surface has reasoning of its own. */
@@ -754,104 +754,15 @@ export function DateStatusIcon({
   );
 }
 
-export function MobileBoardCalendar({
-  month,
-  onMonthChange,
-  onSelect,
-  selectedStart,
-  selectedEnd,
-  mode,
-  weekStartsOn,
-  yearFirst = false,
-}: {
-  month: string;
-  onMonthChange: (value: string) => void;
-  onSelect: (value: string) => void;
-  selectedStart?: string;
-  selectedEnd?: string;
-  mode: "single" | "range";
-  weekStartsOn: 0 | 1;
-  yearFirst?: boolean;
-}) {
-  const weekdays =
-    weekStartsOn === 1
-      ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-      : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const days = boardCalendarDays(month, weekStartsOn);
-  const today = todayBoardDate();
-
-  return (
-    <div
-      className={`mobile-board-calendar mobile-board-calendar--${mode}`}
-      aria-label={boardCalendarMonthLabel(month)}
-    >
-      <div className="mobile-board-calendar__month">
-        <strong>{boardCalendarMonthLabel(month, yearFirst)}</strong>
-        <span>
-          <button
-            className="is-previous"
-            type="button"
-            aria-label="Previous month"
-            onClick={() => onMonthChange(shiftBoardCalendarMonth(month, -1))}
-          >
-            <Icon name="chevron" size={22} />
-          </button>
-          <button
-            type="button"
-            aria-label="Next month"
-            onClick={() => onMonthChange(shiftBoardCalendarMonth(month, 1))}
-          >
-            <Icon name="chevron" size={22} />
-          </button>
-        </span>
-      </div>
-      <div className="mobile-board-calendar__weekdays" aria-hidden="true">
-        {weekdays.map((weekday) => (
-          <span key={weekday}>{weekday}</span>
-        ))}
-      </div>
-      <div className="mobile-board-calendar__days">
-        {days.map((date, index) => {
-          if (!date) {
-            return <span key={`empty-${index}`} aria-hidden="true" />;
-          }
-          const isStart = date === selectedStart;
-          const isEnd = mode === "range" && date === selectedEnd;
-          const inRange = Boolean(
-            mode === "range" &&
-              selectedStart &&
-              selectedEnd &&
-              date >= selectedStart &&
-              date <= selectedEnd,
-          );
-          const classNames = [
-            isStart ? "is-range-start" : "",
-            isEnd ? "is-range-end" : "",
-            inRange ? "is-in-range" : "",
-            mode === "single" && isStart ? "is-selected" : "",
-            date === today ? "is-today" : "",
-            index % 7 === 0 ? "is-week-start" : "",
-            index % 7 === 6 ? "is-week-end" : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          return (
-            <button
-              key={date}
-              className={classNames}
-              type="button"
-              aria-label={formatFullBoardDate(date)}
-              aria-pressed={isStart || isEnd}
-              onClick={() => onSelect(date)}
-            >
-              <span>{Number(date.slice(8))}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+/*
+ * The month grid moved to board-calendar.tsx when this file reached its
+ * 1,300-line ceiling — see that file's header for why the calendar was the
+ * part with the least to do with the board's cells. Re-exported here so
+ * every existing `from "./board-cells"` import keeps working.
+ */
+export { MobileBoardCalendar } from "./board-calendar";
+/* Imported as well as re-exported: the two mobile sheets below draw it. */
+import { MobileBoardCalendar } from "./board-calendar";
 
 export function DateCell({
   title,
@@ -873,6 +784,8 @@ export function DateCell({
     currentDate,
   );
   const [open, setOpen] = useState(false);
+  /* The desktop popover hangs off the cell's own button. */
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [draftDate, setDraftDate] = useState(currentMetadata.date);
   const [draftTime, setDraftTime] = useState(currentMetadata.time);
   const [draftIcon, setDraftIcon] = useState<BoardDateIcon | "">(
@@ -1069,45 +982,73 @@ export function DateCell({
   /*
    * The date, and how far away it is.
    *
-   * A bare `<input type="date">` renders "12/03/2026" and leaves the reader to
-   * work out whether that has happened. `relativeDayLabel` answers it for the
-   * fortnight either side and returns null beyond that, where the date is the
-   * better answer anyway — so a distant date is unchanged and today's job says
-   * so. The input is untouched: same class, same change handler, same saves.
+   * A date alone renders "12/03/2026" and leaves the reader to work out whether
+   * that has happened. `relativeDayLabel` answers it for the fortnight either
+   * side and returns null beyond that, where the date is the better answer
+   * anyway — so a distant date is unchanged and today's job says so.
    */
   const relative = relativeDayLabel(currentDate, new Date());
 
+  /**
+   * One day chosen, saved the way every other date column saves.
+   *
+   * `null` clears, and only where the column allows it — Date Requested passes
+   * `clearable={false}` because it is the timeline's start. The existing
+   * metadata is spread, so a time or a marker set on this column survives.
+   */
+  const pick = (date: string | null) => {
+    if (!date) {
+      if (clearable) onSave(null, "");
+      return;
+    }
+    const metadata = { ...currentMetadata, date };
+    onSave(boardDateValue(metadata), serializeBoardDateMetadata(metadata));
+  };
+
   return (
     <span className="sheet-date">
-      <input
-        className="sheet-date-input"
-        type="date"
-        /*
-         * The column name IS the label. Without it every date box on the board
-         * is an unnamed form control — 36 of them on the jobs board alone, and
-         * axe rates that critical: a screen reader announces "date entry, blank"
-         * thirty-six times with nothing to tell them apart. The mobile branch
-         * above already names itself this way.
-         */
-        aria-label={title}
+      {/*
+        THE CELL IS A BUTTON, AND THE CALENDAR IS OURS.
+
+        It was a bare `<input type="date">`, so pressing it opened Chromium's
+        own popup: a white panel with a blue selected day, drawn by the browser
+        outside the document where no stylesheet can reach it. `accent-color`
+        is the only hook a page gets and, measured on Windows Chromium, it does
+        not reach that popup at all. So the popup is gone and the panel is the
+        product's — see cells/board-date-picker.tsx. Typing a date is still
+        offered, inside the panel.
+
+        The column name IS the label. Without it every date box on the board is
+        an unnamed control — 36 of them on the jobs board alone, and axe rates
+        that critical.
+      */}
+      <button
+        ref={triggerRef}
+        className={`sheet-date__trigger${currentDate ? "" : " is-empty"}`}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${title}: ${currentDate ? formatFullBoardDate(currentDate) : "no date"}`}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{currentDate ? formatDate(currentDate) : "—"}</span>
+        {/* aria-hidden: the button already announces its own value, and a
+            screen reader does not need "12 March 2026, In 3 days". */}
+        {relative && (
+          <span className="sheet-date__relative" aria-hidden="true">
+            {relative}
+          </span>
+        )}
+      </button>
+      <BoardDatePicker
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        title={title}
         value={currentDate}
-        onChange={(event) => {
-          const date = event.target.value;
-          if (!date) {
-            onSave(null, "");
-            return;
-          }
-          const metadata = { ...currentMetadata, date };
-          onSave(boardDateValue(metadata), serializeBoardDateMetadata(metadata));
-        }}
+        clearable={clearable}
+        onPick={pick}
       />
-      {/* aria-hidden: the input already announces its own value, and a screen
-          reader does not need "12 March 2026, In 3 days". */}
-      {relative && (
-        <span className="sheet-date__relative" aria-hidden="true">
-          {relative}
-        </span>
-      )}
     </span>
   );
 }

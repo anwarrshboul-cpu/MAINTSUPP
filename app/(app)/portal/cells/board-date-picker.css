@@ -1,0 +1,307 @@
+/*
+ * The board's date picker.
+ *
+ * TOKENS ONLY. Every colour here is one the product already defines, so the
+ * panel follows the theme rather than pinning a second palette beside it:
+ * `--background-elevated` is the surface every other board popover sits on,
+ * `--brand-primary` / `--on-brand-primary` are the selected-day pair the phone
+ * sheet already uses, and `--brand-fill` rings today exactly as
+ * `brand-overrides.css` rings it on mobile. Nothing is redefined per theme in
+ * this file — the tokens do that.
+ *
+ * WHY THE CALENDAR IS RESTYLED HERE. Every `.mobile-board-calendar` rule in
+ * globals.css lives inside `@media (max-width: 760px)`, so on a desktop the
+ * grid has no styling at all — it was only ever drawn in a phone sheet. The
+ * rules below are scoped to `.board-date-popover`, so they dress the grid for
+ * this panel without reaching the phone sheet, which already has its own.
+ */
+
+.board-date-popover {
+  width: 268px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--background-elevated);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+}
+
+/* ── Month and year navigation ────────────────────────────────────────────── */
+
+.board-date-popover__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.board-date-popover__head > strong {
+  flex: 1 1 auto;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+.board-date-popover__step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /*
+   * 28px rather than 44: this panel is a desktop pointer target inside a dense
+   * board, and the phone gets the sheet rather than this. The touch-target
+   * floor is enforced on the mobile sheet's own controls.
+   */
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+
+.board-date-popover__step:hover {
+  background: var(--surface-hover);
+}
+
+.board-date-popover__step:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* The chevron glyph points right; the back controls mirror it. */
+.board-date-popover__step.is-back svg {
+  transform: rotate(180deg);
+}
+
+/* A year step is two chevrons, tightened so the pair reads as one control. */
+.board-date-popover__step.is-year {
+  width: 30px;
+  gap: 0;
+}
+
+.board-date-popover__step.is-year svg:last-child {
+  margin-left: -9px;
+}
+
+/* ── The grid ─────────────────────────────────────────────────────────────── */
+
+.board-date-popover .mobile-board-calendar {
+  padding: 0;
+}
+
+.board-date-popover .mobile-board-calendar__weekdays,
+.board-date-popover .mobile-board-calendar__days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.board-date-popover .mobile-board-calendar__weekdays {
+  margin-bottom: 2px;
+}
+
+.board-date-popover .mobile-board-calendar__weekdays > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.board-date-popover .mobile-board-calendar__days > button,
+.board-date-popover .mobile-board-calendar__days > span {
+  position: relative;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.board-date-popover .mobile-board-calendar__days > button > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  margin: auto;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.board-date-popover .mobile-board-calendar__days > button:hover > span {
+  background: var(--brand-wash);
+  color: var(--accent-fg);
+}
+
+/*
+ * TODAY, then the SELECTED day, in that order — a selected day that happens to
+ * be today must read as selected, so the filled chip wins over the ring.
+ */
+.board-date-popover
+  .mobile-board-calendar__days
+  > button.is-today:not(.is-selected)
+  > span {
+  box-shadow: inset 0 0 0 1px var(--brand-fill);
+  color: var(--accent-fg);
+  font-weight: 650;
+}
+
+.board-date-popover .mobile-board-calendar__days > button.is-selected > span {
+  background: var(--brand-primary);
+  color: var(--on-brand-primary);
+  font-weight: 700;
+}
+
+.board-date-popover .mobile-board-calendar__days > button:focus-visible {
+  outline: 0;
+}
+
+/* The focus ring goes on the disc, not the 32px cell, so it reads as the day. */
+.board-date-popover
+  .mobile-board-calendar__days
+  > button:focus-visible
+  > span {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* ── Typing, Today and Clear ──────────────────────────────────────────────── */
+
+.board-date-popover__foot {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.board-date-popover__type {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.board-date-popover__type > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.board-date-popover__type .sheet-date-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+
+.board-date-popover__type .sheet-date-input:focus {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--brand-wash);
+  border-color: var(--border-active);
+  background: var(--paper);
+}
+
+/*
+ * THE BROWSER'S OWN PICKER IS UNREACHABLE FROM HERE.
+ *
+ * This indicator is the button Chromium draws inside a date input, and pressing
+ * it opens the grey panel this whole component exists to replace. Hidden, the
+ * input keeps everything a page CAN style — the segments, typing, arrow keys,
+ * the value — and the only calendar on the screen is the branded one above.
+ */
+.board-date-popover__type .sheet-date-input::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.board-date-popover__actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.board-date-popover__actions button {
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--accent-fg);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.board-date-popover__actions button:hover {
+  border-color: var(--border-active);
+  background: var(--brand-wash);
+}
+
+.board-date-popover__actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.board-date-popover__actions button.is-clear {
+  color: var(--muted);
+}
+
+/* ── The cell's own trigger ───────────────────────────────────────────────── */
+
+/*
+ * The date as the board draws it: the value, then how far away it is. Sized and
+ * coloured like the input it replaces, so the column reads exactly as it did —
+ * only what happens on a press has changed.
+ */
+.sheet-date__trigger {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sheet-date__trigger:hover {
+  background: var(--surface-hover);
+}
+
+.sheet-date__trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.sheet-date__trigger.is-empty {
+  color: var(--muted);
+}

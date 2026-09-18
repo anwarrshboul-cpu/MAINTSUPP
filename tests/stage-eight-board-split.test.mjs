@@ -71,10 +71,32 @@ test("cell components are leaves", async () => {
   const source = await read("app/(app)/portal/board-cells.tsx");
   for (const component of [
     "ItemNameEditor", "OptionCell", "InlineTextCell",
-    "DateStatusIcon", "MobileBoardCalendar", "DateCell", "TimelineCell",
+    "DateStatusIcon", "DateCell", "TimelineCell",
   ]) {
     assert.match(source, new RegExp(`export function ${component}`));
   }
+  /*
+   * `MobileBoardCalendar` IS NO LONGER DECLARED HERE, and is still exported
+   * from here — which is the whole point of the re-export.
+   *
+   * It moved to board-calendar.tsx when this file reached its 1,300-line
+   * ceiling and the desktop date picker needed the grid to grow year
+   * navigation and arrow-key movement. The contract this test protects is that
+   * a caller importing from board-cells keeps working, so that is what is
+   * asserted; the declaration's address is not the contract.
+   */
+  assert.match(
+    source,
+    /export \{ MobileBoardCalendar \} from "\.\/board-calendar"/,
+    "every existing `from \"./board-cells\"` import must keep working",
+  );
+  const calendar = await read("app/(app)/portal/board-calendar.tsx");
+  assert.match(calendar, /export function MobileBoardCalendar/);
+  assert.doesNotMatch(
+    calendar,
+    /from "\.\/live-board"|from "\.\/board-cells"/,
+    "the calendar must stay a leaf, or the split becomes circular",
+  );
   assert.match(source, /"use client"/, "cells hold state and need the directive");
 });
 
@@ -158,6 +180,21 @@ test("no board file exceeds a reviewable size", async () => {
      * overflow is the easiest place for the next thing to be dropped quietly.
      */
     "app/(app)/portal/board-pinning.ts": 250,
+    /*
+     * The month grid, split out of board-cells when that file reached its
+     * ceiling and the desktop date picker needed room in it for year
+     * navigation and arrow-key movement.
+     *
+     * Capped from the start for the reason every note above gives: a file
+     * created to relieve a ceiling is the easiest place for the next thing to
+     * be dropped without anyone noticing.
+     */
+    "app/(app)/portal/board-calendar.tsx": 300,
+    /*
+     * The board's date popover — the branded calendar that replaced Chromium's
+     * own, which no stylesheet can reach. Capped on the same argument.
+     */
+    "app/(app)/portal/cells/board-date-picker.tsx": 250,
     /*
      * Split out of board-model when it reached 600 — the two column
      * derivations that turn a board's stored lists into what the grid draws.
