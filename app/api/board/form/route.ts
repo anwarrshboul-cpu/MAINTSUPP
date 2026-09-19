@@ -30,6 +30,7 @@ import {
   anonymousRefusal,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
+import { can, resolvePermissions } from "../../../lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,27 @@ function unavailable(error: unknown) {
  * includes `password_hash`: `hasPassword` is the only thing the panel needs in
  * order to draw the toggle in the right position, and sending the hash would
  * put a PBKDF2 digest into the browser for no reason at all.
+ *
+ * AND IT NO LONGER HANDS THE SHARE TOKEN TO A READER.
+ *
+ * `password_hash` was the only credential this function thought about, and the
+ * share token is the other one. `POST` above says why it matters, in its own
+ * words: creating a form "MINTS AN UNAUTHENTICATED WRITE PATH into this
+ * organisation's database, so it cannot be a read: a `client`, whose
+ * capabilities are `board.view` and `data.export`, must not be able to publish
+ * an intake by opening a tab."
+ *
+ * That reasoning was applied to minting and not to reading, and the two produce
+ * the same outcome. A `client` could not create a form, and did not need to:
+ * `GET` handed them `shareToken`, `shortToken`, `shareUrl` and `presentedUrl`
+ * for the form that already existed — a live, unauthenticated write path into
+ * the workspace, publishable anywhere. Verified before the change: the token a
+ * `board.view`-only account read here opened `/api/forms/<token>` with no
+ * session at all, while `PATCH` refused that same account 403.
+ *
+ * So the credential now follows the authority that mints and rotates it.
+ * `maySeeCredential` is REQUIRED rather than defaulted, so a future call site
+ * has to decide rather than inherit the permissive answer by forgetting.
  */
 function serialiseForm(
   request: Request,
@@ -97,6 +119,8 @@ function serialiseForm(
    * rather than the captured monday snapshot.
    */
   optionOverrides: Record<string, Array<{ label: string; value: string }>>,
+  /** Whether this caller holds `board.edit`, the authority that mints the token. */
+  maySeeCredential: boolean,
 ) {
   return {
     id: record.id,
@@ -126,12 +150,33 @@ function serialiseForm(
     responseLimit: record.responseLimit,
     closeAt: record.closeAt,
     responseCount: record.responseCount,
-    shareToken: record.shareToken,
-    shortToken: record.shortToken,
+    /*
+     * The four credential fields, together, or none of them.
+     *
+     * `shortToken` is not a lesser secret than `shareToken`: `loadFormByToken`
+     * matches EITHER against the same row (`app/lib/form-config.ts:169-170`), so
+     * withholding one and sending the other would withhold nothing. The two URLs
+     * are the tokens with a scheme in front.
+     *
+     * Empty string rather than `undefined` or omitted: the builder renders the
+     * share input unconditionally and `value={undefined}` makes React scream
+     * about an uncontrolled input while the Copy button copies the literal
+     * "undefined" — which is exactly the drift the note above this function
+     * records happening the last time these fields went missing.
+     */
+    shareToken: maySeeCredential ? record.shareToken : "",
+    shortToken: maySeeCredential ? record.shortToken : null,
     /* The long link, always — the dialog needs it for the "full link" case. */
-    shareUrl: shareUrl(request, record.shareToken),
+    shareUrl: maySeeCredential ? shareUrl(request, record.shareToken) : "",
     /* What the dialog displays and the Copy button copies. */
-    presentedUrl: presentedShareUrl(request, record),
+    presentedUrl: maySeeCredential ? presentedShareUrl(request, record) : "",
+    /*
+     * Stated, so the builder can leave the share controls out rather than draw
+     * an empty box a reader would take for a bug. This is a rendering hint and
+     * NOT the boundary — the boundary is the three ternaries above, on the
+     * server, and the fields stay empty however the browser behaves.
+     */
+    canShare: maySeeCredential,
     config: record.config,
     optionOverrides,
   };
@@ -186,6 +231,17 @@ export async function GET(request: Request) {
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
     const { db, orgId } = guard.scope;
+
+    /*
+     * `board.view` opens the builder; `board.edit` is what hands over the live
+     * intake link. Resolved once here and asked once below, rather than a second
+     * `scopedDbWithCapability` probe — that re-resolves tenant access from
+     * scratch, and this is the read every open of the Form tab goes through.
+     * The same shape `app/api/registers/route.ts` uses, for the same reason.
+     */
+    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role);
+    const mayShare = can(subject, "board.edit");
+
     const boardId = await boardIdFrom(request, db, orgId);
     const record = await loadForm(db, orgId, boardId);
     /*
@@ -232,6 +288,7 @@ export async function GET(request: Request) {
         request,
         record,
         await formOptionOverrides(db, orgId, record.config),
+        mayShare,
       ),
       groups,
     });
@@ -276,6 +333,8 @@ export async function POST(request: Request) {
           request,
           existing,
           await formOptionOverrides(db, orgId, existing.config),
+          /* This handler required `board.edit` to reach. */
+          true,
         ),
       });
     }
@@ -344,6 +403,8 @@ export async function POST(request: Request) {
           request,
           created,
           await formOptionOverrides(db, orgId, created.config),
+          /* Likewise — and the caller just minted this token. */
+          true,
         ),
         groups,
       },
@@ -559,7 +620,9 @@ export async function PATCH(request: Request) {
       ok: true,
       form:
         saved &&
-        serialiseForm(request, saved, await formOptionOverrides(db, orgId, saved.config)),
+        /* PATCH requires `board.edit`, and may have just rotated the token —
+           the builder needs the new one back or Copy link hands over the old. */
+        serialiseForm(request, saved, await formOptionOverrides(db, orgId, saved.config), true),
     });
   } catch (error) {
     return unavailable(error);

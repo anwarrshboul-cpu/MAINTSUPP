@@ -540,36 +540,49 @@ export default function FormBuilder({
           )}
         </p>
 
-        <div className="form-builder__share">
-          <button
-            type="button"
-            className="form-builder__sharebtn"
-            onClick={() => setSharing(true)}
-          >
-            <Icon name="share" size={15} />
-            Share form
-          </button>
-          <button
-            type="button"
-            className="form-builder__copy"
-            onClick={copyLink}
-            aria-label="Copy form link"
-            title={copied ? "Copied" : "Copy form link"}
-          >
-            <Icon name={copied ? "check" : "link"} size={15} />
-          </button>
-        </div>
+        {/*
+          Offered only to a reader who may have the link. `/api/board/form`
+          withholds `presentedUrl` from anybody without `board.edit`, so drawing
+          these would give a Copy button that copies an empty string and a dialog
+          with an empty URL box — a control that looks broken rather than one
+          that is not theirs. The server is the boundary; this is honesty.
+        */}
+        {form.canShare && (
+          <div className="form-builder__share">
+            <button
+              type="button"
+              className="form-builder__sharebtn"
+              onClick={() => setSharing(true)}
+            >
+              <Icon name="share" size={15} />
+              Share form
+            </button>
+            <button
+              type="button"
+              className="form-builder__copy"
+              onClick={copyLink}
+              aria-label="Copy form link"
+              title={copied ? "Copied" : "Copy form link"}
+            >
+              <Icon name={copied ? "check" : "link"} size={15} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/*
         PHONE ONLY, by stylesheet — `.form-builder__mshare` is `display: none`
         until 767px, the same boundary that hides the toolbar above. Rendered
-        unconditionally so the server and the first client render agree.
+        unconditionally at every width so the server and the first client render
+        agree — but not to a reader who may not have the link: `canShare` comes
+        from the same fetched object as the URL itself, so the two can never
+        disagree about whether there is one to show.
 
         The link is shown as well as shared. It is what the button will hand
         over, it is selectable when the clipboard refuses, and a reader who is
         about to send a stranger a URL is entitled to see which one.
       */}
+      {form.canShare && (
       <div className="form-builder__mshare">
         <input
           id="form-mobile-share-url"
@@ -589,6 +602,7 @@ export default function FormBuilder({
           {copied ? "Link copied" : "Share link"}
         </button>
       </div>
+      )}
 
       {!form.active && (
         <p className="form-builder__banner">
