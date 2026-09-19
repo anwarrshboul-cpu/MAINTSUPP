@@ -1,0 +1,174 @@
+/*
+ * Settings → Brand colours.
+ *
+ * Written entirely against the palette tokens — no colour literal appears
+ * below, and in this file that rule is load-bearing rather than tidy. This is
+ * the screen that EDITS the tokens, so a literal here would be a control that
+ * kept its old colour after changing the product's, and the one place a person
+ * would notice first.
+ *
+ * `appearance-panel.css` next door makes the one justified exception: its three
+ * swatches preview the two grounds and must show both themes at once, so they
+ * are literals on purpose. Nothing here needs that.
+ *
+ * No media query, for the same reason as that file: the rows are a wrapping
+ * flex layout and reflow on a phone without a breakpoint, which keeps this file
+ * out of the 640/767/768/1024/1280 rule the stage tests enforce rather than
+ * spending one of those widths on a settings card.
+ */
+
+.brand-colours {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 16px;
+}
+
+.brand-colour {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+/*
+ * The native colour input carries its own chrome in every browser and none of
+ * them agree, so it is sized down to a swatch and the border is ours. The
+ * label wraps it so the whole swatch is the hit target rather than the inner
+ * 28px the control would otherwise expose.
+ */
+.brand-colour__swatch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  width: 38px;
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.brand-colour__swatch input[type="color"] {
+  width: 150%;
+  height: 150%;
+  margin: -25%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: inherit;
+}
+
+.brand-colour__swatch input[type="color"]:disabled {
+  cursor: not-allowed;
+}
+
+.brand-colour__body {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.brand-colour__body strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.brand-colour__body small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.brand-colour__body code {
+  color: var(--muted-2);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.brand-colour__reset {
+  flex: 0 0 auto;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.brand-colour__reset:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.brand-colour__default {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+/*
+ * A warning, not an error: the save already happened and the colour is in use.
+ * Amber rather than red says "look at this" without claiming something failed,
+ * which is the accurate description of a pair that measures 4.4:1.
+ */
+.brand-colours__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  border: 1px solid var(--status-yellow);
+  border-radius: 10px;
+  background: var(--status-yellow-bg);
+  list-style: none;
+}
+
+.brand-colours__warnings li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--status-yellow-fg);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.brand-colours__warnings svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.brand-colours__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  padding-top: 16px;
+}
+
+.brand-colours__status {
+  color: var(--status-green-fg);
+  font-size: 11px;
+}
+
+.brand-colours__failure {
+  color: var(--status-red-fg);
+  font-size: 11px;
+}
+
+/*
+ * The boundary of what these colours reach, stated on the screen. Muted rather
+ * than warning-coloured: it is a scope note, not a problem.
+ */
+.brand-colours__scope {
+  margin: 4px 0 0;
+  color: var(--muted-2);
+  font-size: 11px;
+  line-height: 1.5;
+}

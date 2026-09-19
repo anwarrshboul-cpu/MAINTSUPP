@@ -1,0 +1,266 @@
+"use client";
+
+/**
+ * Settings → Brand colours — the workspace's palette, not the viewer's.
+ *
+ * WHY THIS IS NOT PART OF `appearance-panel.tsx`
+ *
+ * They look like the same screen and they are opposite things. Appearance is a
+ * PER-PERSON, per-device choice between dark and light; it applies on click,
+ * saves to `users.theme_preference`, and nobody else ever sees the result. This
+ * is a PER-WORKSPACE decision that repaints the product for every colleague and
+ * every client in it, needs `settings.edit`, and is written to the audit log.
+ * Folding them together would put an "applies to you" control and an "applies to
+ * everyone" control in one card with one Save button, which is exactly the
+ * confusion worth spending a second card to avoid.
+ *
+ * WHY THE SWATCHES ARE `<input type="color">`
+ *
+ * Ten other places in this product already use it for data colours — option
+ * values, status maps, site groups, calendar events — so it is the control
+ * people here already know. It also constrains the value to a hex by
+ * construction, which means the common path never reaches the server's refusal.
+ * The server validates anyway and does not trust this at all; see
+ * `validateThemeToken`.
+ *
+ * WHAT "DEFAULT" MEANS ON THIS SCREEN, AND WHY RESET IS A DELETE
+ *
+ * A token with no stored row is painted from the shipped palette. So "Reset"
+ * deletes the row rather than writing the MAINTSUPP teal into it. The difference
+ * matters the day the shipped palette changes: a workspace that reset stays with
+ * the product, and one that had the old value written in would be silently
+ * frozen on a colour nobody chose.
+ */
+
+import { useCallback, useEffect, useState } from "react";
+
+import { Icon } from "../../../components";
+import "./brand-colours-panel.css";
+
+type ThemeToken = {
+  key: string;
+  label: string;
+  group: string;
+  description: string;
+  value: string;
+  isDefault: boolean;
+  seedInput: string;
+};
+
+type ContrastWarning = {
+  mode: "light" | "dark";
+  property: string;
+  ratio: number;
+  required: number;
+  message: string;
+};
+
+type ThemeResponse = {
+  canEdit: boolean;
+  tokens: ThemeToken[];
+  warnings: ContrastWarning[];
+  error?: string;
+};
+
+export function BrandColoursPanel() {
+  const [state, setState] = useState<ThemeResponse | null>(null);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch("/api/theme", { cache: "no-store" });
+      const body = (await response.json()) as ThemeResponse;
+      if (!response.ok) {
+        setFailure(body.error ?? "Could not load the brand colours.");
+        return;
+      }
+      setState(body);
+      setDraft({});
+      setFailure(null);
+    } catch {
+      setFailure("Could not load the brand colours.");
+    }
+  }, []);
+
+  /* eslint-disable react-hooks/set-state-in-effect -- `load` awaits the fetch
+     before it touches state, so nothing here sets state synchronously in the
+     effect body; the rule cannot see through the promise. The same disable, for
+     the same reason, sits over the identical pattern in `views/audit-log.tsx`.
+     Reading the workspace's stored palette on mount is exactly the
+     external-system synchronisation an effect is for. */
+  useEffect(() => {
+    void load();
+  }, [load]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  if (failure && !state) {
+    return (
+      <section className="panel settings-card">
+        <div className="settings-card__heading">
+          <span>
+            <Icon name="image" size={19} />
+          </span>
+          <div>
+            <h2>Brand colours</h2>
+            <p>{failure}</p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (!state) return null;
+
+  const { canEdit, tokens, warnings } = state;
+  /* Only what actually changed is sent, so pressing Save without touching
+     anything is a no-op rather than a write of every token. */
+  const pending = Object.entries(draft).filter(
+    ([key, value]) => tokens.find((token) => token.key === key)?.value !== value,
+  );
+
+  const save = async (payload: Record<string, string | null>) => {
+    setBusy(true);
+    setStatus(null);
+    setFailure(null);
+    try {
+      const response = await fetch("/api/theme", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tokens: payload }),
+      });
+      const body = (await response.json()) as ThemeResponse;
+      if (!response.ok) {
+        setFailure(body.error ?? "Could not save the brand colours.");
+        return;
+      }
+      setState(body);
+      setDraft({});
+      /*
+       * The stamped `<style>` element is server-rendered by
+       * `app/(app)/layout.tsx`, so the page in front of the person is still
+       * painted with the previous palette until the document is fetched again.
+       * Saying so, and reloading, is the honest option — the alternative is a
+       * saved setting that appears to have done nothing.
+       */
+      setStatus("Saved. Reloading so the new colours take effect…");
+      setTimeout(() => window.location.reload(), 600);
+    } catch {
+      setFailure("Could not save the brand colours.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="panel settings-card">
+      <div className="settings-card__heading">
+        <span>
+          <Icon name="image" size={19} />
+        </span>
+        <div>
+          <h2>Brand colours</h2>
+          <p>
+            {canEdit
+              ? "Applies to everyone in this workspace, on both the dark and light themes."
+              : "Applies to everyone in this workspace. You do not have permission to change these."}
+          </p>
+          {/*
+           * Said on the screen rather than only in a release note. These colours
+           * repaint the navigation, buttons, links, logo, badges and status
+           * chips, but NOT the charts and meters: those draw from palettes held
+           * in TypeScript rather than from these tokens, and consolidating them
+           * is its own piece of work. Letting somebody change their brand and
+           * then wonder why the donut is still teal would be the "configuration
+           * that does not affect components" this product is not allowed to ship.
+           */}
+          <p className="brand-colours__scope">
+            Charts and meters keep the MAINTSUPP palette for now — they are drawn
+            from their own colour set, which is not yet configurable here.
+          </p>
+        </div>
+      </div>
+
+      <div className="brand-colours">
+        {tokens.map((token) => {
+          const value = draft[token.key] ?? token.value;
+          return (
+            <div className="brand-colour" key={token.key}>
+              <label className="brand-colour__swatch" htmlFor={`tt-${token.key}`}>
+                <input
+                  id={`tt-${token.key}`}
+                  type="color"
+                  value={value}
+                  disabled={!canEdit || busy}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      [token.key]: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <div className="brand-colour__body">
+                <strong>{token.label}</strong>
+                <small>{token.description}</small>
+                <code>{value}</code>
+              </div>
+              {canEdit && !token.isDefault ? (
+                <button
+                  type="button"
+                  className="brand-colour__reset"
+                  disabled={busy}
+                  onClick={() => void save({ [token.key]: null })}
+                >
+                  Reset
+                </button>
+              ) : (
+                /* Said plainly rather than left blank, so "we have not chosen
+                   one" is distinguishable from "we chose this and it happens to
+                   match". */
+                <span className="brand-colour__default">MAINTSUPP default</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {warnings.length > 0 ? (
+        <ul className="brand-colours__warnings">
+          {warnings.map((warning) => (
+            <li key={`${warning.mode}-${warning.property}`}>
+              <Icon name="alert" size={15} />
+              <span>{warning.message}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {canEdit ? (
+        <div className="brand-colours__actions">
+          <button
+            type="button"
+            /* The same class the Settings screen's own Save uses, so the two
+               buttons on one page are one control rather than two designs. */
+            className="primary-button"
+            disabled={busy || pending.length === 0}
+            onClick={() => void save(Object.fromEntries(pending))}
+          >
+            <Icon name="check" size={17} />
+            {busy ? "Saving…" : "Save brand colours"}
+          </button>
+          {status ? <span className="brand-colours__status">{status}</span> : null}
+          {failure ? (
+            <span className="brand-colours__failure" role="alert">
+              {failure}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export default BrandColoursPanel;

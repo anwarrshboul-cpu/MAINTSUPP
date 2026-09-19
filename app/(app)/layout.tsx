@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import globalsCss from "../globals.css?url";
 import brandCss from "../brand-overrides.css?url";
 import boardMetricsCss from "../board-metrics.css?url";
+import { organisationThemeCss } from "../lib/theme-render.ts";
 import {
   THEME_COLOR_DARK,
   THEME_COLOR_LIGHT,
@@ -55,8 +56,32 @@ import {
  * The values are imported, not typed out: `theme-boot.ts` holds them next to
  * the code that switches between them, so a colour cannot be changed in one
  * place and missed in the other.
+ *
+ * AND THE WORKSPACE'S OWN COLOURS ARE STAMPED HERE TOO.
+ *
+ * `organisationThemeCss()` returns the brand overrides this workspace has
+ * chosen, as a `:root` block, and the element carrying them is rendered AFTER
+ * the three stylesheet links above. That order is the whole mechanism: the block
+ * reuses `globals.css`'s own selectors verbatim, so specificity ties and the
+ * later rule wins by document order alone. A heavier selector would win too, and
+ * would also outrank the `[data-theme]` rules further down `globals.css` that
+ * these tokens are meant to cooperate with.
+ *
+ * It is almost always the empty string — no workspace has an override until
+ * somebody opens the editor — and an empty string renders nothing at all, so the
+ * common path adds no bytes and no risk. See `app/lib/theme-tokens.ts` for why
+ * absence is the correct steady state rather than an unfinished one.
+ *
+ * This layout is async now, which it was not before. It wraps every screen that
+ * loads `globals.css`, so putting the lookup here is what stops the next page
+ * from forgetting it — the same argument `page-guard.ts` makes for putting the
+ * session check at the route entry. The cost is bounded deliberately: the read
+ * is cached per isolate for 30 seconds by `theme-repository.ts`, and it is
+ * skipped entirely for a request with no session.
  */
-export default function AppLayout({ children }: { children: ReactNode }) {
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  const themeCss = await organisationThemeCss();
+
   return (
     <>
       {/* Inline, and deliberately so: it is the only way to run code before
@@ -75,6 +100,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <link rel="stylesheet" href={globalsCss} />
       <link rel="stylesheet" href={brandCss} />
       <link rel="stylesheet" href={boardMetricsCss} />
+      {/* Nothing is rendered when the workspace has no overrides, which is the
+          usual case. The content is `#rrggbb` values re-serialised by
+          `validateThemeToken` from parsed integers — never a caller's string —
+          so there is no request-shaped input reaching this element. */}
+      {themeCss ? (
+        <style
+          data-maintsupp-theme=""
+          dangerouslySetInnerHTML={{ __html: themeCss }}
+        />
+      ) : null}
       {children}
     </>
   );

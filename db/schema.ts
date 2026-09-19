@@ -3901,3 +3901,35 @@ export const financeInbox = sqliteTable(
     uniqueIndex("finance_inbox_message_idx").on(table.organisationId, table.messageId),
   ],
 );
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE THEME EDITOR'S OVERRIDES — a sparse diff, never the palette.
+ *
+ * A row means "this organisation chose this colour". No row means "paint what
+ * ships", which `app/lib/theme-tokens.ts` holds as literals copied from
+ * `app/globals.css`. So this table is empty on every organisation that has
+ * never opened the editor, and empty is the correct steady state rather than a
+ * backfill waiting to happen — the same shape `role_capabilities` uses for
+ * permissions and `navigation_layouts` for the sidebar.
+ *
+ * `token_value` is ONE hex per token. Both themes are derived from it by
+ * `theme-colour.ts`, each solved against its own ground, because asking an
+ * administrator to pick a light purple and a dark purple and get both
+ * contrast-correct is asking them to do the job that module exists to do.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const themeTokens = sqliteTable(
+  "theme_tokens",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** A key from `THEME_TOKEN_CATALOGUE`, e.g. `brand.primary`. */
+    tokenKey: text("token_key").notNull(),
+    /** `#rrggbb`, re-serialised from parsed channels before it is ever stored. */
+    tokenValue: text("token_value").notNull(),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("theme_tokens_key_idx").on(table.organisationId, table.tokenKey),
+  ],
+);
