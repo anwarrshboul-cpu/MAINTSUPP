@@ -37,6 +37,7 @@ import { and, desc, eq, like, or } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { activityLog, auditEvents } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
+import { can, resolvePermissions } from "../../../lib/permissions";
 
 /**
  * The entities a reader might expect to find in a bin, and the truth for each.
@@ -143,6 +144,31 @@ export async function GET(request: Request) {
     const context = await scopedDb(request);
     const orgId = context.orgId;
 
+    /*
+     * THE HISTORY IS THE AUDIT TRAIL, AND IT ANSWERS TO `audit.read`.
+     *
+     * This screen holds two different things. The recovery matrix says WHAT can
+     * be brought back and from where — useful to anybody who might have deleted
+     * something, and it stays open. `deletions` is the other thing: up to two
+     * hundred rows of `activity_log` and `audit_events`, each naming the
+     * colleague who deleted a record and summarising what it was. That is the
+     * deletion half of the audit log, served from a panel in the avatar menu
+     * which has no role gate at all, to any member including a `client`.
+     *
+     * `/api/audit` requires `audit.read` for the same rows. Two routes reading
+     * one table and disagreeing about who may see it is not a boundary; the
+     * looser one simply decides. So this asks the same question.
+     *
+     * Narrowed in the payload rather than at the door, for the reason
+     * `ROLE_CEILINGS` in `app/lib/permissions.ts` makes unavoidable: `manager`
+     * can never hold `audit.read` whatever a Super Admin writes, so gating the
+     * route would take the recovery matrix away from managers permanently.
+     * Losing the history matches what a manager already gets from `/api/audit`;
+     * losing the recovery instructions would not.
+     */
+    const subject = await resolvePermissions(context.db, orgId, context.actor.role);
+    const mayReadAudit = can(subject, "audit.read");
+
     const [activityRows, auditRows] = await Promise.all([
       context.db
         .select({
@@ -228,8 +254,12 @@ export async function GET(request: Request) {
         reason:
           "Deleted jobs and board groups go to the recycle bin for 30 days and can be restored from there. Everything else in the table below is deleted for good.",
         recoveryMatrix: RECOVERY_MATRIX,
-        deletions,
-        deletionCount: deletions.length,
+        deletions: mayReadAudit ? deletions : [],
+        deletionCount: mayReadAudit ? deletions.length : 0,
+        /* Stated rather than left to be inferred from an empty list, so the
+           screen can say "you do not have permission to see this" instead of
+           "nothing has been deleted", which are very different sentences. */
+        canReadHistory: mayReadAudit,
       },
     });
   } catch (error) {

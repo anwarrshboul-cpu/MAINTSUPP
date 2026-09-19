@@ -21,6 +21,7 @@ import {
 } from "../../../../db/schema";
 import { notificationTargets } from "../../../lib/notifications";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
+import { can, resolvePermissions } from "../../../lib/permissions";
 
 /** Reads a Worker environment variable the way `app/lib/notifications.ts` does. */
 function environmentValue(key: string) {
@@ -53,6 +54,32 @@ export async function GET(request: Request) {
     const context = await scopedDb(request);
     const orgId = context.orgId;
     const now = new Date().toISOString();
+
+    /*
+     * WHICH HALF OF THIS SCREEN IS THE TENANT'S, AND WHICH IS THE DEPLOYMENT'S.
+     *
+     * Everything counted below is this workspace's own: how many contractor job
+     * links are live, expired or revoked, and how its notifications were
+     * delivered. That is operational data and it stays open to any member.
+     *
+     * Three blocks are not. `support` carries the operator's own inbox
+     * addresses; `integrations` says which secrets are configured and whether
+     * the storage binding is attached; and `publicEndpoints` is a hand-written
+     * map of the two routes that accept an unauthenticated request. None of it
+     * is another tenant's data — every query here is `eq(organisationId,
+     * orgId)`, and that was checked — but it is a description of the
+     * installation, served to any signed-in member from a panel in the avatar
+     * menu that has no role gate.
+     *
+     * `settings.edit` is the boundary, because it is what the sibling
+     * operational-configuration routes already use. Narrowed in the payload
+     * rather than at the door: `ROLE_CEILINGS` makes `settings.edit`
+     * unholdable by `manager`, so gating the route would take the workspace's
+     * own token counts away from managers permanently to withhold something
+     * that is not about the workspace at all.
+     */
+    const subject = await resolvePermissions(context.db, orgId, context.actor.role);
+    const mayReadPosture = can(subject, "settings.edit");
 
     const [
       liveTokens,
@@ -136,8 +163,7 @@ export async function GET(request: Request) {
       count: row.value,
     }));
 
-    return Response.json({
-      platform: {
+    const platform = {
         /**
          * Developers. The one credential system that genuinely exists is the
          * scoped job-access token a contractor receives — hashed at rest,
@@ -270,10 +296,26 @@ export async function GET(request: Request) {
          * to notify, so the address on the help screen is the address a lead or
          * an alert really goes to — not a placeholder typed into a page.
          */
-        support: {
-          ...notificationTargets(),
-          emailDeliveryConfigured: emailKey,
-        },
+      support: {
+        ...notificationTargets(),
+        emailDeliveryConfigured: emailKey,
+      },
+    };
+
+    if (mayReadPosture) return Response.json({ platform });
+
+    /* The workspace keeps its own figures; the installation's description goes.
+       Built by naming what survives rather than by destructuring away what does
+       not: an omit-by-rest leaves two bindings nothing reads, and a reader has
+       to work out which keys are missing by comparing two places. */
+    return Response.json({
+      platform: {
+        developers: { ...platform.developers, publicEndpoints: [] },
+        integrations: [],
+        support: null,
+        /* Stated, so the screen can say "you do not have permission to see
+           this" instead of drawing an empty panel. */
+        canReadPosture: false,
       },
     });
   } catch (error) {
