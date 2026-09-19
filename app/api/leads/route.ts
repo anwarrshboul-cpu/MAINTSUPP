@@ -1,22 +1,236 @@
 import { ensureDatabase } from "../../../db/init";
-import { leads } from "../../../db/schema";
-import { scopedDb } from "../../lib/tenant-db";
-import { eq, sql } from "drizzle-orm";
+import { leads, organisations } from "../../../db/schema";
+import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { auditActor, recordAudit } from "../../lib/audit";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   leadAlertTemplate,
   leadConfirmationTemplate,
   notificationTargets,
   sendNotification,
 } from "../../lib/notifications";
+import {
+  DEFAULT_LEAD_STATUS,
+  isLeadStatus,
+  LEAD_OMISSIONS,
+  LEAD_STATUSES,
+  leadStatus,
+} from "../../lib/lead-status";
 
 function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
-export async function GET() {
+/**
+ * The inbox — Master Specification §12.
+ *
+ * THIS REPLACED A HARD 501. The endpoint used to answer *"Lead export is disabled
+ * while public testing is active."* to every caller, so intake, storage and
+ * notification were all finished and **nothing could read an enquiry back**. A lead
+ * arrived, an email went out, and the row was then unreachable by any surface in the
+ * product.
+ *
+ * ⚠️ WHY THIS IS GATED ON PLATFORM STAFF AND EMPHATICALLY NOT ON A CAPABILITY.
+ *
+ * This is the finding that decided the whole design, and it is measured rather than
+ * assumed. A public enquiry has no account behind it, so `POST` below resolves its
+ * scope with `allowAnonymous: true` — and an anonymous request resolves to the
+ * PRIMARY active organisation. On Staging, all 8 stored leads therefore sit in
+ * `org_000000000000000000000001`, which is **a client company's workspace**, not
+ * MAINTSUPP's.
+ *
+ * So the rows are MAINTSUPP's own inbound sales pipeline, filed under a customer.
+ * A `leads.view` capability granted to workspace roles would have shown that
+ * customer's Owner every enquiry MAINTSUPP has ever received from its own website,
+ * including the names and email addresses of their competitors. `scopedDb`'s
+ * organisation filter would have delivered it correctly and the leak would have
+ * looked like the feature working.
+ *
+ * `scope.platformAdmin` is therefore the gate, exactly as the website CMS decided
+ * for the same underlying reason: the row says it belongs to an organisation, and
+ * the truth is that it belongs to the platform.
+ *
+ * **The mis-filing itself is NOT fixed here.** Re-homing live rows out of a
+ * customer's workspace is a data change to a customer's tenant and belongs to the
+ * owner, not to a read path. It is recorded as a finding.
+ *
+ * WHY IT READS ACROSS WORKSPACES. `scope.organisationIds` is already widened for a
+ * platform admin — `crossOrganisation: platformAdmin` — so `inArray` over it is
+ * the same instrument `GET /api/audit` uses. Reading only the current workspace
+ * would strand every lead the day the primary organisation changes.
+ */
+export async function GET(request: Request) {
+  try {
+    await ensureDatabase();
+    const scope = await scopedDb(request);
+    if (scope.platformAdmin !== true || !scope.authenticated) {
+      return Response.json(
+        { error: "The website's enquiries are read by MAINTSUPP platform staff." },
+        { status: 403 },
+      );
+    }
+
+    const rows = await scope.db
+      .select()
+      .from(leads)
+      .where(inArray(leads.organisationId, scope.organisationIds))
+      .orderBy(desc(leads.createdAt));
+
+    /* Which workspace each lead landed in, named rather than shown as an opaque id
+       — because "these are all filed under a client" is the fact a reader of this
+       screen most needs to be able to see for themselves. */
+    const workspaces = scope.organisationIds.length
+      ? await scope.db
+          .select({ id: organisations.id, name: organisations.name })
+          .from(organisations)
+          .where(inArray(organisations.id, scope.organisationIds))
+      : [];
+    const workspaceNames = new Map(workspaces.map((row) => [row.id, row.name]));
+
+    const counts: Record<string, number> = {};
+    let open = 0;
+    const enquiries = rows.map((row) => {
+      const status = leadStatus(row.status);
+      counts[status.key] = (counts[status.key] ?? 0) + 1;
+      if (!status.closed) open += 1;
+      return {
+        id: row.id,
+        name: row.name,
+        company: row.company,
+        email: row.email,
+        phone: row.phone ?? null,
+        siteRange: row.siteRange,
+        /* Stored as JSON text by `POST`. Parsed here rather than on the screen, so a
+           row written before the form stopped asking — which stores "[]" — reads as
+           an empty list instead of the two characters. */
+        services: parseList(row.services),
+        regions: parseList(row.regions),
+        challenge: row.challenge,
+        status: status.key,
+        closed: status.closed,
+        notifiedAt: row.notifiedAt ?? null,
+        notifyAttempts: row.notifyAttempts,
+        createdAt: row.createdAt,
+        organisationId: row.organisationId,
+        workspaceName: workspaceNames.get(row.organisationId) ?? null,
+      };
+    });
+
+    return Response.json({
+      canEdit: true,
+      enquiries,
+      statuses: LEAD_STATUSES,
+      counts,
+      open,
+      /* Printed by the screen rather than restated there, so the two cannot drift. */
+      omissions: LEAD_OMISSIONS,
+    });
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+/**
+ * Move one enquiry to another status.
+ *
+ * The status is narrowed against the closed vocabulary in `lead-status.ts`, so a
+ * request cannot invent one — the column is `TEXT` and the database would accept
+ * anything, which would make both the filter and the totals on the screen untrue.
+ *
+ * THE REASON GOES IN THE AUDIT TRAIL, because there is nowhere else for it. A lead
+ * has no notes column and this phase adds no migration, so an optional sentence
+ * explaining a change is recorded as audit `detail` and read back from there. That
+ * is not a workaround: a note about why something changed belongs with the record of
+ * the change rather than overwriting a field on the row.
+ */
+export async function PATCH(request: Request) {
+  try {
+    await ensureDatabase();
+    const scope = await scopedDb(request);
+    if (scope.platformAdmin !== true || !scope.authenticated) {
+      return Response.json(
+        { error: "The website's enquiries are managed by MAINTSUPP platform staff." },
+        { status: 403 },
+      );
+    }
+
+    const body = (await request.json().catch(() => null)) as {
+      id?: unknown;
+      status?: unknown;
+      reason?: unknown;
+    } | null;
+    const id = clean(body?.id, 120);
+    if (!id) {
+      return Response.json({ error: "Name the enquiry to update." }, { status: 400 });
+    }
+    if (!isLeadStatus(body?.status)) {
+      return Response.json(
+        {
+          error: `A status must be one of ${LEAD_STATUSES.map((s) => s.key).join(", ")}.`,
+        },
+        { status: 400 },
+      );
+    }
+    const next = body.status;
+    const reason = clean(body?.reason, 400);
+
+    /* Scoped to the workspaces this platform admin may read, so an id alone is not
+       enough to reach a row — the same confinement the read uses. */
+    const [existing] = await scope.db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.id, id), inArray(leads.organisationId, scope.organisationIds)))
+      .limit(1);
+    if (!existing) {
+      return Response.json({ error: "There is no enquiry with that reference." }, { status: 404 });
+    }
+
+    const before = existing.status || DEFAULT_LEAD_STATUS;
+    if (before !== next) {
+      await scope.db.update(leads).set({ status: next }).where(eq(leads.id, id));
+    }
+
+    await recordAudit({
+      db: scope.db,
+      /* Against the workspace the lead is filed under, not the actor's, because that
+         is where the row lives and where a later reader would look for it. */
+      organisationId: existing.organisationId,
+      actor: auditActor(scope),
+      action: before === next ? "lead.status_reaffirmed" : "lead.status_changed",
+      entityType: "lead",
+      entityId: id,
+      summary:
+        before === next
+          ? `Left the enquiry from ${existing.company} at ${next}.`
+          : `Moved the enquiry from ${existing.company} from ${before} to ${next}.`,
+      detail: { from: before, to: next, reason: reason || null, email: existing.email },
+      request,
+    });
+
+    return Response.json({ ok: true, id, status: next });
+  } catch (error) {
+    return unavailable(error);
+  }
+}
+
+/** A JSON array stored as text, or an empty list. Never a throw. */
+function parseList(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((entry) => typeof entry === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function unavailable(error?: unknown) {
+  // A session that has ended is not an outage — the same helper every other route uses.
+  const refusal = anonymousRefusal(error);
+  if (refusal) return refusal;
   return Response.json(
-    { error: "Lead export is disabled while public testing is active." },
-    { status: 501 },
+    { error: "The enquiries are temporarily unavailable." },
+    { status: 503 },
   );
 }
 

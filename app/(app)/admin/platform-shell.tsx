@@ -74,6 +74,7 @@ import {
   platformSection,
   platformSectionPath,
 } from "../../lib/platform-sections";
+import { LeadsInboxView } from "./leads-view";
 import { PlatformOverview } from "./platform-overview";
 import "./platform-shell.css";
 
@@ -130,6 +131,8 @@ export function PlatformShell({
         return <AdminRolesView />;
       case "audit":
         return <AuditLog />;
+      case "leads":
+        return <LeadsInboxView />;
       default:
         return <PlatformOverview />;
     }

@@ -23,10 +23,10 @@
  * dashboard sidebar "would duplicate navigation another part of the app owns and
  * would drift from it the first time either changed".
  *
- * WHY FIVE SCREENS AND NOT TEN
+ * WHY SIX SCREENS AND NOT TEN
  *
- * The console is the shell plus the screens that EXIST. Five platform reads exist
- * today and every one is mounted here:
+ * The console is the shell plus the screens that EXIST. Six platform surfaces
+ * exist today and every one is mounted here:
  *
  *   Dashboard   `GET /api/admin/clients` totals — platform-wide already
  *   Clients     `AdminClientsView`
@@ -35,6 +35,9 @@
  *   Audit       `GET /api/audit`, which is already platform-wide for a Super
  *               Admin and is the only route that also returns workspace-less
  *               events
+ *   Enquiries   `/api/leads`, whose GET was a hard 501 until this phase. The
+ *               sixth, and the one that proves the rule below rather than
+ *               weakening it: it was listed on the day it had a read path
  *
  * Branding, Integrations, Billing and platform Settings are NOT listed. Each
  * needs a server side that does not exist — in Billing's case a payment
@@ -110,6 +113,27 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     icon: "list",
     blurb: "What happened, who did it, and where — across every workspace.",
     capability: "audit.read",
+  },
+  /*
+   * Website enquiries, added when its API arrived — the rule below being kept
+   * rather than bent. `GET /api/leads` was a hard 501 until this phase, so there
+   * genuinely was nothing behind a rail entry; now there is a read, a status write
+   * and an audit trail.
+   *
+   * `capability: null`, and here the reason is stronger than "there is no suitable
+   * capability". A public enquiry has no account, so the intake route files it under
+   * the PRIMARY active organisation — measured, a client company's workspace. The
+   * rows are MAINTSUPP's own sales pipeline wearing a customer's `organisation_id`.
+   * A workspace capability would therefore have shown that customer every enquiry
+   * MAINTSUPP has ever received from its own website, and `scopedDb` would have
+   * delivered it correctly. `platformAdmin` is the only honest gate.
+   */
+  {
+    key: "leads",
+    label: "Website enquiries",
+    icon: "inbox",
+    blurb: "What the public enquiry form has taken, and where each one has got to.",
+    capability: null,
   },
 ] as const;
 
