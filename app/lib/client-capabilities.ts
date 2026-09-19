@@ -33,6 +33,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { governingModule } from "./portal-modules.ts";
 import { fetchRuntimeContext, forgetRuntimeContext } from "./runtime-context";
 
 export type CapabilityMap = Record<string, boolean>;
@@ -52,6 +53,96 @@ export function fetchCapabilities(): Promise<CapabilityMap> {
  */
 export function forgetCapabilities() {
   forgetRuntimeContext();
+}
+
+/**
+ * Whether a section key's module is switched on for this workspace AND reachable
+ * by this person — Master Specification §19, from the one answer the server
+ * resolved.
+ *
+ * WHY THIS EXISTS BESIDE `useCapability` RATHER THAN INSIDE IT
+ *
+ * A capability is about the person; a module is about the workspace. Both happen
+ * to arrive in the same payload, and a control that needs the second would
+ * otherwise have to ask for `modules` itself — and
+ * `tests/shared-context-and-navigation-reads.test.mjs` forbids a second direct
+ * read of `/api/context` for exactly the reason that test was written: two
+ * readers of one endpoint fetched it twice on every dashboard load.
+ *
+ * `null` WHILE IT LOADS, and every caller must read it as "not answered". The
+ * sidebar has the same rule for the same reason: treating an unanswered question
+ * as "switched off" would empty the navigation on every page load, which reads as
+ * the product having lost half of itself.
+ *
+ * `governingModule` follows the aliases, so a second door answers for the room it
+ * opens — `units` for Assets, and the account `trash` panel for the Recycle Bin.
+ */
+export function useModuleAvailable(sectionKey: string): boolean | null {
+  const [available, setAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRuntimeContext()
+      .then((context) => {
+        if (cancelled) return;
+        const listed = context.modules;
+        /* Not answered — an older payload, or a read that has not landed. The
+           caller decides, and every caller today keeps the control visible. */
+        if (!Array.isArray(listed)) return;
+        const governing = governingModule(sectionKey);
+        setAvailable(!governing || listed.includes(governing));
+      })
+      .catch(() => {
+        // Leave it unanswered, exactly as `useCapability` does.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sectionKey]);
+  return available;
+}
+
+/**
+ * Whether this person is MAINTSUPP platform staff — `identity.platformAdmin`.
+ *
+ * WHY THIS IS NOT A CAPABILITY, AND SO NOT `useCapability`
+ *
+ * `can()` returns true for `super_admin` before it reads anything at all, so no
+ * capability distinguishes the platform's own staff from a client company's most
+ * senior role. `platformAdmin` comes from the `platform_admins` table by way of
+ * `resolveTenantAccess`, which reads it from the database and never from the
+ * request. It is the same value as `crossOrganisation`, and it is what makes a
+ * Platform Super Admin's membership list every active organisation.
+ *
+ * `null` while it loads, read as "not answered" — and every caller must treat that
+ * as "do not offer". Showing a door to the platform console and taking it away a
+ * moment later is worse than showing it a moment late.
+ *
+ * THIS IS NOT THE ENFORCEMENT. `requirePlatformAdmin` in `app/lib/platform-guard.ts`
+ * is, on the server, at every `/admin` route entry. Reading the same answer here is
+ * only what stops the two disagreeing, so nobody is offered a console that will
+ * turn them away.
+ */
+export function usePlatformAdmin(): boolean | null {
+  const [platformAdmin, setPlatformAdmin] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRuntimeContext()
+      .then((context) => {
+        if (cancelled) return;
+        const identity = context.identity as { platformAdmin?: boolean } | undefined;
+        /* A payload from before this field existed leaves it unanswered rather
+           than answering "no", which is the same rule `capabilities` follows. */
+        if (!identity || typeof identity.platformAdmin !== "boolean") return;
+        setPlatformAdmin(identity.platformAdmin);
+      })
+      .catch(() => {
+        // Unanswered. The server still decides.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return platformAdmin;
 }
 
 /**

@@ -27,6 +27,8 @@ import {
 } from "../../lib/tenant-access";
 import { listOptionValues } from "../../lib/options-repository";
 import { effectiveCapabilities, resolvePermissions } from "../../lib/permissions";
+import { availableModules } from "../../lib/portal-modules.ts";
+import { readModuleOverrides } from "../../lib/portal-module-repository.ts";
 import { type WorkspaceRole } from "../../lib/workspace-actor";
 import { isWorkspaceRole } from "../../lib/roles";
 
@@ -214,6 +216,25 @@ async function contextPayload(request: Request) {
      * the board. Guessing from a role is wrong the moment an admin narrows one.
      */
     capabilities: effectiveCapabilities(context.actor.role, permissions.capabilities),
+    /*
+     * WHICH PORTAL MODULES THIS ACTOR MAY REACH, decided by the server.
+     *
+     * Existence AND authority, resolved once: a module this workspace has
+     * switched off, or whose capability this actor does not hold, is simply not
+     * in the list. Both the sidebar and the page guard read THIS answer, which
+     * is the same reason `capabilities` above exists — "a control the browser
+     * hides and a request the API refuses can never disagree."
+     *
+     * The browser needs it because it builds its own catalogue: `navCatalogue`
+     * in `portal-app.tsx` is assembled from a static client-side list, so
+     * dropping a module on the server would otherwise change nothing in the
+     * sidebar. This field is how the client learns.
+     */
+    modules: availableModules(
+      await readModuleOverrides(context.db, context.orgId),
+      effectiveCapabilities(context.actor.role, permissions.capabilities),
+      context.actor.role,
+    ),
     // Stage 19 — what the actor is allowed to see, and how it was decided.
     identity: {
       email: context.identityEmail,

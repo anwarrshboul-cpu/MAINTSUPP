@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requirePageSession } from "../../../lib/page-guard";
+import { requireModuleAccess, requirePageSession } from "../../../lib/page-guard";
 import { TeamsManager } from "../../portal/views/teams-manager";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +18,15 @@ export default async function TeamsPage() {
    * guard as every other screen under /dashboard. See `app/lib/page-guard.ts`.
    */
   await requirePageSession("/dashboard/teams");
+  /*
+   * THE SECOND DOOR ONTO THE TEAM MODULE.
+   *
+   * This static segment wins over the `[[...section]]` catch-all, so it never
+   * passes the guard there. Without this line an administrator could switch the
+   * Team module off, watch it leave the sidebar, and find it still open at this
+   * URL — which is the "navigation-only hiding" §19 refuses.
+   */
+  await requireModuleAccess("team", "/dashboard/teams");
   return (
     <main className="teams-page">
       <nav className="teams-page__crumbs">
