@@ -26,7 +26,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar, Icon, type IconName } from "../../components";
-import { useCapability, useModuleAvailable } from "../../lib/client-capabilities";
+import {
+  useCapability,
+  useModuleAvailable,
+  usePlatformAdmin,
+} from "../../lib/client-capabilities";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
@@ -479,6 +483,23 @@ export function AccountMenu({
    * three items away on each page load would be the more visible bug. Being told
    * "no" on arrival is the lesser of the two, and it is one round trip long.
    */
+  /*
+   * The door to the platform console, for MAINTSUPP staff only.
+   *
+   * "Administration" below opens the WORKSPACE's admin screens at
+   * `/dashboard/admin`, which is right for an Owner or an Admin. The console at
+   * `/admin` answers across every client, so it is offered on `platformAdmin`
+   * rather than on any capability — see `usePlatformAdmin` for why a capability
+   * cannot express this. `=== true` keeps it hidden while the answer is in flight,
+   * exactly as `canAdminister` does.
+   *
+   * Note the two rules differ on purpose. A module question is read `!== false`,
+   * because a workspace that has switched nothing off is every workspace today and
+   * flashing items away on each page load would be the more visible fault. This one
+   * is read `=== true`, because offering a console that will turn somebody away is
+   * worse than offering it late.
+   */
+  const isPlatformStaff = usePlatformAdmin();
   const trashModule = useModuleAvailable("recycle-bin");
   const adminModule = useModuleAvailable("admin-users");
   const teamsModule = useModuleAvailable("team");
@@ -541,6 +562,18 @@ export function AccountMenu({
         label: "Administration",
         icon: "shield",
         href: "/dashboard/admin",
+      },
+      {
+        /*
+         * The platform console — Master Specification §5. Not one of monday's
+         * items: monday has no notion of the vendor operating the installation,
+         * so `monday` names the nearest thing rather than inventing a claim.
+         */
+        key: "platform",
+        monday: "Admin",
+        label: "Platform console",
+        icon: "building",
+        href: "/admin",
       },
       {
         key: "teams",
@@ -760,6 +793,7 @@ export function AccountMenu({
               {accountItems
                 .filter((item) => item.key !== "admin" || canAdminister === true)
                 .filter((item) => moduleAllows(item.key))
+                .filter((item) => item.key !== "platform" || isPlatformStaff === true)
                 .map((item) => renderItem(item))}
             </section>
             <section data-menu-column="explore">

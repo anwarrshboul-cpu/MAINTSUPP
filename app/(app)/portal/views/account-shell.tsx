@@ -67,6 +67,16 @@ const ELSEWHERE = [
     module: "admin-users",
   },
   { href: "/dashboard/teams", label: "Teams", icon: "users" as IconName, module: "team" },
+  /*
+   * The platform console — §5. `module: null` because the registry does not govern
+   * it: `/admin` is not a portal module, it is a different shell.
+   *
+   * Listed unconditionally, unlike in the avatar menu. This rail already reads three
+   * module signals, and a fourth hook for one link that `requirePlatformAdmin`
+   * refuses on arrival anyway would buy nothing — the cost of listing it is one
+   * redirect, not an exposure.
+   */
+  { href: "/admin", label: "Platform console", icon: "building" as IconName, module: null },
   {
     href: "/dashboard?manage=import",
     label: "Import data",
