@@ -3933,3 +3933,54 @@ export const themeTokens = sqliteTable(
     uniqueIndex("theme_tokens_key_idx").on(table.organisationId, table.tokenKey),
   ],
 );
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE PORTAL MODULE REGISTRY — a sparse overlay, never the module list.
+ *
+ * `app/lib/portal-modules.ts` decides which modules EXIST. A row here only ever
+ * records that one workspace has switched one off, so an empty table is the
+ * shipped product and every organisation has one today — the same shape
+ * `role_capabilities` uses for permissions and `theme_tokens` for colours.
+ *
+ * `enabled` is a PLAIN integer, not `{ mode: "boolean" }`, and deliberately not
+ * in `BOOLEAN_COLUMNS`. That map is consulted by bare column NAME, and
+ * `board_automations.enabled` is TEXT — listing this one would rewrite
+ * statements against that table and break both invariants in
+ * `tests/node-pg-d1.test.mjs`. An integer on both dialects has nothing to
+ * translate, which is what `boards.position` already does.
+ *
+ * THERE IS NO `required_capability` COLUMN, AND THAT IS THE POINT.
+ *
+ * One was here through the first draft of this table, "reserved" for a
+ * per-workspace override of the capability a module answers to. It was never read
+ * and never written, and it was removed before this branch merged, because a
+ * reserved column is an invitation and this particular invitation is a trap.
+ *
+ * `can()` in `app/lib/permissions.ts` consults `isForbiddenForRole` BEFORE it
+ * reads any override row, and the write side refuses to store such a row at all.
+ * So a stored capability naming something a role may never hold — `settings.edit`
+ * for a manager, `data.delete` for an owner — makes that module permanently
+ * unreachable for that role, and NO Super Admin can give it back through the
+ * product. The recovery is a code change and a deploy.
+ *
+ * The mapping therefore stays a code constant in `portal-modules.ts`, where three
+ * of the nineteen modules are deliberately NULL because no single capability is
+ * faithful to their existing rule. A row here decides one thing only: whether this
+ * workspace has switched a module off.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const portalModuleSettings = sqliteTable(
+  "portal_module_settings",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** A key from `PORTAL_MODULES`, e.g. `maintenance`. */
+    moduleKey: text("module_key").notNull(),
+    /** 1 or 0. Compared as an integer — see the note above. */
+    enabled: integer("enabled").notNull().default(1),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("portal_module_settings_key_idx").on(table.organisationId, table.moduleKey),
+  ],
+);

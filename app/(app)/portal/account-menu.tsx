@@ -26,7 +26,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar, Icon, type IconName } from "../../components";
-import { useCapability } from "../../lib/client-capabilities";
+import { useCapability, useModuleAvailable } from "../../lib/client-capabilities";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
@@ -462,6 +462,33 @@ export function AccountMenu({
   const canAdminister = useCapability("users.view");
   const canInvite = useCapability("users.invite");
 
+  /*
+   * AND DOORS TO MODULES THIS WORKSPACE HAS SWITCHED OFF — §19.
+   *
+   * Three of these items are second doors onto portal modules: Trash IS the
+   * Recycle Bin (`/dashboard/account/trash` renders the same `AccountTrashPanel`),
+   * Administration opens Users & Access, and Teams opens the Team screen. The page
+   * guards already refuse all three when the module is off, so leaving them drawn
+   * would offer a colleague three menu items that bounce them to Overview — which
+   * is the "navigation-only hiding" failure in reverse, and reads as the product
+   * being broken rather than configured.
+   *
+   * `!== false` rather than `=== true`, deliberately, and the opposite of
+   * `canAdminister` above: an unanswered module question keeps the item, because a
+   * workspace that has switched nothing off is every workspace today and flashing
+   * three items away on each page load would be the more visible bug. Being told
+   * "no" on arrival is the lesser of the two, and it is one round trip long.
+   */
+  const trashModule = useModuleAvailable("recycle-bin");
+  const adminModule = useModuleAvailable("admin-users");
+  const teamsModule = useModuleAvailable("team");
+  const MODULE_ITEMS: Readonly<Record<string, boolean | null>> = {
+    trash: trashModule,
+    admin: adminModule,
+    teams: teamsModule,
+  };
+  const moduleAllows = (key: string) => MODULE_ITEMS[key] !== false;
+
   const accountItems = useMemo<MenuItem[]>(
     () => [
       {
@@ -732,12 +759,14 @@ export function AccountMenu({
               <h3>Account</h3>
               {accountItems
                 .filter((item) => item.key !== "admin" || canAdminister === true)
+                .filter((item) => moduleAllows(item.key))
                 .map((item) => renderItem(item))}
             </section>
             <section data-menu-column="explore">
               <h3>Explore</h3>
               {exploreItems
                 .filter((item) => item.key !== "invite" || canInvite !== false)
+                .filter((item) => moduleAllows(item.key))
                 .map((item) => renderItem(item))}
             </section>
           </div>
