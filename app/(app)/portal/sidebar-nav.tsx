@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Icon, type IconName } from "../../components";
+import { isIconName } from "../../api/workspace-sections/catalogue";
 import sidebarNavCss from "./sidebar-nav.css?url";
 import {
   BUILT_IN_GROUPS,
@@ -255,6 +256,7 @@ export function SidebarNav({
         key: group.key,
         kind: "group",
         label: group.renamed || group.custom ? group.label : null,
+        icon: null,
         hidden: false,
         group: null,
         position: flat.length,
@@ -264,6 +266,9 @@ export function SidebarNav({
           key: item.key,
           kind: "section",
           label: item.renamed ? item.label : null,
+          /* Carried through every re-flatten, or the first drag would clear the
+             workspace's chosen glyphs. */
+          icon: item.icon,
           hidden: item.hidden,
           group: group.key,
           position: flat.length,
@@ -526,6 +531,7 @@ export function SidebarNav({
         key,
         kind: "group" as const,
         label: "New section",
+        icon: null,
         hidden: false,
         group: null,
         position: rows.length,
@@ -809,7 +815,26 @@ export function SidebarNav({
                         }}
                       >
                         <span className="nav-icon">
-                          <Icon name={iconFor.get(item.key) ?? "grid"} size={19} />
+                          {/*
+                            * The workspace's chosen glyph wins; the catalogue's is
+                            * the fallback and `grid` is the floor.
+                            *
+                            * `isIconName` narrows before drawing even though the
+                            * write route already refused anything outside it, because
+                            * a row stored before a glyph was retired would otherwise
+                            * index a map that no longer holds it — and the renderer
+                            * indexes a fixed map, so an unknown name draws an empty
+                            * hole rather than failing. Falling back is the honest
+                            * answer to "we no longer ship that one".
+                            */}
+                          <Icon
+                            name={
+                              (isIconName(item.icon) ? item.icon : null) ??
+                              iconFor.get(item.key) ??
+                              "grid"
+                            }
+                            size={19}
+                          />
                         </span>
                         <span className="nav-row__label">{item.label}</span>
                         {appeared.has(item.key) && editing && (

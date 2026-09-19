@@ -31,6 +31,7 @@ import {
   type NavArrangementItem,
   type NavCatalogueEntry,
 } from "./layout";
+import { isIconName } from "../workspace-sections/catalogue";
 
 type LayoutRow = typeof navigationLayouts.$inferSelect;
 
@@ -444,6 +445,36 @@ export async function PUT(request: Request) {
       scope === "workspace" && body.locked !== undefined
         ? sanitiseLocked(body.locked)
         : storedLocked;
+
+    /*
+     * THE REAL ICON ALLOWLIST, ENFORCED HERE.
+     *
+     * `sanitiseArrangement` checks an icon's shape and deliberately not its
+     * membership: `app/api/navigation/layout.ts` imports nothing, because both the
+     * server and the browser call it and whatever it imports lands in both bundles.
+     * So the allowlist check is at the door instead — and it is the SAME predicate
+     * `workspace_sections` writes through, not a second copy.
+     *
+     * A refusal rather than a silent coercion, matching
+     * `PATCH /api/workspace-sections`: an administrator who asked for a glyph this
+     * product does not ship should be told, not quietly given `grid`. The renderer
+     * narrows once more before drawing, so a row stored before a glyph was retired
+     * still falls back rather than leaving a hole.
+     *
+     * Only sections carry one; `sanitiseArrangement` has already nulled every
+     * heading's.
+     */
+    const unknownIcon = items.find((item) => item.icon && !isIconName(item.icon));
+    if (unknownIcon) {
+      return Response.json(
+        {
+          error: "That is not an icon this product ships.",
+          key: unknownIcon.key,
+          icon: unknownIcon.icon,
+        },
+        { status: 422 },
+      );
+    }
 
     const violations = lockViolations(
       items,

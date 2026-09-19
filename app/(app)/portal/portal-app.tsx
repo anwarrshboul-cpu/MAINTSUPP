@@ -219,6 +219,7 @@ import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
+import { NavIconsPanel } from "./views/nav-icons-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -3992,6 +3993,7 @@ export default function PortalApp({
           )}
           {activeSurface === "settings" && (
             <SettingsView
+              navCatalogue={navCatalogue}
               settings={currentSettings}
               /*
                * The categories actually in use, counted from the jobs on
@@ -6731,6 +6733,7 @@ function SettingsView({
   settings,
   categories,
   busy,
+  navCatalogue,
   onSave,
   onNotify,
 }: {
@@ -6738,6 +6741,15 @@ function SettingsView({
   /** Every category the workspace's jobs actually use. */
   categories: string[];
   busy: boolean;
+  /*
+   * The live sidebar catalogue, passed down rather than rebuilt.
+   *
+   * `sectionMeta` is the single source for a built-in section's icon, and FOUR test
+   * files slice that declaration by source position — moving it or deriving a second
+   * copy is the most expensive edit in this area. The Navigation icons panel reads it
+   * from here instead.
+   */
+  navCatalogue: SidebarNavEntry[];
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
@@ -6823,6 +6835,13 @@ function SettingsView({
           views/portal-modules-panel.tsx for why a 403 is an answer here and a
           read-only card next door. */}
       <PortalModulesPanel />
+
+      {/* And which glyph each sidebar entry wears — the third workspace-wide
+          presentation decision, beside the palette and the module switches. It takes
+          the live catalogue as a prop rather than rebuilding it: `sectionMeta` is the
+          one source for a built-in section's icon, and four tests slice that
+          declaration by source position, so it is read from here and never moved. */}
+      <NavIconsPanel catalogue={navCatalogue} />
 
       <section className="panel settings-card">
         <div className="settings-card__heading">
