@@ -359,8 +359,14 @@ test("status.attention closes the gap the catalogue had", async () => {
   assert.ok(uses >= 1, "something must read --status-orange, or the token is decorative");
 });
 
-test("the catalogue is six tokens, and none names a ground", () => {
-  assert.equal(THEME_TOKEN_CATALOGUE.length, 6);
+test("the catalogue is eight tokens, and none names a ground", () => {
+  /*
+   * RE-POINTED from six to eight: the typeface phase added `type.body` and
+   * `type.display`. The list is still pinned in full rather than by length alone,
+   * for the reason it was pinned in the first place — a token added without a
+   * deliberate change here is a token nobody chose to offer.
+   */
+  assert.equal(THEME_TOKEN_CATALOGUE.length, 8);
   assert.deepStrictEqual(
     THEME_TOKEN_CATALOGUE.map((token) => token.key),
     [
@@ -370,6 +376,8 @@ test("the catalogue is six tokens, and none names a ground", () => {
       "status.warning",
       "status.danger",
       "status.attention",
+      "type.body",
+      "type.display",
     ],
   );
   /*

@@ -66,6 +66,38 @@
   cursor: not-allowed;
 }
 
+/*
+ * The typeface control. Sized to match the colour swatch's footprint so the rows
+ * line up whichever kind of token they carry — a select that jumped the row height
+ * would make the panel look like two panels.
+ */
+.brand-colour__face {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.brand-colour__face select {
+  min-width: 132px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.brand-colour__face select:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.brand-colour__face select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .brand-colour__body {
   display: flex;
   flex: 1 1 220px;
