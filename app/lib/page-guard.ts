@@ -1,5 +1,12 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { effectiveCapabilities, resolvePermissions } from "./permissions";
+import { governingModule, resolveModuleAccess } from "./portal-modules.ts";
+import { readModuleOverrides, readSectionSurface } from "./portal-module-repository.ts";
+import { scopedDb } from "./tenant-db";
+
+/** Where a member lands when the module they asked for is not available. */
+const MODULE_FALLBACK_PATH = "/dashboard";
 import {
   getSession,
   safeRedirectPath,
@@ -100,4 +107,135 @@ export async function requirePageSession(
   const session = await pageSession();
   if (session) return session;
   redirect(loginRedirect(pathname));
+}
+
+/**
+ * The section a protected page is about — refused before a single element.
+ *
+ * WHY THIS IS A SECOND GUARD RATHER THAN PART OF THE FIRST.
+ *
+ * `requirePageSession` answers "are you signed in". Until now that was the ONLY
+ * question any portal page asked: `dashboard/[[...section]]/page.tsx` resolved
+ * its section from a static table and rendered the shell for any member, and
+ * every refusal happened later, per request, in the APIs. That is why a section
+ * could be hidden from the sidebar and still render when typed into the address
+ * bar — the hiding was a browser-side filter.
+ *
+ * Master Specification §19 asks for the other half: a module that is switched
+ * off "should disappear from navigation; route access must also be blocked
+ * appropriately". This is that block, and it is deliberately on the server, at
+ * the route entry, where the decision can still be made.
+ *
+ * WHY IT REDIRECTS RATHER THAN 404s.
+ *
+ * The product already has an answer for a section it cannot draw, and it is
+ * Overview: `page.tsx` falls back to it for an unknown slug, `portal-app.tsx`
+ * falls back to it for an unknown key and rewrites the URL, and the sidebar
+ * resolver refuses to leave a person with nothing visible. A disabled module is
+ * the same situation — a link that was good yesterday — so it gets the same
+ * answer rather than a dead end. `notFound()` would also leak that the section
+ * exists but is off, which a redirect does not.
+ *
+ * THE COST, BOUNDED ON PURPOSE.
+ *
+ * This resolves tenant access and permissions, which `requirePageSession` does
+ * not. It runs on DOCUMENT requests only — `/api/*` never renders a page, and
+ * the portal is a shell that mounts once and then talks to APIs — so it is a
+ * handful of times per session, not once per request. `page-guard.ts` explains
+ * at length why none of this may move to middleware.
+ */
+export async function requireModuleAccess(
+  sectionKey: string,
+  pathname: string,
+): Promise<void> {
+  /*
+   * NEVER REDIRECT A PAGE TO ITSELF — checked before anything else, because it is
+   * the only failure here the browser rather than the product has to stop.
+   *
+   * Nothing reaches it through a switch: the fallback is `/dashboard`, whose
+   * module is `overview`, and `overview` cannot be switched off. It IS reachable
+   * through a capability — a role whose `board.view` has been revoked fails
+   * `permitted` on every module including Overview — and that is precisely when a
+   * loop would form. One comparison, ahead of the work, rather than a redirect
+   * chain.
+   */
+  if (pathname === MODULE_FALLBACK_PATH) return;
+
+  /*
+   * WHICH MODULE GOVERNS THIS KEY, WHICH IS NOT ALWAYS THE KEY.
+   *
+   * Three indirections, and only the first is obvious:
+   *
+   *   1. a built-in section key IS its module;
+   *   2. `units` is a second route onto the Assets screen — see `MODULE_ALIASES`;
+   *   3. a `section:<slug>` key draws one of eight BUILT-IN surfaces, and every
+   *      one of those eight is a module. That one needs a database read, so it is
+   *      resolved inside the try below rather than here.
+   *
+   * A key none of the three describes — an account panel, a section whose surface
+   * is a board — is not this guard's business. Saying nothing is correct;
+   * refusing would break every screen the registry does not govern.
+   */
+  const direct = governingModule(sectionKey);
+  const isWorkspaceSection = sectionKey.startsWith("section:");
+  if (!direct && !isWorkspaceSection) return;
+
+  let available = true;
+  try {
+    const request = new Request("https://maintsupp.local/", {
+      headers: await headers(),
+    });
+    const scope = await scopedDb(request);
+
+    /* Indirection 3. Resolved here because it is the only one that costs a query,
+       and it is skipped for the eighteen keys that do not need it. */
+    let governing = direct;
+    if (!governing && isWorkspaceSection) {
+      const surface = await readSectionSurface(scope.db, scope.orgId, sectionKey);
+      governing = surface ? governingModule(surface) : null;
+    }
+    if (!governing) return;
+
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const overrides = await readModuleOverrides(scope.db, scope.orgId);
+    available = resolveModuleAccess(
+      governing,
+      overrides,
+      effectiveCapabilities(scope.actor.role, subject.capabilities),
+      scope.actor.role,
+    ).available;
+  } catch {
+    /*
+     * FAILING OPEN, AND WHAT THAT DOES AND DOES NOT COST.
+     *
+     * An earlier version of this comment said "the APIs behind it enforce their
+     * own capabilities regardless". Half of that is true and the half it implies
+     * is not, so it is worth being exact.
+     *
+     * TRUE for the capability half: every module's own route holds the capability
+     * it needs — `users.view` on `/api/admin/users`, `audit.read` on `/api/audit`,
+     * the rank rule in `lib/finance/access.ts` — so rendering the shell for
+     * somebody who may not read it yields a screen of refusals, not data.
+     *
+     * NOT TRUE for the switch: NO operational route consults the registry. Only
+     * `/api/context`, `/api/portal-modules` and this function read it. So a
+     * request that lands here costs exactly one document render of a module the
+     * workspace has switched off, with working data behind it.
+     *
+     * That is accepted deliberately, because a switch is product configuration
+     * and not an authorisation boundary. Failing closed would redirect every page
+     * to Overview for the duration of a pooler-capacity event — the estate runs
+     * two clients per instance against Supabase's fifteen, and `busyRefusal`
+     * exists because that ceiling is reached — which turns a slow minute into a
+     * portal that appears to have lost every screen.
+     *
+     * Note also that `readModuleOverrides` and `readSectionSurface` catch their
+     * own failures and answer "no opinion", so a hiccup in the registry read never
+     * reaches here at all. What reaches here is a tenancy or permission failure,
+     * and the request has already passed `requirePageSession`.
+     */
+    return;
+  }
+
+  if (!available) redirect(MODULE_FALLBACK_PATH);
 }

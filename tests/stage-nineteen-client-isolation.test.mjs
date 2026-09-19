@@ -56,6 +56,12 @@ const dataRoutes = [
   "app/api/sites/groups/route.ts",
   "app/api/assets/route.ts",
   "app/api/assets/csv/route.ts",
+  /* Per-workspace presentation and configuration. Both resolve their
+     organisation through `scopedDb` and both write audited rows against it, so
+     both belong in this survey — `theme` arrived with the brand-colour phase and
+     `portal-modules` with the module registry. */
+  "app/api/theme/route.ts",
+  "app/api/portal-modules/route.ts",
   "app/api/workspace/route.ts",
 ];
 

@@ -1,0 +1,202 @@
+/*
+ * Settings → Portal modules.
+ *
+ * Written entirely against the palette tokens — no colour literal appears
+ * below. That is the same rule `brand-colours-panel.css` keeps, and it matters
+ * here for the ordinary reason rather than that file's special one: a workspace
+ * that has recoloured the product must find this card recoloured with it.
+ *
+ * No media query. The rows are a wrapping flex layout and reflow on a phone
+ * without a breakpoint, which keeps this file out of the
+ * 640/767/768/1024/1280 rule the stage tests enforce rather than spending one of
+ * those five widths on a settings card.
+ */
+
+.portal-modules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.portal-module {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+/*
+ * A switched-off module is dimmed rather than removed or struck through. It is
+ * still a real row with a real switch — the point of the screen is that the
+ * state is reversible — so the treatment says "not in use" and not "gone".
+ */
+.portal-module--off {
+  border-style: dashed;
+}
+
+.portal-module--off .portal-module__body strong {
+  color: var(--muted);
+}
+
+/*
+ * The switch. A native checkbox does the state, the keyboard and the
+ * accessibility tree; the track beside it does the drawing. The input is not
+ * hidden with `display: none` — that takes it out of the tab order — but scaled
+ * to nothing and placed over its own track, so focus and the label's hit target
+ * are the switch.
+ */
+.portal-module__switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  width: 36px;
+  height: 20px;
+  cursor: pointer;
+}
+
+.portal-module__switch input[type="checkbox"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.portal-module__switch input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.portal-module__track {
+  display: block;
+  width: 36px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-hover);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.portal-module__track::after {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.portal-module__switch input[type="checkbox"]:checked + .portal-module__track {
+  border-color: var(--brand-fill);
+  background: var(--brand-fill);
+}
+
+.portal-module__switch input[type="checkbox"]:checked + .portal-module__track::after {
+  background: var(--on-brand-primary);
+  transform: translateX(16px);
+}
+
+/* The keyboard ring belongs on the thing that looks like the control, because
+   the input it actually sits on is invisible. */
+.portal-module__switch input[type="checkbox"]:focus-visible + .portal-module__track {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.portal-module__switch input[type="checkbox"]:disabled + .portal-module__track {
+  opacity: 0.55;
+}
+
+.portal-module__body {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.portal-module__body strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.portal-module__body small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Why a switch will not move, in the same place a person looks for what it
+   does. Dimmer than the capability line beside it: it is a constraint, not an
+   instruction. */
+.portal-module__permanent {
+  color: var(--muted-2);
+}
+
+.portal-module__note {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.portal-modules__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  padding-top: 16px;
+}
+
+/*
+ * What is about to happen to everybody else, before it happens. Amber rather
+ * than red: nothing has failed and nothing is being destroyed — a screen is
+ * about to leave a colleague's sidebar, which is worth reading twice and is not
+ * an error.
+ */
+.portal-modules__warning {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--status-yellow);
+  border-radius: 10px;
+  background: var(--status-yellow-bg);
+  color: var(--status-yellow-fg);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.portal-modules__warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.portal-modules__status {
+  color: var(--status-green-fg);
+  font-size: 11px;
+}
+
+.portal-modules__failure {
+  color: var(--status-red-fg);
+  font-size: 11px;
+}
+
+/* A scope note, not a problem — muted, like the equivalent line on the brand
+   colours card. */
+.portal-modules__scope {
+  margin: 4px 0 0;
+  color: var(--muted-2);
+  font-size: 11px;
+  line-height: 1.5;
+}

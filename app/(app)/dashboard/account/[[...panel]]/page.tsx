@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { requirePageSession } from "../../../../lib/page-guard";
+import { requireModuleAccess, requirePageSession } from "../../../../lib/page-guard";
 import { ACCOUNT_PANEL_KEYS } from "../../../portal/views/account-panels";
 import { AccountShell } from "../../../portal/views/account-shell";
 
@@ -34,6 +34,22 @@ export default async function AccountPage({
       : "/dashboard/account",
   );
   const requested = panel?.[0] ?? "";
+  /*
+   * `trash` IS the Recycle Bin module, at its second address.
+   *
+   * `views/recycle-bin-section.tsx` says so in its own header: the section "adds
+   * a door, not a room", and renders the same `AccountTrashPanel` this panel
+   * renders. Gating the section and leaving this open would make the switch
+   * cosmetic for anyone who knows the URL — which is the failure §19 is asking
+   * us to avoid, not a smaller version of it.
+   *
+   * Only `trash` is checked. The other panels are the signed-in person's own
+   * account and belong to no module; sending them through the registry would
+   * invent switches the product does not have.
+   */
+  if (requested === "trash") {
+    await requireModuleAccess("recycle-bin", "/dashboard/account/trash");
+  }
   // An unknown segment falls back to the profile rather than 404ing, so a stale
   // bookmark lands somewhere useful.
   return <AccountShell panel={ACCOUNT_PANEL_KEYS.has(requested) ? requested : ""} />;

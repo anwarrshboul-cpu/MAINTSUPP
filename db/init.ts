@@ -344,6 +344,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      row is the correct state rather than an unfinished one. */
   await ensureThemeTokens(d1);
 
+  /* The portal module registry. Two guarded DDL statements and no seed — see
+     `ensurePortalModuleSettings` for why the absence of a row is the shipped
+     state rather than a backfill waiting to happen. */
+  await ensurePortalModuleSettings(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6027,6 +6032,60 @@ const SLA_TARGET_SEED: ReadonlyArray<{
  * Placed after `ensureAssetsFoundation` only for reading order. It references
  * `organisations` and nothing else, so it could run at any point after Stage 1.
  */
+/**
+ * The portal module registry — which sections a workspace has switched off.
+ *
+ * A TABLE OF ITS OWN, AND NOT THREE COLUMNS ON `workspace_sections`.
+ *
+ * Extending that table was the obvious move and it is the wrong one. Every
+ * reader of it assumes an owner-created row in the `section:` namespace:
+ * `sectionsToCatalogue` DROPS a key without that prefix, so seeded built-ins
+ * would exist and draw nothing; `MAX_SECTIONS` counts rows rather than
+ * owner-created ones, so nineteen seeded rows would eat half of every
+ * workspace's budget; `loadWorkspaceSections` is a bare `.select()` that feeds
+ * both the section manager and the sidebar, so the built-ins would appear as
+ * phantom "added sections" and draw every module twice; and
+ * `repairOrphanedSectionBoards` reads that whole table on every boot, on the
+ * warm path. A module is also switched off, not deleted for thirty days, so the
+ * archive/recycle-bin lifecycle there does not apply.
+ *
+ * `enabled` is a PLAIN INTEGER and is deliberately NOT added to
+ * `BOOLEAN_COLUMNS` in `db/sqlite-to-postgres.ts`. That map is consulted by bare
+ * column NAME for comparisons, and `board_automations.enabled` is TEXT
+ * (`'on'`/`'off'`) — listing this one would start rewriting statements against
+ * that table and would break the two invariants `tests/node-pg-d1.test.mjs`
+ * holds. Keeping the column a real integer on both dialects means there is
+ * nothing to translate, which is the same choice `boards.position` and
+ * `job_access_tokens.use_count` already make.
+ *
+ * NO SEED HERE. A module with no row is enabled, exactly as a capability with
+ * no `role_capabilities` row takes its built-in default and a colour with no
+ * `theme_tokens` row takes the shipped palette. So an empty table is the
+ * shipped product, every organisation has one today, and this stage costs two
+ * guarded DDL statements rather than nineteen inserts per tenant per replay.
+ * `app/lib/portal-modules.ts` holds the list; the code decides what EXISTS and a
+ * row only ever records a workspace switching one off.
+ */
+async function ensurePortalModuleSettings(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS portal_module_settings (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         module_key TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* One row per module per organisation, so a save is an upsert rather than
+       an append and two administrators cannot leave two rows disagreeing. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS portal_module_settings_key_idx ON portal_module_settings(organisation_id, module_key)",
+    ),
+  ]);
+}
+
 async function ensureThemeTokens(d1: D1DatabaseLike) {
   await d1.batch([
     d1.prepare(
