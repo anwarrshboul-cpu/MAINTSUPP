@@ -117,6 +117,37 @@
   --chart-danger: #ff4d5e;
   --chart-attention: #ff8a3d;
 
+  /*
+   * ===========================================================================
+   * TYPEFACES — the two families the portal sets, on :root so a workspace can
+   * change them.
+   *
+   * WHY THESE EXIST. `app/brand-overrides.css` named `Inter` for the body and
+   * `Manrope` for headings, and the portal loaded NEITHER: there is no
+   * `@font-face` anywhere, no font file in the tree, no `next/font`, and the
+   * `(app)` layout emits no font `<link>`. So the typeface a customer saw was
+   * already whatever their own machine happened to have, and two machines
+   * rendered the product differently. Naming a face you do not ship is not a
+   * default -- it is an accident with a plausible-looking cause.
+   *
+   * WHY ONLY THE FAMILY. The family funnels through one declaration per role, so
+   * a token reaches all of it. Sizes funnel nowhere: 2,043 `font-size`
+   * declarations across `app/**`, ten of which read a `var()`. A size token would
+   * move ten rules. See the header of `app/lib/theme-tokens.ts`.
+   *
+   * DECLARED ONCE, no dark counterpart. A typeface does not change with the
+   * theme, and restating it would invite the two blocks to drift.
+   *
+   * EVERY CHOICE RESOLVES LOCALLY. `FONT_STACKS` in `theme-tokens.ts` lists only
+   * stacks that need no network request -- no layout shift, no third party on the
+   * critical path, and nothing new to license. The board's line lengths,
+   * truncation points and tabular-figure alignments were measured against
+   * metrics like these.
+   * ===========================================================================
+   */
+  --type-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --type-display: Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
+
   --text-primary: #132537;
   --text-secondary: #4e5f6f;
   --text-muted: #64707b;
@@ -1680,7 +1711,7 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--type-body);
   text-rendering: optimizeLegibility;
 }
 
@@ -10756,7 +10787,7 @@ th.sheet-column--name {
 .evidence-viewer button,
 .evidence-viewer input,
 .evidence-viewer select {
-  font-family: "Segoe UI", var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: "Segoe UI", var(--type-body);
   letter-spacing: normal;
 }
 

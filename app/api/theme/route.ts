@@ -15,12 +15,21 @@
  *
  * WHAT CANNOT REACH THE STYLESHEET
  *
- * Every value is put through `validateThemeToken`, which parses the hex into
- * three integers and RE-SERIALISES it. The string the caller sent is discarded,
- * not sanitised, so there is no escaping to get wrong: the only thing that can
- * ever reach the `<style>` element in `app/(app)/layout.tsx` is `#` followed by
- * six hex digits this server produced. An unknown token key is refused for the
- * same reason — the property name is interpolated too.
+ * Every value is put through `validateThemeToken`, and the principle is the same
+ * for both kinds of token: **what the caller sent is discarded rather than
+ * sanitised**, so there is no escaping to get wrong.
+ *
+ * For a COLOUR it parses the hex into three integers and RE-SERIALISES it, so the
+ * only thing that can reach the `<style>` element in `app/(app)/layout.tsx` is `#`
+ * followed by six hex digits this server produced.
+ *
+ * For a TYPEFACE it accepts only a key present in `FONT_STACKS` and stores the
+ * KEY; the stack itself is looked up server-side at render. A font stack is a much
+ * harder string to make safe than `#rrggbb` — commas, quotes and arbitrary family
+ * names — so none of it is ever taken from a request.
+ *
+ * An unknown token key is refused for the same reason: the property name is
+ * interpolated too.
  *
  * WHY A REFUSAL IS ALL-OR-NOTHING
  *
@@ -36,6 +45,8 @@ import { requireCapability, resolvePermissions } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { readThemeOverrides, writeThemeOverride } from "../../lib/theme-repository.ts";
 import {
+  FONT_KEYS,
+  FONT_STACKS,
   THEME_TOKEN_CATALOGUE,
   themeContrastWarnings,
   themeTokenDefinition,
@@ -62,12 +73,31 @@ function describe(overrides: Readonly<Record<string, string>>) {
     label: token.label,
     group: token.group,
     description: token.description,
-    /* What the swatch shows: the chosen colour, or the shipped one. */
+    /*
+     * Colour or typeface. The panel needs it to decide between a swatch and a
+     * select, and it is sent rather than inferred from the key so a later token
+     * cannot be mis-rendered by a client guessing from its name.
+     */
+    kind: token.kind,
+    /* What the control shows: the chosen value, or the shipped one. For a colour
+       that is a hex; for a typeface it is a key from `FONT_STACKS`. */
     value: overrides[token.key] ?? token.seedInput,
     /* Whether this workspace has an opinion. Drives the "Reset" affordance, and
        is the honest way to say "this is MAINTSUPP's colour, not yours". */
     isDefault: !overrides[token.key],
     seedInput: token.seedInput,
+    /*
+     * The typefaces a workspace may choose, sent only for a font token.
+     *
+     * The SERVER owns this list, because it is the same list `validateThemeToken`
+     * refuses anything outside. A client-side copy would be a second source of
+     * truth for a security boundary, and the first divergence would be a select
+     * offering a face the API rejects.
+     */
+    choices:
+      token.kind === "font"
+        ? FONT_KEYS.map((key) => ({ key, label: FONT_STACKS[key].label }))
+        : null,
   }));
 }
 

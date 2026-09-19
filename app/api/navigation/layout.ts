@@ -175,6 +175,27 @@ export type NavArrangementItem = {
   kind: "section" | "group";
   /** A user's rename, or null to keep whatever the product calls it. */
   label: string | null;
+  /**
+   * A WORKSPACE's chosen glyph for this section, or null to keep the built-in one.
+   *
+   * The same shape as `label` above, stored in the same row, for the same reason: it
+   * is an override of a built-in section's presentation, and this table already has
+   * the three-layer merge, the capability gate, the audit trail and the transport
+   * that such an override needs. A table of its own would have bought a migration, a
+   * schema-fingerprint change and a second place for the sidebar to disagree with
+   * itself.
+   *
+   * `string` and not an icon union, because this module imports nothing — see the
+   * header. The name's SHAPE is checked here, the real allowlist is enforced by
+   * `PUT /api/navigation` before anything is stored, and the renderer narrows once
+   * more before it draws. Three checks, none of them the only one.
+   *
+   * Unlike `label` it is read from the WORKSPACE layer only — see
+   * `resolveNavigation`. A rename can sensibly be personal; a glyph is what the
+   * workspace calls a thing, and two colleagues describing the sidebar to each other
+   * should be looking at the same picture.
+   */
+  icon: string | null;
   hidden: boolean;
   group: string | null;
   position: number;
@@ -186,6 +207,16 @@ export type ResolvedNavItem = {
   label: string;
   builtInLabel: string;
   renamed: boolean;
+  /**
+   * The workspace's chosen glyph, or null to draw the built-in one.
+   *
+   * Null rather than a resolved name, because the CATALOGUE owns the built-in glyph
+   * and the catalogue lives in the browser (`sectionMeta` in `portal-app.tsx`). The
+   * server has never had an opinion about a built-in section's icon and this does not
+   * give it one: it reports the override and nothing else, so the fallback stays in
+   * the one place that knows it.
+   */
+  icon: string | null;
   hidden: boolean;
   locked: boolean;
   group: string;
@@ -250,6 +281,25 @@ function cleanKey(value: unknown): string | null {
 }
 
 /**
+ * An icon name's SHAPE, not its membership.
+ *
+ * Mirrors `cleanKey` above and the philosophy in this file's header: content is
+ * forgiven here and decided where it can be decided. The product's glyph names are
+ * short identifiers — `wrench`, `sortAsc` — so anything outside that shape was never
+ * one and is dropped early rather than travelling further.
+ *
+ * The real allowlist (`isIconName` in `app/api/workspace-sections/catalogue.ts`, the
+ * same one `workspace_sections` writes through) is enforced by the write route, which
+ * may import it; this module may not.
+ */
+function cleanIcon(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^[a-zA-Z]{2,24}$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+/**
  * Coerce anything that arrived over the wire into a well-formed arrangement.
  *
  * Deliberately forgiving about *content* and strict about *shape*: an unknown
@@ -272,6 +322,9 @@ export function sanitiseArrangement(value: unknown): NavArrangementItem[] {
       key,
       kind,
       label: cleanLabel(record.label),
+      /* A heading takes no icon: headings are text in this sidebar, and giving one a
+         glyph would make it look like a destination. */
+      icon: kind === "section" ? cleanIcon(record.icon) : null,
       // A heading cannot be hidden — hiding one would strand its items with no
       // way to reach them. Delete the heading instead; its items move up.
       hidden: kind === "section" && record.hidden === true,
@@ -494,6 +547,21 @@ export function resolveNavigation(input: ResolveInput): ResolvedNavigation {
     applyLayer(base, input.workspaceItems).map((item) => [item.key, item.label]),
   );
 
+  /*
+   * The workspace's chosen glyphs, read straight off the stored layer rather than
+   * through `applyLayer`.
+   *
+   * `applyLayer` resolves ORDER and GROUPING, which a glyph has nothing to do with,
+   * and it drops a section the live catalogue does not contain — right for a row that
+   * would otherwise be a labelled 404, irrelevant to a glyph. Reading the layer
+   * directly also means a personal arrangement cannot carry an icon into the result
+   * even if one were somehow stored, which is the rule this field is meant to have.
+   */
+  const workspaceIcons = new Map<string, string>();
+  for (const item of input.workspaceItems ?? []) {
+    if (item.kind === "section" && item.icon) workspaceIcons.set(item.key, item.icon);
+  }
+
   const flat: ResolvedNavItem[] = [];
   const groups: ResolvedNavGroup[] = [];
   let current: ResolvedNavGroup | null = null;
@@ -532,6 +600,8 @@ export function resolveNavigation(input: ResolveInput): ResolvedNavigation {
     const resolvedItem: ResolvedNavItem = {
       key: item.key,
       label,
+      /* The WORKSPACE's glyph, never a personal one — see `NavArrangementItem.icon`. */
+      icon: workspaceIcons.get(item.key) ?? null,
       builtInLabel: item.builtInLabel,
       renamed: label !== item.builtInLabel,
       hidden: locked ? false : item.hidden,
@@ -562,6 +632,8 @@ export function toArrangement(groups: ResolvedNavGroup[]): NavArrangementItem[] 
       key: group.key,
       kind: "group",
       label: group.renamed ? group.label : null,
+      /* A heading never carries one. */
+      icon: null,
       hidden: false,
       group: null,
       position: items.length,
@@ -571,6 +643,10 @@ export function toArrangement(groups: ResolvedNavGroup[]): NavArrangementItem[] 
         key: item.key,
         kind: "section",
         label: item.renamed ? item.label : null,
+        /* Carried through, or a save would silently clear every chosen glyph the
+           first time somebody dragged a row. `item.icon` is already null when the
+           workspace has chosen nothing, which is what "keep the built-in" means. */
+        icon: item.icon,
         hidden: item.hidden,
         group: group.key,
         position: items.length,

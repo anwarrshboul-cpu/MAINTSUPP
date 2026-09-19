@@ -1,0 +1,111 @@
+/*
+ * Settings → Navigation icons.
+ *
+ * Tokens only -- no colour literal below, so a workspace that has recoloured the
+ * product finds this card recoloured with it. No media query: the rows are a
+ * wrapping flex layout and reflow on a phone without one, which keeps this file out
+ * of the 640/767/768/1024/1280 rule the stage tests enforce rather than spending one
+ * of those five widths on a settings card.
+ */
+
+.nav-icons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 16px;
+}
+
+.nav-icon-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+/*
+ * The glyph as it will appear, at the size the sidebar draws it. A name in a select
+ * is not a preview -- somebody choosing between `tool` and `wrench` is choosing
+ * between two pictures.
+ */
+.nav-icon-row__glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--brand-primary);
+}
+
+.nav-icon-row__body {
+  display: flex;
+  flex: 1 1 180px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nav-icon-row__body strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.nav-icon-row__body small {
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.nav-icon-row__select {
+  flex: 0 0 auto;
+  min-width: 140px;
+  height: 30px;
+  padding: 0 7px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-card);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.nav-icon-row__select:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.nav-icon-row__select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.nav-icons__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 11px;
+  padding-top: 16px;
+}
+
+.nav-icons__status {
+  color: var(--status-green-fg);
+  font-size: 11px;
+}
+
+.nav-icons__failure {
+  color: var(--status-red-fg);
+  font-size: 11px;
+}
+
+/* A consequence worth reading twice, not a problem -- muted, like the scope notes
+   on the brand-colours and portal-modules cards. */
+.nav-icons__scope {
+  margin: 4px 0 0;
+  color: var(--muted-2);
+  font-size: 11px;
+  line-height: 1.5;
+}

@@ -41,8 +41,26 @@
  * token is an accent sitting on a stable ground; a background is the ground, so
  * a bad choice does not degrade one control, it makes the product unreadable and
  * takes the theme editor down with it. They need a preview and a reset-to-safe
- * path before they can be offered, which is a later phase. Typography, spacing
- * and icons are likewise out of scope here.
+ * path before they can be offered, which is a later phase.
+ *
+ * THE TYPEFACE IS NOW IN SCOPE; SIZES AND SPACING ARE STILL NOT, and the two halves
+ * of that sentence have different reasons.
+ *
+ * The FAMILY funnels through one declaration — `app/brand-overrides.css`'s `body`
+ * rule, plus its heading companion — so making it configurable is one token and one
+ * `var()`. It was also the least controlled thing in the product: the stylesheet
+ * named Inter and Manrope and the portal loaded neither, so a customer's typeface
+ * was already whatever their machine happened to have.
+ *
+ * SIZES do not funnel anywhere. Measured on this commit: **2,043 `font-size`
+ * declarations across `app/**` and ten of them read a `var()`.** A size control
+ * would move ten rules while 2,033 ignored it — a switch that saves and changes
+ * almost nothing, which is the same fault as a switch that changes something and
+ * does not save. It also collides with a 16px floor on typed controls that ten test
+ * files pin with a stated reason (iOS zooms a form field under 16px and does not
+ * zoom back out). `docs/vibe-tokens.reference.css` and `docs/vibe-token-mapping.md`
+ * already hold a risk-scored order for that migration; it is its own phase, not a
+ * control.
  *
  * CHART PALETTES ARE NO LONGER OUT OF SCOPE, and this sentence used to say they
  * were. The always-dark dashboards' accents now come from `--chart-*`, which every
@@ -68,10 +86,31 @@ export type { ThemeMode };
 /** The CSS custom properties one token owns, for one mode. */
 export type TokenFamily = Record<string, string>;
 
+/**
+ * What KIND of value a token holds, and why the catalogue has to know.
+ *
+ * Until the typeface tokens arrived every token was a colour, and two functions
+ * encoded that assumption as a gate rather than as a type: `resolveThemeCss` and
+ * `resolveThemeFamily` both treated an override as "set" only if `parseHex`
+ * accepted it. A font name is not a hex, so a font token dropped into the
+ * catalogue would have been **stored, audited, echoed back by `GET /api/theme`
+ * and shown as changed in the panel — while emitting nothing at all.**
+ *
+ * That is the exact failure this product has already been bitten by twice, and
+ * both bites are written down: `theme-repository.ts` records a cached read that
+ * answered with a stale colour, and `app/(public)/f/[token]/public-form.tsx`
+ * records a font picker that "did nothing on most phones — a control that changed
+ * a stored value and nothing a submitter could see". A discriminator is what stops
+ * the third.
+ */
+export type TokenKind = "colour" | "font";
+
 export type ThemeTokenDefinition = {
   key: string;
   label: string;
   group: string;
+  /** Colour or typeface. Decides validation, emission and whether contrast applies. */
+  kind: TokenKind;
   /** Written for the person choosing a colour, not for a developer. */
   description: string;
   /**
@@ -88,6 +127,80 @@ export type ThemeTokenDefinition = {
   derive: (hex: string, mode: ThemeMode) => TokenFamily;
 };
 
+/* ------------------------------------------------------------------ */
+/* Typefaces                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * THE TYPEFACES A WORKSPACE MAY CHOOSE, AND WHY EVERY ONE COSTS NOTHING TO LOAD.
+ *
+ * Every stack below resolves on the visitor's own machine. Not one of them causes
+ * a network request, and that is the whole design rather than a limitation:
+ *
+ *   - **No layout shift.** A webfont arrives after first paint, so the page reflows
+ *     once it lands. The board's line lengths, its truncation points, its
+ *     `line-clamp` and the twelve-plus `font-variant-numeric: tabular-nums`
+ *     alignments were all measured against the metrics the product has now.
+ *   - **No third party on the critical path.** `app/(marketing)/layout.tsx` fetches
+ *     Manrope and Inter from Google for the marketing site, which is one page a
+ *     visitor reads once. The portal is a shell somebody keeps open all day, and
+ *     `app/(public)/f/[token]/public-form.tsx` already records what a runtime font
+ *     `<link>` costs when it is wrong.
+ *   - **Nothing new to license or ship.** No `.woff2` enters the repository.
+ *
+ * WHAT THIS REPLACES, WHICH WAS NOT A CHOICE AT ALL.
+ *
+ * `app/brand-overrides.css` named `Inter` for the body and `Manrope` for headings
+ * and **the portal loaded neither** — no `@font-face`, no font file in the tree, no
+ * `next/font`, no `<link>`. So the typeface a customer saw was already whatever
+ * their machine happened to have, and two machines rendered the product
+ * differently. `inter` and `manrope` are kept below for exactly that reason: on a
+ * machine that has them, they are what the product has always meant to look like.
+ *
+ * THE VALUE STORED IS THE KEY, NEVER THE STACK.
+ *
+ * `theme_tokens.token_value` holds `"inter"`, and the stack is looked up here. A
+ * caller's string is never echoed into the `<style>` element — the same rule the
+ * hex validator follows by re-serialising from parsed integers. A font stack is a
+ * far harder string to make safe than `#rrggbb`, so it is never trusted at all.
+ */
+export const FONT_STACKS: Readonly<Record<string, { label: string; stack: string }>> = {
+  system: {
+    label: "System default",
+    stack:
+      'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+  inter: {
+    label: "Inter",
+    stack:
+      'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  },
+  manrope: {
+    label: "Manrope",
+    stack: "Manrope, Inter, ui-sans-serif, system-ui, sans-serif",
+  },
+  humanist: {
+    label: "Humanist",
+    stack:
+      '"Segoe UI", Candara, Optima, "Trebuchet MS", ui-sans-serif, system-ui, sans-serif',
+  },
+  geometric: {
+    label: "Geometric",
+    stack: 'Avenir, "Avenir Next", Futura, Corbel, ui-sans-serif, system-ui, sans-serif',
+  },
+  serif: {
+    label: "Serif",
+    stack: 'ui-serif, Georgia, Cambria, "Times New Roman", Times, serif',
+  },
+};
+
+export const FONT_KEYS: readonly string[] = Object.keys(FONT_STACKS);
+
+/** The stack a stored key names, or null. Never echoes an unknown string. */
+export function fontStack(key: string): string | null {
+  return FONT_STACKS[key]?.stack ?? null;
+}
+
 /**
  * Every colour an organisation may change.
  *
@@ -99,6 +212,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "brand.primary",
     label: "Primary brand colour",
     group: "Brand",
+    kind: "colour",
     description:
       "The main accent. Buttons, links, active navigation, focus rings and selected rows.",
     seedInput: "#12b4a8",
@@ -174,6 +288,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "accent.info",
     label: "Information",
     group: "Status",
+    kind: "colour",
     description: "Informational badges, scheduled work and the blue series in charts.",
     seedInput: "#38bdf8",
     seed: {
@@ -201,6 +316,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "status.success",
     label: "Success",
     group: "Status",
+    kind: "colour",
     description: "Completed jobs, compliant certificates and anything within target.",
     seedInput: "#25d98b",
     seed: {
@@ -228,6 +344,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "status.warning",
     label: "Warning",
     group: "Status",
+    kind: "colour",
     description: "Expiring certificates, approaching due dates and work awaiting action.",
     seedInput: "#ffd447",
     seed: {
@@ -255,6 +372,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "status.danger",
     label: "Danger",
     group: "Status",
+    kind: "colour",
     description: "Overdue work, expired certificates and destructive actions.",
     seedInput: "#ff4d5e",
     seed: {
@@ -292,6 +410,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     key: "status.attention",
     label: "Attention",
     group: "Status",
+    kind: "colour",
     description:
       "Reactive work, missing paperwork and the nearest due band — the orange series in charts.",
     seedInput: "#ff8a3d",
@@ -322,6 +441,45 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
       ...deriveStatusFamily("orange", hex, mode),
       ...deriveChartRung("attention", hex),
     }),
+  },
+  {
+    /*
+     * THE PORTAL'S BODY TYPEFACE.
+     *
+     * One declaration owns it — `app/brand-overrides.css`'s `body` rule, which
+     * loads after `globals.css` and therefore wins. That is why this is a small
+     * change rather than a migration of 2,043 font-size declarations: the FAMILY
+     * funnels through one place, and the SIZES do not funnel anywhere.
+     */
+    key: "type.body",
+    label: "Body typeface",
+    group: "Typography",
+    kind: "font",
+    description:
+      "Everything the portal sets in running text — tables, drawers, forms and labels.",
+    seedInput: "inter",
+    seed: {
+      light: { "--type-body": FONT_STACKS.inter.stack },
+      dark: { "--type-body": FONT_STACKS.inter.stack },
+    },
+    derive: (key) => ({ "--type-body": fontStack(key) ?? FONT_STACKS.inter.stack }),
+  },
+  {
+    /*
+     * AND THE HEADING TYPEFACE, which the product has always set separately —
+     * `h1, h2, h3, .brand-word` take Manrope where the body takes Inter.
+     */
+    key: "type.display",
+    label: "Heading typeface",
+    group: "Typography",
+    kind: "font",
+    description: "Headings and the wordmark. May be the same as the body typeface.",
+    seedInput: "manrope",
+    seed: {
+      light: { "--type-display": FONT_STACKS.manrope.stack },
+      dark: { "--type-display": FONT_STACKS.manrope.stack },
+    },
+    derive: (key) => ({ "--type-display": fontStack(key) ?? FONT_STACKS.manrope.stack }),
   },
 ] as const;
 
@@ -356,8 +514,27 @@ export function validateThemeToken(key: unknown, value: unknown): TokenValidatio
     return { ok: false, reason: `Unknown theme token: ${String(key)}` };
   }
   if (typeof value !== "string") {
-    return { ok: false, reason: `${key} must be a colour string` };
+    return { ok: false, reason: `${key} must be a string` };
   }
+
+  const definition = themeTokenDefinition(key);
+  if (definition?.kind === "font") {
+    /*
+     * A whitelist INDEX, not a sanitised string. `fontStack` returns null for
+     * anything it does not know, and what gets stored is the key rather than the
+     * stack — so no part of a caller's input ever reaches the `<style>` element.
+     * Same principle as the hex branch below, which re-serialises from parsed
+     * integers and discards what arrived.
+     */
+    if (!fontStack(value)) {
+      return {
+        ok: false,
+        reason: `${key} must be one of: ${FONT_KEYS.join(", ")}`,
+      };
+    }
+    return { ok: true, key, value };
+  }
+
   const rgb = parseHex(value);
   if (!rgb) {
     return {
@@ -379,6 +556,23 @@ export function validateThemeToken(key: unknown, value: unknown): TokenValidatio
 /** `token key -> chosen hex`. Only keys an organisation has actually set. */
 export type ThemeOverrides = Readonly<Record<string, string>>;
 
+/**
+ * Whether a stored value is a real override for this token.
+ *
+ * ONE PREDICATE, because there used to be two copies of `parseHex(value)` — one in
+ * `resolveThemeCss` and one in `resolveThemeFamily` — and a second kind of token
+ * would have had to be remembered in both. A token whose value fails this is
+ * treated as unset and falls back to its seed, which is what makes "a workspace
+ * that has chosen nothing emits nothing" true.
+ */
+function isOverrideSet(
+  token: ThemeTokenDefinition,
+  value: string | undefined,
+): boolean {
+  if (!value) return false;
+  return token.kind === "font" ? fontStack(value) !== null : parseHex(value) !== null;
+}
+
 /** The resolved custom properties for one mode: seed, with overrides derived over it. */
 export function resolveThemeFamily(
   overrides: ThemeOverrides,
@@ -387,8 +581,9 @@ export function resolveThemeFamily(
   const out: TokenFamily = {};
   for (const token of THEME_TOKEN_CATALOGUE) {
     const chosen = overrides[token.key];
-    const family =
-      chosen && parseHex(chosen) ? token.derive(chosen, mode) : token.seed[mode];
+    const family = isOverrideSet(token, chosen)
+      ? token.derive(chosen as string, mode)
+      : token.seed[mode];
     Object.assign(out, family);
   }
   return out;
@@ -417,8 +612,8 @@ const DARK_SELECTOR = ':root:not([data-theme="light"]), body[data-theme="dark"]'
  * second copy of the palette that could drift.
  */
 export function resolveThemeCss(overrides: ThemeOverrides): string {
-  const active = THEME_TOKEN_CATALOGUE.filter(
-    (token) => overrides[token.key] && parseHex(overrides[token.key] as string),
+  const active = THEME_TOKEN_CATALOGUE.filter((token) =>
+    isOverrideSet(token, overrides[token.key]),
   );
   if (active.length === 0) return "";
 
@@ -507,6 +702,12 @@ export type ContrastWarning = {
 export function themeContrastWarnings(
   overrides: ThemeOverrides,
 ): ContrastWarning[] {
+  /*
+   * Colour tokens only. A typeface has no ratio to measure — the contrast a font
+   * participates in is between the INK and the GROUND, which the colour tokens
+   * already own. Running a font through this would compare a font stack to a
+   * background and report nonsense.
+   */
   const warnings: ContrastWarning[] = [];
 
   const add = (
