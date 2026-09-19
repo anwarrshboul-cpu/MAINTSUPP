@@ -26,7 +26,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Avatar, Icon, type IconName } from "../../components";
-import { useCapability } from "../../lib/client-capabilities";
+import { useCapability, usePlatformAdmin } from "../../lib/client-capabilities";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
@@ -461,6 +461,17 @@ export function AccountMenu({
    */
   const canAdminister = useCapability("users.view");
   const canInvite = useCapability("users.invite");
+  /*
+   * And the door to the platform console, for MAINTSUPP staff only.
+   *
+   * "Administration" below opens the WORKSPACE's admin screens at
+   * `/dashboard/admin`, which is right for an Owner or an Admin. The console at
+   * `/admin` answers across every client, so it is offered on `platformAdmin`
+   * rather than on any capability — see `usePlatformAdmin` for why a capability
+   * cannot express this. `=== true` keeps it hidden while the answer is in
+   * flight, exactly as `canAdminister` does.
+   */
+  const isPlatformStaff = usePlatformAdmin();
 
   const accountItems = useMemo<MenuItem[]>(
     () => [
@@ -514,6 +525,18 @@ export function AccountMenu({
         label: "Administration",
         icon: "shield",
         href: "/dashboard/admin",
+      },
+      {
+        /*
+         * The platform console — Master Specification §5. Not one of monday's
+         * items: monday has no notion of the vendor operating the installation,
+         * so `monday` names the nearest thing rather than inventing a claim.
+         */
+        key: "platform",
+        monday: "Admin",
+        label: "Platform console",
+        icon: "building",
+        href: "/admin",
       },
       {
         key: "teams",
@@ -732,6 +755,7 @@ export function AccountMenu({
               <h3>Account</h3>
               {accountItems
                 .filter((item) => item.key !== "admin" || canAdminister === true)
+                .filter((item) => item.key !== "platform" || isPlatformStaff === true)
                 .map((item) => renderItem(item))}
             </section>
             <section data-menu-column="explore">

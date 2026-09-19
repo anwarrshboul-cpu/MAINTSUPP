@@ -81,11 +81,43 @@ async function menuItems(which) {
 }
 
 test("the Account column is monday's nine items, in monday's order", async () => {
-  const items = (await menuItems("account")).slice(0, 9);
-  assert.deepEqual(
-    items.map((item) => [item.monday, item.label]),
-    MONDAY_ACCOUNT_COLUMN,
-  );
+  /*
+   * Re-pointed from `.slice(0, 9)` to a SUBSEQUENCE check, and the contract is
+   * unchanged rather than relaxed.
+   *
+   * What this test has always claimed in its own title is that monday's nine items
+   * are present and in monday's order. `slice(0, 9)` asserted something narrower —
+   * that they are the FIRST nine — which was an implementation shortcut that held
+   * only while MAINTSUPP added none of its own. The platform console (§5) is the
+   * first: monday has no notion of the vendor operating the installation, so there
+   * is no monday item it could stand in for, and it belongs beside Administration
+   * rather than after Log out.
+   *
+   * A subsequence check still fails if one of the nine goes missing, if two of them
+   * swap, or if one is renamed — every regression the prefix check caught. What it
+   * no longer does is forbid this product having an item of its own.
+   */
+  const items = await menuItems("account");
+  const pairs = items.map((item) => [item.monday, item.label]);
+
+  let at = 0;
+  for (const expected of MONDAY_ACCOUNT_COLUMN) {
+    const found = pairs.findIndex(
+      (pair, index) => index >= at && pair[0] === expected[0] && pair[1] === expected[1],
+    );
+    assert.ok(
+      found >= 0,
+      `monday's "${expected[0]}" (as "${expected[1]}") is missing, or is out of ` +
+        `monday's order. The column reads: ${JSON.stringify(pairs)}`,
+    );
+    at = found + 1;
+  }
+
+  /* And nothing MAINTSUPP adds may be untraceable: every extra item must name the
+     monday item it stands nearest to, so the mapping stays reviewable. */
+  for (const pair of pairs) {
+    assert.ok(pair[0], `the "${pair[1]}" item must still carry a monday label`);
+  }
 });
 
 test("the Explore column is monday's eight items, in monday's order", async () => {
@@ -251,6 +283,10 @@ test("every menu href points at a panel that exists or a route another agent own
     "/dashboard/admin",
     "/dashboard/teams",
     "/dashboard?manage=import",
+    /* The Platform Super Admin console — §5. Owned by `app/(app)/admin`, guarded by
+       `requirePlatformAdmin`, and offered in this menu only to platform staff.
+       `tests/platform-admin-shell.test.mjs` asserts the route and its two guards. */
+    "/admin",
   ]);
 
   const hrefs = [...menu.matchAll(/href:\s*"([^"]+)"/g)].map(([, href]) => href);

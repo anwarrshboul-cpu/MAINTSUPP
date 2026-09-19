@@ -6,17 +6,30 @@ export const dynamic = "force-dynamic";
 /*
  * The address Module 3 §4 names, pointed at the address this product uses.
  *
- * §4 asks for the reconciliation page at `/admin/reconcile`. This product has
- * no top-level `/admin` namespace at all — every administration screen lives
- * under `/dashboard`, including the nested ones (`/dashboard/admin/roles`,
- * `/dashboard/admin/clients`), and the surface itself is a section of the one
- * portal shell rather than a page of its own. Building a second shell to own
- * one URL would give the reconciler its own copy of the navigation, the session
- * read and the theme.
+ * §4 asks for the reconciliation page at `/admin/reconcile`, and it is a redirect
+ * into the workspace screen at `/dashboard/reconcile`.
  *
- * So the spec's URL is a redirect. Typing it, or following it out of the
- * module document, lands on the page; the authorisation is unchanged, because
- * it is enforced by `/api/admin/reconcile` and not by the route.
+ * THIS COMMENT USED TO ARGUE THAT `/admin` DOES NOT EXIST. It said "this product
+ * has no top-level `/admin` namespace at all" and that "building a second shell to
+ * own one URL would give the reconciler its own copy of the navigation, the session
+ * read and the theme." That reasoning was correct for what it was deciding — one
+ * URL is not worth a shell — and it stopped being the whole picture when §5's
+ * Platform Super Admin console arrived. `/admin` is now a real namespace with its
+ * own shell, its own rail and its own guard (`app/lib/platform-guard.ts`), because
+ * a console that answers across every client workspace is a different thing from a
+ * page, and the cost is paid once rather than per URL.
+ *
+ * The record is kept rather than deleted, because the reversal is the interesting
+ * part: the shell was built when there was a console to put in it, and not before.
+ *
+ * SO WHY IS THIS STILL A REDIRECT, NOT A CONSOLE SCREEN?
+ *
+ * Because the reconciler is not a platform view. It reports figures for ONE
+ * workspace and offers a purge inside it, it answers to `settings.edit` rather than
+ * to platform staff, and `/api/admin/reconcile` refuses outright outside
+ * non-production. `PLATFORM_SECTIONS` says the same thing in its own header. Moving
+ * it into the console would take a URL with a documented meaning and quietly change
+ * it, and would put a workspace harness behind a door marked "platform".
  *
  * Same shape as `app/(app)/portal/page.tsx`, which redirects the old portal
  * address to `/dashboard` for the same reason.

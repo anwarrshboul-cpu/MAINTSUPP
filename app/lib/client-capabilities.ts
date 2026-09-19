@@ -61,6 +61,50 @@ export function forgetCapabilities() {
  * should render as enabled while `null` and let the server refuse; a control
  * whose absence is safer should render hidden.
  */
+/**
+ * Whether this person is MAINTSUPP platform staff — `identity.platformAdmin`.
+ *
+ * WHY THIS IS NOT A CAPABILITY, AND SO NOT `useCapability`
+ *
+ * `can()` returns true for `super_admin` before it reads anything at all, so no
+ * capability distinguishes the platform's own staff from a client company's most
+ * senior role. `platformAdmin` comes from the `platform_admins` table by way of
+ * `resolveTenantAccess`, which reads it from the database and never from the
+ * request. It is the same value as `crossOrganisation`, and it is what makes a
+ * Platform Super Admin's membership list every active organisation.
+ *
+ * `null` while it loads, read as "not answered" — and every caller must treat that
+ * as "do not offer". Showing a door to the platform console and taking it away a
+ * moment later is worse than showing it a moment late.
+ *
+ * THIS IS NOT THE ENFORCEMENT. `requirePlatformAdmin` in `app/lib/platform-guard.ts`
+ * is, on the server, at every `/admin` route entry. Reading the same answer here is
+ * only what stops the two disagreeing, so nobody is offered a console that will
+ * turn them away.
+ */
+export function usePlatformAdmin(): boolean | null {
+  const [platformAdmin, setPlatformAdmin] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchRuntimeContext()
+      .then((context) => {
+        if (cancelled) return;
+        const identity = context.identity as { platformAdmin?: boolean } | undefined;
+        /* A payload from before this field existed leaves it unanswered rather
+           than answering "no", which is the same rule `capabilities` follows. */
+        if (!identity || typeof identity.platformAdmin !== "boolean") return;
+        setPlatformAdmin(identity.platformAdmin);
+      })
+      .catch(() => {
+        // Unanswered. The server still decides.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return platformAdmin;
+}
+
 export function useCapability(capability: string): boolean | null {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   useEffect(() => {

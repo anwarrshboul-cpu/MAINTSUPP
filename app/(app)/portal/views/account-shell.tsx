@@ -50,6 +50,15 @@ import "./account-views.css";
  */
 const ELSEWHERE = [
   { href: "/dashboard/admin", label: "Administration", icon: "shield" as IconName },
+  /*
+   * The platform console — §5. Listed unconditionally here, unlike in the avatar
+   * menu, because this rail has no access to the capability hooks the menu uses and
+   * adding a fetch to it for one link would be the second read of `/api/context`
+   * that `tests/shared-context-and-navigation-reads.test.mjs` exists to prevent.
+   * `requirePlatformAdmin` refuses anyone else on arrival, so the cost of listing
+   * it is one redirect rather than an exposure.
+   */
+  { href: "/admin", label: "Platform console", icon: "building" as IconName },
   { href: "/dashboard/teams", label: "Teams", icon: "users" as IconName },
   { href: "/dashboard?manage=import", label: "Import data", icon: "upload" as IconName },
 ];
