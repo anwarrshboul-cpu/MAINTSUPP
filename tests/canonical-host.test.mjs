@@ -48,6 +48,11 @@ const DECLARING = [
   "app/layout.tsx",
   "app/(marketing)/page.tsx",
   "app/(marketing)/contractors/page.tsx",
+  /* The CMS route builds a canonical and an og:url from the page's slug. It has to
+     declare one: `app/layout.tsx` sets a root `alternates: { canonical: "/" }`, so
+     a page that declares none tells a crawler it is the homepage. Added here by
+     hand because the header above says why this list is not a glob. */
+  "app/(marketing)/p/[slug]/page.tsx",
   "public/robots.txt",
   "public/sitemap.xml",
   "worker/index.ts",
