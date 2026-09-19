@@ -339,6 +339,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      and the order between the two is reading order rather than a dependency. */
   await ensureAssetsFoundation(d1);
 
+  /* The theme editor's per-organisation colour overrides. Two guarded DDL
+     statements and no seed — see `ensureThemeTokens` for why the absence of a
+     row is the correct state rather than an unfinished one. */
+  await ensureThemeTokens(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -5999,6 +6004,49 @@ const SLA_TARGET_SEED: ReadonlyArray<{
   { stage: "acknowledged", priority: "low", minutes: 480, note: "P3 — acknowledged the same working day" },
   { stage: "acknowledged", priority: "not_recorded", minutes: 480, note: "P4 — acknowledged within 1 working day" },
 ];
+
+/**
+ * The per-organisation colour overrides behind the theme editor.
+ *
+ * TWO STATEMENTS AND NO SEED, WHICH IS THE WHOLE POINT.
+ *
+ * Every other presentation table in this file seeds itself — `dashboard_meters`
+ * writes eight rows per organisation, `job_status_map` writes one per status.
+ * This one deliberately writes none. `app/lib/theme-tokens.ts` holds the shipped
+ * palette as its fallback, so a row here means "somebody changed this" and the
+ * absence of a row means "paint what ships". An empty table is therefore not an
+ * unfinished state to be backfilled; it is the correct and expected state for
+ * every organisation that has never opened the editor, and it is what every
+ * organisation including Production has on the day this ships.
+ *
+ * That also makes the stage free on a warm boot: no `SELECT` over organisations,
+ * no fan-out, no `INSERT OR IGNORE` per row. `db/init.ts` runs on the boot path
+ * of every request, so a stage that costs two guarded DDL statements and nothing
+ * else is the difference between a feature and a tax.
+ *
+ * Placed after `ensureAssetsFoundation` only for reading order. It references
+ * `organisations` and nothing else, so it could run at any point after Stage 1.
+ */
+async function ensureThemeTokens(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS theme_tokens (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         token_key TEXT NOT NULL,
+         token_value TEXT NOT NULL,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* One row per token per organisation. The uniqueness is what makes a save
+       an upsert rather than an append, so an editor that is saved twice cannot
+       leave two rows disagreeing about one colour. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS theme_tokens_key_idx ON theme_tokens(organisation_id, token_key)",
+    ),
+  ]);
+}
 
 async function ensureOverviewFoundation(d1: D1DatabaseLike) {
   await d1.batch([

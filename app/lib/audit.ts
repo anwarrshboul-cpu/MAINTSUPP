@@ -66,6 +66,9 @@ export type AuditAction =
   | "board.items_archived"
   | "data.imported"
   | "data.exported"
+  // Appearance
+  | "theme.token_changed"
+  | "theme.token_reset"
   | (string & {});
 
 /** The person the event is recorded against. */

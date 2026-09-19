@@ -216,6 +216,7 @@ import { JobTypesSettings } from "./admin/job-types-settings";
 import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
+import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -6679,6 +6680,12 @@ function SettingsView({
           save above — it applies on click and mirrors itself. See
           views/appearance-panel.tsx. */}
       <AppearancePanel />
+
+      {/* And its opposite, deliberately a separate card: brand colours are a
+          WORKSPACE decision that repaints the product for everybody in it,
+          need `settings.edit`, and are audited. See
+          views/brand-colours-panel.tsx for why the two are not one card. */}
+      <BrandColoursPanel />
 
       <section className="panel settings-card">
         <div className="settings-card__heading">
