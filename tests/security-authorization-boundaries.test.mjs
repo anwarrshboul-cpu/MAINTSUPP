@@ -523,3 +523,122 @@ test(
     );
   },
 );
+
+/* ================================================================== */
+/* 5. The two account panels, narrowed in the payload                  */
+/* ================================================================== */
+
+test("the Trash panel's deletion history answers to audit.read", async () => {
+  /*
+   * The screen holds two different things and they have different boundaries.
+   * The recovery matrix says WHAT can be brought back and from where, which is
+   * useful to anybody who might have deleted something. `deletions` is up to two
+   * hundred rows of `activity_log` and `audit_events`, each naming the colleague
+   * who deleted a record — the deletion half of the audit log, served from an
+   * avatar-menu panel with no role gate.
+   *
+   * `/api/audit` requires `audit.read` for the same rows. Two routes reading one
+   * table and disagreeing about who may see it is not a boundary; the looser one
+   * simply decides.
+   */
+  const src = await read("app/api/account/trash/route.ts");
+  assert.match(
+    src,
+    /can\(subject, "audit\.read"\)/,
+    "the history must ask the same capability /api/audit asks",
+  );
+  assert.match(
+    src,
+    /deletions: mayReadAudit \? deletions : \[\]/,
+    "the history must be withheld from a reader without audit.read",
+  );
+  assert.match(
+    src,
+    /recoveryMatrix: RECOVERY_MATRIX,/,
+    "the recovery matrix must stay open — it is the actionable half, and " +
+      "ROLE_CEILINGS means a manager could never get it back",
+  );
+  assert.ok(
+    !/scopedDbWithCapability\(request, "audit\.read"\)/.test(src),
+    "it must be narrowed in the payload, not gated at the door: a manager can " +
+      "never hold audit.read, so gating would take the recovery matrix away " +
+      "from them permanently",
+  );
+});
+
+test("the platform panel separates the workspace's figures from the installation's", async () => {
+  /*
+   * Everything counted in this route is the workspace's own — how many
+   * contractor job links are live, expired or revoked, and how its notifications
+   * were delivered. Three blocks are not: `support` carries the operator's inbox
+   * addresses, `integrations` says which secrets are configured, and
+   * `publicEndpoints` maps the two routes that accept an unauthenticated
+   * request.
+   *
+   * Not a tenancy hole — every query is `eq(organisationId, orgId)`, checked —
+   * but a description of the installation served to any member from a panel with
+   * no role gate.
+   */
+  const src = await read("app/api/account/platform/route.ts");
+  assert.match(src, /can\(subject, "settings\.edit"\)/);
+  assert.match(
+    src,
+    /if \(mayReadPosture\) return Response\.json\(\{ platform \}\);/,
+    "a permitted reader must get the whole thing",
+  );
+  for (const withheld of [/publicEndpoints: \[\]/, /integrations: \[\]/, /support: null/]) {
+    assert.match(src, withheld, "the installation's description must be withheld");
+  }
+  assert.match(
+    src,
+    /developers: \{ \.\.\.platform\.developers/,
+    "the workspace's own token counts must survive the narrowing",
+  );
+  assert.ok(
+    !/scopedDbWithCapability\(request, "settings\.edit"\)/.test(src),
+    "payload, not door: a manager can never hold settings.edit, and gating " +
+      "would take the workspace's own figures away to withhold something that " +
+      "is not about the workspace at all",
+  );
+});
+
+test(
+  "live: the account panels withhold the installation, not the workspace",
+  { skip: !serverUp },
+  async (t) => {
+    if (!(await asOwner())) return t.skip("the seeded owner could not sign in");
+    const client = await onboard("client", "panels");
+
+    /* A client holds neither `audit.read` nor `settings.edit`. */
+    const trash = await call(client.cookie, "/api/account/trash");
+    assert.equal(trash.status, 200, "the recovery matrix must stay reachable");
+    assert.ok(
+      (trash.body.trash.recoveryMatrix ?? []).length > 0,
+      "the actionable half must survive",
+    );
+    assert.deepEqual(trash.body.trash.deletions, [], "the audit history must not");
+    assert.equal(trash.body.trash.canReadHistory, false);
+
+    const platform = await call(client.cookie, "/api/account/platform");
+    assert.equal(platform.status, 200, "the workspace's own figures stay reachable");
+    assert.ok(
+      (platform.body.platform.developers?.credentials ?? []).length > 0,
+      "the workspace's contractor-link counts must survive",
+    );
+    assert.deepEqual(platform.body.platform.integrations, []);
+    assert.deepEqual(platform.body.platform.developers.publicEndpoints, []);
+    assert.equal(platform.body.platform.support, null);
+    assert.equal(platform.body.platform.canReadPosture, false);
+
+    /* And the owner, who holds both, still sees everything. */
+    const ownerTrash = await call(ownerCookie, "/api/account/trash");
+    assert.equal(ownerTrash.body.trash.canReadHistory, true);
+    const ownerPlatform = await call(ownerCookie, "/api/account/platform");
+    assert.ok(
+      ownerPlatform.body.platform.support,
+      "an owner must still see the operator's contact block — withholding it " +
+        "from everybody would be a regression, not a fix",
+    );
+    assert.ok((ownerPlatform.body.platform.integrations ?? []).length > 0);
+  },
+);
