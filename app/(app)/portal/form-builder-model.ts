@@ -32,12 +32,29 @@ export type BuilderForm = {
   responseLimit: number | null;
   closeAt: string | null;
   responseCount: number;
+  /*
+   * THE FOUR CREDENTIAL FIELDS ARE EMPTY FOR A READER WITHOUT `board.edit`.
+   *
+   * `/api/board/form` withholds them together — see `serialiseForm` there.
+   * They are typed as they always were rather than optional, because the server
+   * sends `""`/`null` rather than omitting them: the share input is rendered
+   * unconditionally and an `undefined` value makes it uncontrolled. Read
+   * `canShare`, never the emptiness of these, to decide whether to offer the
+   * controls.
+   */
   shareToken: string;
   shortToken: string | null;
   /** The long link, always. */
   shareUrl: string;
   /** What the Share dialog shows and copies — long or short, per the switch. */
   presentedUrl: string;
+  /**
+   * Whether this reader may have the live intake link at all.
+   *
+   * A rendering hint, NOT the boundary: the server empties the four fields
+   * above whatever the browser does with this.
+   */
+  canShare: boolean;
   config: StoredFormConfig;
   /**
    * The canonical option substitution — live sites for Location, the option
