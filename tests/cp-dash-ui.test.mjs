@@ -25,6 +25,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { THEME_TOKEN_CATALOGUE } from "../app/lib/theme-tokens.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = async (file) => (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
@@ -339,6 +340,24 @@ test("every chart states its values to a screen reader", () => {
 
 /* ── The stylesheet ───────────────────────────────────────────────────────── */
 
+/**
+ * The hex a theme token SEEDS for one CSS property, in the dark theme.
+ *
+ * The dash stylesheets no longer carry the brief's hexes as literals — they
+ * reference `--chart-*` (and two mode-invariant `--brand-*` rungs), so a workspace
+ * that sets its brand colour sees it in its charts. The brief's values did not stop
+ * mattering: they are the SEED, which is what a workspace that has chosen nothing
+ * still renders. This reads them back out of the catalogue so the pins below can
+ * assert both halves — the reference, and the value behind it.
+ */
+function seeded(property) {
+  for (const token of THEME_TOKEN_CATALOGUE) {
+    const value = token.seed.dark[property] ?? token.seed.light[property];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 test("the stylesheet declares the brief's compliance tokens and no second Overview palette", () => {
   /*
    * RE-POINTED: the approved colour system gives compliance one palette
@@ -348,18 +367,36 @@ test("the stylesheet declares the brief's compliance tokens and no second Overvi
    * yellow #ffd447 / blue #38bdf8 (was #c85024 / #d88c38 / #5878a4), with the
    * neutral grey #64707b (was #44546c).
    */
-  for (const [token, hex] of [
-    ["--cp-compliant", "#25d98b"],
-    ["--cp-expiring", "#ffd447"],
-    ["--cp-expired", "#ff4d5e"],
-    ["--cp-missing", "#ff8a3d"],
-    ["--cp-due-30", "#ff8a3d"],
-    ["--cp-due-60", "#ffd447"],
-    ["--cp-due-90", "#38bdf8"],
-    ["--cp-other", "#64707b"],
+  /*
+   * RE-POINTED AGAIN, and STRENGTHENED. The seven hued tokens reference the theme's
+   * chart rungs now, so a workspace that sets its brand colours sees them on the
+   * compliance dashboard. Each is pinned twice — the reference, and the seed behind
+   * it, which is still the brief's approved value.
+   */
+  for (const [token, source, hex] of [
+    ["--cp-compliant", "--chart-success", "#25d98b"],
+    ["--cp-expiring", "--chart-warning", "#ffd447"],
+    ["--cp-expired", "--chart-danger", "#ff4d5e"],
+    ["--cp-missing", "--chart-attention", "#ff8a3d"],
+    ["--cp-due-30", "--chart-attention", "#ff8a3d"],
+    ["--cp-due-60", "--chart-warning", "#ffd447"],
+    ["--cp-due-90", "--chart-info", "#38bdf8"],
   ]) {
-    assert.match(css, new RegExp(`${token}: ${hex};`, "i"), `${token} is ${hex}`);
+    assert.match(
+      css,
+      new RegExp(`\\${token}: var\\(\\${source}\\);`),
+      `${token} must follow ${source}`,
+    );
+    assert.equal(seeded(source), hex, `${source} must still seed the brief's ${hex}`);
   }
+
+  /*
+   * `--cp-other` stays a literal, and that is a decision. It is the "no date
+   * recorded" bucket, and `overview-meters.ts` states the rule it obeys: an absence
+   * must "never be a colour that could pass for a real category". A brand-derived
+   * grey is a contradiction in terms.
+   */
+  assert.match(css, /--cp-other: #64707b;/i, "--cp-other stays the neutral grey");
   assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ""), /--ov-[\w-]+\s*:/, "the --ov-* palette is inherited, not copied");
 });
 

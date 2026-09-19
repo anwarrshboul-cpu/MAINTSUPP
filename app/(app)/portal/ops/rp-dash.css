@@ -46,14 +46,14 @@
    * picks one by the job type's stable CODE (`KPI_ACCENT` in `rp-dash.tsx`),
    * so a renamed type keeps its colour; the token keeps the brief's name.
    */
-  --rp-total: #12b4a8;
-  --rp-reactive: #ff8a3d;
-  --rp-planned: #38bdf8;
-  --rp-projects: #55e8d8;
+  --rp-total: var(--chart-primary);
+  --rp-reactive: var(--chart-attention);
+  --rp-planned: var(--chart-info);
+  --rp-projects: var(--brand-light);
 
   /* Charts — the turquoise primary series and its bright line. */
-  --rp-bar: #12b4a8;
-  --rp-line: #20d8c6;
+  --rp-bar: var(--chart-primary);
+  --rp-line: var(--brand-bright);
   /*
    * The brief's area wash. Declared for completeness; the shared `AreaTrend`
    * derives its wash from its line colour (`--rp-line` at 34% to nothing), and
@@ -63,9 +63,9 @@
   --rp-area-bottom: rgba(18, 180, 168, 0.03);
 
   /* Repeat activity — the shared status scale. */
-  --rp-weekly: #ff4d5e;
-  --rp-fortnightly: #ffd447;
-  --rp-monthly: #38bdf8;
+  --rp-weekly: var(--chart-danger);
+  --rp-fortnightly: var(--chart-warning);
+  --rp-monthly: var(--chart-info);
   --rp-less-often: #64707b;
 
   /*
