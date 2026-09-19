@@ -413,10 +413,33 @@ test("resetting a colour deletes the row rather than storing the default", async
     /if \(value === null\) \{[\s\S]*?\.delete\(themeTokens\)/,
     "a null value must delete the row",
   );
+  /*
+   * RE-POINTED, not removed. This assertion used to require
+   * `invalidateThemeCache(organisationId)` after a write, guarding the contract
+   * "a save is visible immediately". That contract still holds; its home moved.
+   *
+   * Authenticated QA against the deployed Preview showed why: the cache was
+   * per-isolate, so a write invalidated only the serverless instance that served
+   * it and a read landing elsewhere answered with the old colour for up to
+   * thirty seconds. Since the editor reloads the page after saving, that meant
+   * watching the product repaint in the OLD colour and concluding the save had
+   * failed. There is no cross-instance invalidation channel in this product, so
+   * the cache went instead — it was guarding two rare callers.
+   *
+   * The pin therefore now asserts the absence, which is what makes the save
+   * immediate. Reintroducing a cache here without a shared invalidation channel
+   * brings the bug back, so this test refuses one.
+   */
+  assert.ok(
+    !/new Map\(|CACHE_TTL|invalidateThemeCache/.test(repository),
+    "theme-repository.ts must not cache: the cache was per-isolate, so a saved " +
+      "colour could stay invisible on other serverless instances for up to its " +
+      "TTL, which reads as a save that silently failed",
+  );
   assert.match(
     repository,
-    /invalidateThemeCache\(organisationId\)/,
-    "a write must invalidate the cache or the editor appears not to have saved",
+    /export async function readThemeOverrides[\s\S]*?await db\s*\n?\s*\.select/,
+    "every read must go to the database, so the answer is always current",
   );
 });
 

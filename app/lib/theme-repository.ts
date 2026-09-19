@@ -1,27 +1,43 @@
 /**
  * Reading and writing one organisation's colour overrides.
  *
- * WHY THERE IS A CACHE HERE AT ALL
+ * WHY THERE IS NO CACHE HERE, HAVING SHIPPED ONE AND TAKEN IT OUT
  *
- * `app/(app)/layout.tsx` resolves the theme, and that layout wraps every screen
- * that loads `globals.css` — so without a cache this would be one extra query on
- * the boot path of every portal request, for ever. `db/init.ts` already runs
- * there and the cold-start work that took it from 47s to 3.0s is recent enough
- * that adding an unconditional round trip would be a poor trade for a value that
- * changes perhaps twice a year.
+ * This module first carried the 30-second per-isolate cache that
+ * `options-repository.ts` uses, invalidated on write. It was wrong here, and
+ * authenticated QA against the deployed Preview is what proved it: a colour was
+ * reset, the database showed zero rows, and `GET /api/theme` still answered with
+ * the old override. Nothing was corrupt — the write had invalidated the cache on
+ * the ONE serverless instance that served it, and the read landed on another
+ * whose copy had not yet expired.
  *
- * So: the same 30-second isolate cache `options-repository.ts` uses, keyed by
- * organisation so one tenant's palette can never be served to another, and
- * invalidated on write so an administrator who saves a colour sees it on the
- * next navigation rather than up to thirty seconds later.
+ * A stale palette for up to thirty seconds sounds harmless. It is not, because
+ * of what the editor does next: it reloads the page and says "Reloading so the
+ * new colours take effect". If that reload lands on an instance with a warm
+ * cache, the administrator watches the product repaint itself in the OLD colour
+ * and concludes the save silently failed. That is the "visual toggle that does
+ * not save" impression the master specification forbids — produced, ironically,
+ * by a correct save.
  *
- * WHY A MISS IS NOT AN ERROR
+ * Invalidation cannot fix it. There is no shared channel between instances, so
+ * the only honest options were a cross-instance invalidation mechanism this
+ * product does not have, or no cache. The cache also turned out to be guarding
+ * very little: `readThemeOverrides` has exactly two callers, the layout (which
+ * renders on document requests, not on `/api/*` — the portal is a shell that
+ * then talks to APIs) and `/api/theme` (which runs when somebody opens the
+ * settings panel). Both are rare. It was trading correctness for a query that
+ * happens a handful of times per session.
+ *
+ * So the read is one indexed lookup on `(organisation_id, token_key)`, taken
+ * every time, and the answer is always what the database says.
+ *
+ * WHY A FAILED READ IS NOT AN ERROR
  *
  * `readThemeOverrides` answers `{}` for an organisation with no rows, which is
  * every organisation until somebody opens the editor. `{}` resolves to an empty
  * `<style>` and the page paints exactly what `globals.css` says. A failure to
  * read is treated the same way and logged: a database hiccup should cost the
- * shipped palette for thirty seconds, not a 500 on every screen in the product.
+ * shipped palette, not a 500 on every screen in the product.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -31,19 +47,6 @@ import { themeTokens } from "../../db/schema";
 import { THEME_TOKEN_KEYS, type ThemeOverrides } from "./theme-tokens.ts";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
-
-/** Matches `options-repository.ts`. Long enough to be worth having, short
-    enough that a save is visible on the next navigation even without the
-    explicit invalidation below. */
-const CACHE_TTL_MS = 30_000;
-
-type CacheEntry = { expires: number; overrides: ThemeOverrides };
-
-const cache = new Map<string, CacheEntry>();
-
-export function invalidateThemeCache(organisationId: string) {
-  cache.delete(organisationId);
-}
 
 /**
  * The colours this organisation has chosen. `{}` when it has chosen none.
@@ -60,10 +63,6 @@ export async function readThemeOverrides(
   db: Database,
   organisationId: string,
 ): Promise<ThemeOverrides> {
-  const hit = cache.get(organisationId);
-  if (hit && hit.expires > Date.now()) return hit.overrides;
-
-  let overrides: ThemeOverrides = {};
   try {
     const rows = await db
       .select({ key: themeTokens.tokenKey, value: themeTokens.tokenValue })
@@ -78,14 +77,12 @@ export async function readThemeOverrides(
     for (const row of rows) {
       if (row.key && row.value) out[row.key] = row.value;
     }
-    overrides = out;
+    return out;
   } catch (error) {
     // See the header: the shipped palette is the right answer to a failed read.
     console.error("[theme-repository] could not read overrides", error);
+    return {};
   }
-
-  cache.set(organisationId, { expires: Date.now() + CACHE_TTL_MS, overrides });
-  return overrides;
 }
 
 /**
@@ -124,7 +121,6 @@ export async function writeThemeOverride(
           eq(themeTokens.tokenKey, tokenKey),
         ),
       );
-    invalidateThemeCache(organisationId);
     return;
   }
 
@@ -154,6 +150,4 @@ export async function writeThemeOverride(
       })
       .onConflictDoNothing();
   }
-
-  invalidateThemeCache(organisationId);
 }

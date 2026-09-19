@@ -12,9 +12,12 @@
  * document requests only.** `/api/*` never renders it, and the portal is a shell
  * — `PortalApp` mounts once and everything afterwards is an API call. So this
  * costs one resolution per full page load, a handful of times per session,
- * rather than once per request. The `/api/theme` route and the editor share the
- * same 30-second per-isolate cache in `theme-repository.ts`, so repeated loads
- * inside that window cost nothing at all.
+ * rather than once per request.
+ *
+ * `theme-repository.ts` deliberately does NOT cache the read, and its header
+ * explains why: the per-isolate cache it first carried made a saved colour
+ * invisible on other serverless instances for up to thirty seconds, which reads
+ * as a save that failed. One indexed lookup on a rare path is the better trade.
  *
  * THE TWO EARLY RETURNS ARE THE POINT
  *
