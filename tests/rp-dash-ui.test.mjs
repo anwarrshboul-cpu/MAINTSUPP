@@ -29,6 +29,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { THEME_TOKEN_CATALOGUE } from "../app/lib/theme-tokens.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = async (file) => (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
@@ -342,6 +343,21 @@ test("the stylesheet branches only at the agreed widths", async () => {
   assert.doesNotMatch(css, /@container/, "no container width queries standing in for breakpoints");
 });
 
+/**
+ * The hex a theme token SEEDS for one CSS property, in the dark theme.
+ *
+ * The `--rp-*` accents reference `--chart-*` now, so a workspace that sets its brand
+ * colour sees it on the Reports dashboard. The brief's values are still pinned —
+ * they are the SEED, which is what a workspace that has chosen nothing renders.
+ */
+function seeded(property) {
+  for (const token of THEME_TOKEN_CATALOGUE) {
+    const value = token.seed.dark[property] ?? token.seed.light[property];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 test("it adds the brief's --rp-* tokens and restates none of the shared palette", async () => {
   const css = await read(STYLES);
   /*
@@ -353,18 +369,46 @@ test("it adds the brief's --rp-* tokens and restates none of the shared palette"
    * / grey #ff4d5e / #ffd447 / #38bdf8 / #64707b (was #d34e49 / #e09438 /
    * #5878a4 / #44546c).
    */
+  /*
+   * RE-POINTED AGAIN, and STRENGTHENED. Nine of the twelve reference the theme now,
+   * each pinned twice — the reference, and the seed behind it, still the brief's
+   * approved value. Three stay literals, each for a reason stated below.
+   */
+  for (const [token, source, hex] of [
+    ["--rp-total", "--chart-primary", "#12b4a8"],
+    ["--rp-reactive", "--chart-attention", "#ff8a3d"],
+    ["--rp-planned", "--chart-info", "#38bdf8"],
+    /* Two mode-invariant brand rungs rather than chart rungs: both are pure
+       lightness offsets with no ground, declared once in `globals.css`. */
+    ["--rp-projects", "--brand-light", "#55e8d8"],
+    ["--rp-bar", "--chart-primary", "#12b4a8"],
+    ["--rp-line", "--brand-bright", "#20d8c6"],
+    ["--rp-weekly", "--chart-danger", "#ff4d5e"],
+    ["--rp-fortnightly", "--chart-warning", "#ffd447"],
+    ["--rp-monthly", "--chart-info", "#38bdf8"],
+  ]) {
+    assert.ok(
+      css.includes(`${token}: var(${source});`),
+      `${token} must follow ${source}, or a brand change stops at the chart's edge`,
+    );
+    assert.equal(seeded(source), hex, `${source} must still seed the brief's ${hex}`);
+  }
+
+  /*
+   * THE THREE THAT STAY LITERALS.
+   *
+   * The two area washes are `rgba()` of a hex, and `rgba(var(--x), 0.35)` is not
+   * valid CSS — a custom property cannot be interpolated into a colour function's
+   * channels. This file's own comment already records that the shared `AreaTrend`
+   * derives its wash from the line colour anyway, so these two are declared for
+   * completeness and read by nothing.
+   *
+   * `--rp-less-often` is the "rarely" bucket: an absence of frequency, not a hue,
+   * and the same rule `--cp-other` obeys.
+   */
   for (const [token, value] of [
-    ["--rp-total", "#12b4a8"],
-    ["--rp-reactive", "#ff8a3d"],
-    ["--rp-planned", "#38bdf8"],
-    ["--rp-projects", "#55e8d8"],
-    ["--rp-bar", "#12b4a8"],
-    ["--rp-line", "#20d8c6"],
     ["--rp-area-top", "rgba(18, 180, 168, 0.35)"],
     ["--rp-area-bottom", "rgba(18, 180, 168, 0.03)"],
-    ["--rp-weekly", "#ff4d5e"],
-    ["--rp-fortnightly", "#ffd447"],
-    ["--rp-monthly", "#38bdf8"],
     ["--rp-less-often", "#64707b"],
   ]) {
     assert.ok(css.includes(`${token}: ${value};`), `${token} is ${value}`);

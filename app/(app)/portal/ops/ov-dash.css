@@ -86,12 +86,29 @@
   --ov-text-2: #b8c8ce;
   --ov-text-nav: #b8c8ce;
   --ov-text-muted: #8099a3;
-  --ov-teal: #12b4a8;
-  --ov-orange: #ff8a3d;
-  --ov-amber: #ffd447;
-  --ov-blue: #38bdf8;
-  --ov-green: #25d98b;
-  --ov-red: #ff4d5e;
+  /*
+   * These reference `--chart-*` rather than carrying a literal, and that is what
+   * makes a brand colour reach a chart at all.
+   *
+   * A CSS custom property resolves from the NEAREST ancestor that declares it, so
+   * while `.ov-dash` declared these values itself, a `:root` block emitted by
+   * `resolveThemeCss` could never reach them -- specificity and document order are
+   * both irrelevant to that. `--chart-*` is a set of names this island does NOT
+   * declare, so it resolves from `:root`, where the override lands.
+   *
+   * `--chart-*` is solved against the DARK ground in both themes, because this
+   * island is dark in both -- see `deriveChartRung`. That is the same treatment
+   * `--rail-*` already gets, for the same reason.
+   *
+   * Every value below is byte-identical to the literal it replaced, so nothing
+   * moves for a workspace that has chosen no colour.
+   */
+  --ov-teal: var(--chart-primary);
+  --ov-orange: var(--chart-attention);
+  --ov-amber: var(--chart-warning);
+  --ov-blue: var(--chart-info);
+  --ov-green: var(--chart-success);
+  --ov-red: var(--chart-danger);
   --ov-grey: #64707b;
 
   display: grid;

@@ -40,16 +40,16 @@
 .ov-dash.cp-dash {
   /* Compliance status — the approved palette: compliant green, expiring
      yellow, expired red, missing orange. */
-  --cp-compliant: #25d98b;
-  --cp-expiring: #ffd447;
-  --cp-expired: #ff4d5e;
-  --cp-missing: #ff8a3d;
+  --cp-compliant: var(--chart-success);
+  --cp-expiring: var(--chart-warning);
+  --cp-expired: var(--chart-danger);
+  --cp-missing: var(--chart-attention);
 
   /* Renewal urgency — due soonest orange, then yellow, then blue; grey for
      anything without a date. */
-  --cp-due-30: #ff8a3d;
-  --cp-due-60: #ffd447;
-  --cp-due-90: #38bdf8;
+  --cp-due-30: var(--chart-attention);
+  --cp-due-60: var(--chart-warning);
+  --cp-due-90: var(--chart-info);
   --cp-other: #64707b;
 
   /*

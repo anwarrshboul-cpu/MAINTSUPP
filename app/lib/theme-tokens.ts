@@ -41,8 +41,16 @@
  * token is an accent sitting on a stable ground; a background is the ground, so
  * a bad choice does not degrade one control, it makes the product unreadable and
  * takes the theme editor down with it. They need a preview and a reset-to-safe
- * path before they can be offered, which is a later phase. Typography, spacing,
- * icons and chart palettes are likewise out of scope here.
+ * path before they can be offered, which is a later phase. Typography, spacing
+ * and icons are likewise out of scope here.
+ *
+ * CHART PALETTES ARE NO LONGER OUT OF SCOPE, and this sentence used to say they
+ * were. The always-dark dashboards' accents now come from `--chart-*`, which every
+ * brand and status token below derives alongside its own family — so a workspace
+ * that sets its primary colour sees it in its charts, which is what it would
+ * reasonably have expected all along. See `deriveChartRung` for why those rungs are
+ * mode-independent and why they had to be new names rather than an override of the
+ * island's own.
  */
 
 import { contrastRatio } from "../(app)/portal/chip-ink.ts";
@@ -50,6 +58,7 @@ import {
   AA_TEXT,
   type ThemeMode,
   deriveBrandFamily,
+  deriveChartRung,
   deriveStatusFamily,
   parseHex,
 } from "./theme-colour.ts";
@@ -121,6 +130,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--legacy-teal-500": "#12b5aa",
         "--legacy-teal-600": "#087771",
         "--legacy-teal-700": "#087771",
+        "--chart-primary": "#12b4a8",
       },
       dark: {
         "--brand-primary": "#12b4a8",
@@ -150,9 +160,15 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--legacy-teal-500": "#12b4a8",
         "--legacy-teal-600": "#63aeaa",
         "--legacy-teal-700": "#63aeaa",
+        /* The always-dark dashboards' primary series. One value for both modes —
+           see `deriveChartRung`. */
+        "--chart-primary": "#12b4a8",
       },
     },
-    derive: (hex, mode) => deriveBrandFamily(hex, mode),
+    derive: (hex, mode) => ({
+      ...deriveBrandFamily(hex, mode),
+      ...deriveChartRung("primary", hex),
+    }),
   },
   {
     key: "accent.info",
@@ -166,15 +182,20 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--status-blue-bg": "rgba(56, 189, 248, 0.12)",
         "--status-blue-fg": "#006fa6",
         "--status-blue-wash": "#e7f7fe",
+        "--chart-info": "#38bdf8",
       },
       dark: {
         "--status-blue": "#38bdf8",
         "--status-blue-bg": "rgba(56, 189, 248, 0.12)",
         "--status-blue-fg": "#38bdf8",
         "--status-blue-wash": "#153848",
+        "--chart-info": "#38bdf8",
       },
     },
-    derive: (hex, mode) => deriveStatusFamily("blue", hex, mode),
+    derive: (hex, mode) => ({
+      ...deriveStatusFamily("blue", hex, mode),
+      ...deriveChartRung("info", hex),
+    }),
   },
   {
     key: "status.success",
@@ -188,15 +209,20 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--status-green-bg": "rgba(37, 217, 139, 0.12)",
         "--status-green-fg": "#007a34",
         "--status-green-wash": "#e5faf1",
+        "--chart-success": "#25d98b",
       },
       dark: {
         "--status-green": "#25d98b",
         "--status-green-bg": "rgba(37, 217, 139, 0.12)",
         "--status-green-fg": "#25d98b",
         "--status-green-wash": "#133b3b",
+        "--chart-success": "#25d98b",
       },
     },
-    derive: (hex, mode) => deriveStatusFamily("green", hex, mode),
+    derive: (hex, mode) => ({
+      ...deriveStatusFamily("green", hex, mode),
+      ...deriveChartRung("success", hex),
+    }),
   },
   {
     key: "status.warning",
@@ -210,15 +236,20 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--status-yellow-bg": "rgba(255, 212, 71, 0.12)",
         "--status-yellow-fg": "#8d6400",
         "--status-yellow-wash": "#fffae9",
+        "--chart-warning": "#ffd447",
       },
       dark: {
         "--status-yellow": "#ffd447",
         "--status-yellow-bg": "rgba(255, 212, 71, 0.12)",
         "--status-yellow-fg": "#ffd447",
         "--status-yellow-wash": "#2d3b33",
+        "--chart-warning": "#ffd447",
       },
     },
-    derive: (hex, mode) => deriveStatusFamily("yellow", hex, mode),
+    derive: (hex, mode) => ({
+      ...deriveStatusFamily("yellow", hex, mode),
+      ...deriveChartRung("warning", hex),
+    }),
   },
   {
     key: "status.danger",
@@ -232,15 +263,65 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
         "--status-red-bg": "rgba(255, 77, 94, 0.12)",
         "--status-red-fg": "#ca0134",
         "--status-red-wash": "#ffeaec",
+        "--chart-danger": "#ff4d5e",
       },
       dark: {
         "--status-red": "#ff4d5e",
         "--status-red-bg": "rgba(255, 77, 94, 0.12)",
         "--status-red-fg": "#ff6b77",
         "--status-red-wash": "#2d2b36",
+        "--chart-danger": "#ff4d5e",
       },
     },
-    derive: (hex, mode) => deriveStatusFamily("red", hex, mode),
+    derive: (hex, mode) => ({
+      ...deriveStatusFamily("red", hex, mode),
+      ...deriveChartRung("danger", hex),
+    }),
+  },
+  {
+    /*
+     * THE HUE THE CATALOGUE WAS MISSING.
+     *
+     * `globals.css` has shipped the whole `--status-orange` family since the
+     * palette was approved — base, `-bg`, `-fg` and `-wash`, in both blocks — and
+     * fourteen places read it through `var()`. It carries "reactive work", "missing
+     * certificate" and the 30-day due band on every dashboard. It was the one
+     * shipped status hue a workspace could not set, and nothing but an omission
+     * made it so.
+     */
+    key: "status.attention",
+    label: "Attention",
+    group: "Status",
+    description:
+      "Reactive work, missing paperwork and the nearest due band — the orange series in charts.",
+    seedInput: "#ff8a3d",
+    seed: {
+      light: {
+        "--status-orange": "#dc6a0d",
+        "--status-orange-bg": "rgba(255, 138, 61, 0.12)",
+        "--status-orange-fg": "#b34400",
+        "--status-orange-wash": "#fff1e8",
+        "--chart-attention": "#ff8a3d",
+      },
+      dark: {
+        "--status-orange": "#ff8a3d",
+        "--status-orange-bg": "rgba(255, 138, 61, 0.12)",
+        "--status-orange-fg": "#ff8a3d",
+        "--status-orange-wash": "#2d3232",
+        "--chart-attention": "#ff8a3d",
+      },
+    },
+    /*
+     * `"orange"` is the CSS name and `"attention"` is the series name, and they
+     * differ on purpose. The stylesheet property has been `--status-orange` since
+     * the palette was approved and renaming it would touch fourteen call sites for
+     * no gain; the chart rung is new, so it gets the name that says what it means
+     * rather than what colour it happens to be today.
+     */
+    derive: (hex, mode) => ({
+      ...deriveStatusFamily("orange", hex, mode),
+      ...deriveChartRung("attention", hex),
+    }),
   },
 ] as const;
 

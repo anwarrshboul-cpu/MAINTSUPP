@@ -31,6 +31,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { THEME_TOKEN_CATALOGUE } from "../app/lib/theme-tokens.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = async (file) => (await readFile(path.join(root, file), "utf8")).replace(/\r\n/g, "\n");
@@ -371,6 +372,24 @@ test("the target bars draw a marker at the payload's SLA target", () => {
   assert.match(charts, /<span className="oi-targets__marker" style=\{\{ left: `\$\{marker\}%` \}\} \/>/);
 });
 
+/**
+ * The hex a theme token SEEDS for one CSS property, in the dark theme.
+ *
+ * The dash stylesheets no longer carry the brief's hexes as literals — they
+ * reference `--chart-*` (and two mode-invariant `--brand-*` rungs), so a workspace
+ * that sets its brand colour sees it in its charts. The brief's values did not stop
+ * mattering: they are the SEED, which is what a workspace that has chosen nothing
+ * still renders. This reads them back out of the catalogue so the pins below can
+ * assert both halves — the reference, and the value behind it.
+ */
+function seeded(property) {
+  for (const token of THEME_TOKEN_CATALOGUE) {
+    const value = token.seed.dark[property] ?? token.seed.light[property];
+    if (value) return value;
+  }
+  return undefined;
+}
+
 /* ── The stylesheet ───────────────────────────────────────────────────────── */
 
 test("the stylesheet declares the brief's palette, and repoints the shared tokens at it", () => {
@@ -383,15 +402,53 @@ test("the stylesheet declares the brief's palette, and repoints the shared token
    * card, ground and border values. `--muted` is the approved muted text grey
    * #8099a3 (was #4a5b72) because a muted KPI caption is printed in it.
    */
+  /*
+   * RE-POINTED AGAIN, and STRENGTHENED rather than relaxed.
+   *
+   * The eight accents no longer carry the brief's hexes as literals: they reference
+   * the theme tokens, so a workspace that sets its brand colour sees it in these
+   * charts. That was the whole point of the chart-token phase — a `:root` override
+   * could never reach a property `.ov-dash` declared for itself.
+   *
+   * The brief's values did not stop mattering, so each accent is now pinned TWICE:
+   * the declaration must reference the right token, AND that token's seed must still
+   * carry the brief's approved hex. A regression in either half fails, where the old
+   * single assertion could only catch one.
+   */
+  for (const [token, source, hex] of [
+    ["--accent-primary", "--chart-primary", "#12b4a8"],
+    /* `--brand-light` and `--brand-muted` rather than a `--chart-*` rung: both are
+       pure lightness offsets with no ground, declared once in `globals.css` with no
+       dark override, so they are mode-invariant by construction and safe inside an
+       always-dark island exactly as they are. */
+    ["--accent-secondary", "--brand-light", "#55e8d8"],
+    ["--accent-amber", "--chart-warning", "#ffd447"],
+    ["--accent-critical", "--chart-danger", "#ff4d5e"],
+    ["--accent-blue", "--chart-info", "#38bdf8"],
+    ["--accent-teal-light", "--brand-muted", "#147d77"],
+    ["--accent-green", "--chart-success", "#25d98b"],
+    ["--accent-orange", "--chart-attention", "#ff8a3d"],
+  ]) {
+    assert.match(
+      css,
+      new RegExp(`\\${token}: var\\(\\${source}\\);`),
+      `${token} must follow ${source}, or a brand change stops at the chart's edge`,
+    );
+    assert.equal(
+      seeded(source),
+      hex,
+      `${source} must still SEED the brief's ${hex}, so a workspace that has ` +
+        "chosen nothing renders the approved palette",
+    );
+  }
+
+  /*
+   * Still literals, and each for a stated reason. The grounds and the inks are what
+   * every derived value is measured AGAINST — make them configurable and every
+   * contrast solve in the product becomes wrong — and `--muted` is an absence
+   * rather than a hue.
+   */
   for (const [token, hex] of [
-    ["--accent-primary", "#12b4a8"],
-    ["--accent-secondary", "#55e8d8"],
-    ["--accent-amber", "#ffd447"],
-    ["--accent-critical", "#ff4d5e"],
-    ["--accent-blue", "#38bdf8"],
-    ["--accent-teal-light", "#147d77"],
-    ["--accent-green", "#25d98b"],
-    ["--accent-orange", "#ff8a3d"],
     ["--muted", "#8099a3"],
     ["--text-primary", "#f5fafc"],
     ["--text-secondary", "#b8c8ce"],

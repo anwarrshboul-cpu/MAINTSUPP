@@ -82,6 +82,41 @@
   --status-red-wash: #ffeaec;
   --status-blue-wash: #e7f7fe;
 
+  /*
+   * ===========================================================================
+   * CHART SERIES — the always-dark dashboards' accents, on :root where an
+   * override can reach them.
+   *
+   * WHY THESE EXIST AT ALL. The four Operations-Centre dashboards are a
+   * deliberately always-dark island: `ops/ov-dash.css` sets `color-scheme: dark`
+   * on `.ov-dash` and declares its own grounds there. It also used to declare its
+   * own accents there, and that is what made the brand colours stop at the edge
+   * of a chart. A CSS custom property resolves from the NEAREST ancestor that
+   * declares it, so a `:root` override emitted by `resolveThemeCss` can never
+   * reach a property `.ov-dash` declares for itself -- specificity and document
+   * order are both irrelevant. These are a new set of names the island does NOT
+   * declare, so the island references them and the override is what they resolve
+   * to.
+   *
+   * DECLARED ONCE, WITH NO DARK COUNTERPART, exactly as `--rail-*` is and for the
+   * same reason: the surface is always dark, so a light-theme value would be
+   * solved against the wrong ground. `deriveChartRung` takes no mode.
+   *
+   * THE VALUES ARE THE SHIPPED PALETTE, UNCHANGED. Each is
+   * `solveForContrast(base, #102630, 3)` -- `AA_FILL`, because a series is a
+   * graphical object rather than text -- and every shipped base already clears it
+   * with room (4.83:1 for danger, 11:1 for warning), so the solve returns the base
+   * untouched. A workspace that has chosen nothing sees precisely what it saw
+   * before.
+   * ===========================================================================
+   */
+  --chart-primary: #12b4a8;
+  --chart-info: #38bdf8;
+  --chart-success: #25d98b;
+  --chart-warning: #ffd447;
+  --chart-danger: #ff4d5e;
+  --chart-attention: #ff8a3d;
+
   --text-primary: #132537;
   --text-secondary: #4e5f6f;
   --text-muted: #64707b;

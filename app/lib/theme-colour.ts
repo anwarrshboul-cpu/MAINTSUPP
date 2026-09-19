@@ -344,6 +344,67 @@ export function deriveBrandFamily(base: string, mode: ThemeMode): BrandFamily {
   };
 }
 
+/**
+ * THE CHART RUNG, AND WHY IT IS MODE-INDEPENDENT.
+ *
+ * The four Operations-Centre dashboards are a deliberately always-dark island:
+ * `.ov-dash` in `ops/ov-dash.css` sets `color-scheme: dark` and declares its own
+ * grounds, and its header says why — "its accents are chosen against a near-black
+ * card and would fail contrast against a white one". That island is dark whichever
+ * theme the document is in.
+ *
+ * So a chart colour cannot take the document's mode. A light-mode value is solved
+ * against `MODE_GROUND.light` (`#ffffff`), and inside the island the real ground is
+ * `MODE_GROUND.dark` (`#102630`) — which happens to be `--ov-card` exactly. A value
+ * that clears 3:1 on white can be far under it on `#102630`, so using the
+ * light-derived value there would ship a chart that measures as compliant and is
+ * not.
+ *
+ * `deriveChromeFamily` above already solved this problem for the navigation rail,
+ * in the same words: "The rail is always a dark surface, so everything here is
+ * measured against the dark ground." A chart is the second always-dark surface, so
+ * it gets the same treatment, and `globals.css` declares `--chart-*` once on the
+ * bare `:root` with no dark override, exactly as it does for `--rail-*`.
+ *
+ * WHY THE DECLARATIONS LIVE ON `:root` AND NOT ON `.ov-dash`.
+ *
+ * This is the part that decides whether the feature works at all. A CSS custom
+ * property resolves from the NEAREST ancestor that declares it — specificity and
+ * document order are irrelevant. `.ov-dash` declares `--ov-teal` and friends, so a
+ * `:root { --ov-teal: … }` emitted by `resolveThemeCss` could never reach inside
+ * the island. `--chart-*` is a NEW name that the island does not declare, so the
+ * island's own rules reference it (`--ov-teal: var(--chart-primary)`) and the
+ * override on `:root` is what they resolve to.
+ *
+ * WHY 3:1 AND NOT 4.5:1.
+ *
+ * A series colour is a graphical object, not text — WCAG SC 1.4.11, which is
+ * `AA_FILL`. And it is not carrying the meaning alone: `dashboard-insights.tsx`
+ * states that every chart is drawn "always with a legend and direct labels rather
+ * than colour alone", `ops-tokens.css` says legibility on a bar "is carried by
+ * structure", and `tests/stage-eighteen-insights.test.mjs` pins that. Solving a
+ * series at 4.5:1 would drag every hue toward the extremes and make adjacent
+ * series harder to tell apart, which is the opposite of the goal.
+ *
+ * There is no `-fg` and no `-wash` rung. A chart series has no text on it — where a
+ * number does sit on a slice, the ink is measured by `chipInk` against that slice.
+ */
+export type ChartFamily = Record<string, string>;
+
+/**
+ * One chart series colour, solved against the dark ground in both modes.
+ *
+ * `name` is the series' meaning, not its hue: `primary`, `success`, `warning`,
+ * `danger`, `info`, `attention`. A caller passes the same base the matching
+ * brand or status token was given, so a workspace sets one colour and both the
+ * badge and the series follow it.
+ */
+export function deriveChartRung(name: string, base: string): ChartFamily {
+  /* `MODE_GROUND.dark` rather than `MODE_GROUND[mode]`, and the function takes no
+     mode at all so a caller cannot pass one by mistake. */
+  return { [`--chart-${name}`]: solveForContrast(base, MODE_GROUND.dark, AA_FILL) };
+}
+
 /** Every CSS custom property one status hue paints, for one mode. */
 export type StatusFamily = Record<string, string>;
 

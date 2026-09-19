@@ -168,17 +168,27 @@ export function BrandColoursPanel() {
               : "Applies to everyone in this workspace. You do not have permission to change these."}
           </p>
           {/*
-           * Said on the screen rather than only in a release note. These colours
-           * repaint the navigation, buttons, links, logo, badges and status
-           * chips, but NOT the charts and meters: those draw from palettes held
-           * in TypeScript rather than from these tokens, and consolidating them
-           * is its own piece of work. Letting somebody change their brand and
-           * then wonder why the donut is still teal would be the "configuration
-           * that does not affect components" this product is not allowed to ship.
+           * THIS SENTENCE USED TO SAY THE OPPOSITE, and the change is the whole of
+           * the chart-token phase.
+           *
+           * It read: "Charts and meters keep the MAINTSUPP palette for now — they
+           * are drawn from their own colour set, which is not yet configurable
+           * here." That was true and it was also the "configuration that does not
+           * affect components" this product is not allowed to ship — somebody
+           * changed their brand and the donut stayed teal.
+           *
+           * The dashboards now read `--chart-*`, which every brand and status token
+           * derives alongside its own family, so the series follow. What still does
+           * not follow is named below rather than left for somebody to discover: the
+           * greys that mean "not recorded", and the two ordinal ramps, which need a
+           * derivation this product does not have yet. Naming them is the honest
+           * half of the claim.
            */}
           <p className="brand-colours__scope">
-            Charts and meters keep the MAINTSUPP palette for now — they are drawn
-            from their own colour set, which is not yet configurable here.
+            The dashboard charts follow these colours too. Two things deliberately
+            do not: the greys that mean “not recorded”, so an absence can never be
+            mistaken for a category, and the graded teal scales on the spend
+            matrix.
           </p>
         </div>
       </div>
