@@ -178,16 +178,26 @@ test("the expected production URLs are stated as constants, and are overridable"
    * and — the part the old version could not see — they actually reach the
    * verdict. A constant that is declared and never used would have passed.
    */
+  /*
+   * RE-POINTED AGAIN, and only in which domain is primary.
+   *
+   * This pinned www as `EXPECTED_PRODUCTION` and the apex as the alternate, which
+   * was right while www was the production host. Measured on the live project:
+   * `maintsupp.com` carries no redirect and `www.maintsupp.com` 308s to it, so the
+   * apex is primary and www is the other domain. The three properties this test is
+   * actually about -- named constants with real defaults, overridable, and actually
+   * reaching the verdict -- are unchanged.
+   */
   const source = await load(SCRIPT);
   assert.match(
     source,
-    /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/www\.maintsupp\.com\}"/,
+    /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/maintsupp\.com\}"/,
     "the canonical domain is a named constant with a real default",
   );
   assert.match(
     source,
-    /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-https:\/\/maintsupp\.com\}"/,
-    "and so is the apex, which is the same project",
+    /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-https:\/\/www\.maintsupp\.com\}"/,
+    "and so is www, which redirects to it and is the same project",
   );
   assert.match(
     source,
