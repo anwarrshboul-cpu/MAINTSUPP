@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { attachments, maintenanceRequests } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { demoIdentityAllowed } from "../../../lib/tenant-access";
 import {
   DEFAULT_EXPIRY_DAYS,
@@ -37,7 +37,9 @@ function unavailable(error?: unknown) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const requestId = text(url.searchParams.get("requestId"), 64);
     if (!requestId) return bad("A job id is required.");

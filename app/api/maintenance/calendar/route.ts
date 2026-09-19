@@ -49,7 +49,7 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { calendarEvents } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { databaseSafeFailure } from "../../../lib/database-failure";
 
 /**
@@ -261,7 +261,9 @@ const failure = (error: unknown, fallback: string) =>
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const { db, orgId } = viewGuard.scope;
     const url = new URL(request.url);
     const withArchived = url.searchParams.get("archived") === "include";
     const withDeleted = url.searchParams.get("deleted") === "include";

@@ -1,16 +1,31 @@
 import { desc, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { notificationLog } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { replayFailed } from "../../../lib/notifications";
 
 export const dynamic = "force-dynamic";
 
-/** GET /api/notifications/replay — the delivery log, newest first. */
+/**
+ * GET /api/notifications/replay — the delivery log, newest first.
+ *
+ * `settings.edit`, the same capability the POST below already requires, and the
+ * asymmetry it corrects was precise: replaying a notification was an operator
+ * act, while READING the log — every address this workspace has ever notified,
+ * every subject line, and every delivery error — asked for nothing beyond a
+ * membership. A `client` could not retry a message but could enumerate the
+ * recipients.
+ *
+ * Nothing in the product calls this route, so no screen loses anything; it is
+ * reached by hand, by whoever is diagnosing delivery, and that is the person
+ * `settings.edit` describes.
+ */
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "settings.edit");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const rows = await db
       .select()
       .from(notificationLog)

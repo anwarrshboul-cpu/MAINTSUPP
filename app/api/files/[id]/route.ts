@@ -348,9 +348,15 @@ export async function GET(
    * confined to three stores must not download the photographs, invoices or
    * certificates filed against a fourth.
    *
-   * Only a document that names a site or an asset is checked. One that names
-   * neither — a contractor's insurance certificate, a job's evidence — is not
-   * about a site, and a restriction on sites has nothing to say about it.
+   * A document that names a site, an asset OR A JOB is checked — the job
+   * because it happens at a site, so its evidence is a site's document reached
+   * one hop sideways. This paragraph used to say a job's evidence "is not about
+   * a site", which let a member confined to three stores download the before
+   * and after photographs of a job at a fourth. See `outsideSiteScope`.
+   *
+   * A document naming none of the three — a contractor's insurance certificate
+   * — really is not about a site, and a restriction on sites still has nothing
+   * to say about it.
    *
    * Same 404 as a missing file, deliberately: a refusal that said "forbidden"
    * would confirm the document exists.
@@ -550,17 +556,35 @@ async function archiveInstead(denied: Response) {
 /**
  * Whether this document belongs to a site the caller may not reach.
  *
- * Two anchors, one question. `site_id` is the direct one; `unit_id` is resolved
- * through the asset, because an asset's photographs carry the asset and often
- * the site, and either alone has to be enough to refuse.
+ * THREE anchors, one question. `site_id` is the direct one; `unit_id` is
+ * resolved through the asset, because an asset's photographs carry the asset
+ * and often the site; and `request_id` is resolved through the job, because a
+ * job happens AT a site.
  *
- * Returns false for a document anchored to neither — see the call site.
+ * THE JOB ANCHOR WAS MISSING, AND THAT WAS THE HOLE.
+ *
+ * This function used to check two anchors, and both this call site and the
+ * listing in `../route.ts` justified the omission the same way: a document
+ * naming neither a site nor an asset — "a contractor's insurance certificate, a
+ * job's evidence" — "is not about a site, and a restriction on sites has
+ * nothing to say about it".
+ *
+ * Half of that is right and half of it is not. A contractor's insurance
+ * certificate genuinely is not about a site. **A job's evidence is**:
+ * `maintenance_requests.site_id` exists (`db/schema.ts:683`), so the before and
+ * after photographs of a job at a fourth store are a site's documents reached
+ * one hop sideways. A member confined to three stores could read them, which is
+ * precisely what the site restriction exists to prevent.
+ *
+ * So the job is resolved too. `site_id` on a job is nullable, and a job with no
+ * site still falls through to allowed — a restriction on sites really does have
+ * nothing to say about a job that names none.
  */
 async function outsideSiteScope(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
   siteScope: string[],
-  record: { siteId: string | null; unitId: string | null },
+  record: { siteId: string | null; unitId: string | null; requestId: string | null },
 ): Promise<boolean> {
   if (record.siteId) return !siteScope.includes(record.siteId);
   if (record.unitId) {
@@ -572,6 +596,24 @@ async function outsideSiteScope(
     /* An asset that does not resolve is not proof of permission. */
     if (!asset) return true;
     return !siteScope.includes(asset.siteId);
+  }
+  if (record.requestId) {
+    const [job] = await db
+      .select({ siteId: maintenanceRequests.siteId })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.id, record.requestId),
+          eq(maintenanceRequests.organisationId, orgId),
+        ),
+      )
+      .limit(1);
+    /* A job that does not resolve is not proof of permission — the same rule
+       the asset branch applies, for the same reason. */
+    if (!job) return true;
+    /* A job with no site is genuinely not about one. */
+    if (!job.siteId) return false;
+    return !siteScope.includes(job.siteId);
   }
   return false;
 }

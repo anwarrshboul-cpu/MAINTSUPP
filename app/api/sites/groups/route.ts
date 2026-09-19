@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getD1 } from "../../../../db";
 import { ensureDatabase, seedStoreDocumentationGroups } from "../../../../db/init";
 import { siteGroupMembers, siteGroups } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { can, resolvePermissions } from "../../../lib/permissions";
 import type { WorkspaceRole } from "../../../lib/workspace-actor";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
@@ -29,7 +29,9 @@ function colour(value: unknown, fallback: string) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, db, orgId, siteScope } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { actor, db, orgId, siteScope } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
       orgId,

@@ -46,7 +46,7 @@ import {
   sectionViewPreferences,
   workspaceSections,
 } from "../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability, type ScopedDatabase } from "../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability, type ScopedDatabase } from "../../lib/tenant-db";
 import { auditActor, recordAudit } from "../../lib/audit";
 import {
   DEFAULT_ICON,
@@ -226,7 +226,9 @@ async function nextPosition(context: ScopedDatabase) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const context = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const context = viewGuard.scope;
     const sections = await loadWorkspaceSections(context.db, context.orgId);
     const guard = await scopedDbWithCapability(request, SECTION_ADMIN);
     return Response.json({

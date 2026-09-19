@@ -623,9 +623,14 @@ async function logChange(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    /* `actor` is read for one purpose: the repair below writes an activity_log
-       row, and an audit entry with no author is worth very little. */
-    const { actor, db, orgId, siteScope } = await scopedDb(request);
+    /* `actor` used to be destructured here, with a note saying the repair below
+       needed an author for its `activity_log` row. That repair no longer writes:
+       this handler only READS `activity_log`, so nothing wanted the name and the
+       binding sat unused behind a comment claiming otherwise. Dropped along with
+       the claim, on the line this batch was already changing. */
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     /*
      * The member's authorised sites. Every read below — the aggregate, one

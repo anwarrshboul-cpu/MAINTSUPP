@@ -39,7 +39,12 @@ import {
  * no React, no hooks, no component — which is the property those suites rely on.
  */
 import { COMPLETED_STAGE, completedStatuses } from "../../(app)/portal/dashboard-meters";
-import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import {
+  PRIMARY_ORGANISATION_ID,
+  anonymousRefusal,
+  scopedDb,
+  scopedDbWithCapability,
+} from "../../lib/tenant-db";
 import { getContractor, listContractors } from "../../lib/contractor-repository";
 import {
   CANONICAL_REGISTER,
@@ -93,6 +98,7 @@ import {
 } from "../../lib/workspace-data";
 import {
   type Capability,
+  can,
   requireCapability,
   resolvePermissions,
 } from "../../lib/permissions";
@@ -604,6 +610,42 @@ const liveWorkOrder = (orgId: string) =>
  * for. (The team roster's own exposure to a `client` is a separate,
  * pre-existing question about capabilities, recorded in this batch's report.)
  */
+/**
+ * The staff directory, withheld from a reader who may not see people.
+ *
+ * WHY THIS IS NOT A CAPABILITY ON THE ROUTE.
+ *
+ * This is the dashboard's primary read — `portal-app.tsx` calls it to paint the
+ * workspace — so every role must reach it, and `board.view` is the gate that
+ * says so. But the snapshot carries `team`: every user row in the organisation
+ * with `email`, `role` and `lastActive`, which `confineSnapshot` deliberately
+ * does not filter because a SITE restriction has nothing to say about a roster.
+ * Its comment said as much and recorded the exposure as "a separate,
+ * pre-existing question about capabilities". This is the answer to that
+ * question.
+ *
+ * So the door stays open and the payload narrows. Putting `users.view` on the
+ * route instead would blank the dashboard for a `client`, and — worse —
+ * permanently for a `manager`, because `ROLE_CEILINGS` in `app/lib/permissions.ts`
+ * makes `users.view` unholdable by that role whatever the matrix says. A fix no
+ * Super Admin can undo is not a fix.
+ *
+ * `activity` keeps its entries and loses `actorEmail` for the same reader: the
+ * feed's job is to say what happened to the workspace, and it can do that
+ * without naming colleagues to somebody who may not see the roster.
+ */
+function withoutDirectory(
+  snapshot: WorkspaceSnapshot,
+  maySeePeople: boolean,
+): WorkspaceSnapshot {
+  if (maySeePeople) return snapshot;
+  return {
+    ...snapshot,
+    team: [],
+    activity: snapshot.activity.map((entry) => ({ ...entry, actorEmail: null })),
+  };
+}
+
 function confineSnapshot(snapshot: WorkspaceSnapshot, siteScope: string[] | null): WorkspaceSnapshot {
   const allowed = memberSiteSet(siteScope);
   if (!allowed) return snapshot;
@@ -1289,8 +1331,12 @@ async function logChange(db: WorkspaceDb, orgId: string, entity: WorkspaceEntity
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId, siteScope } = await scopedDb(request);
-    return Response.json({ workspace: confineSnapshot(await readWorkspace(db, orgId), siteScope) });
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const { actor, db, orgId, siteScope } = viewGuard.scope;
+    const snapshot = confineSnapshot(await readWorkspace(db, orgId), siteScope);
+    const subject = await resolvePermissions(db, orgId, actor.role);
+    return Response.json({ workspace: withoutDirectory(snapshot, can(subject, "users.view")) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);

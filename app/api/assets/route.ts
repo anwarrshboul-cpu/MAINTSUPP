@@ -66,7 +66,6 @@ import {
 import {
   anonymousRefusal,
   busyRefusal,
-  scopedDb,
   scopedDbWithCapability,
   type ScopedDatabase,
 } from "../../lib/tenant-db";
@@ -585,7 +584,9 @@ async function referenceData(db: Db, orgId: string, siteScope: string[] | null) 
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId, siteScope } = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const { db, orgId, siteScope } = viewGuard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 120);
     const siteId = text(url.searchParams.get("siteId"), 120);

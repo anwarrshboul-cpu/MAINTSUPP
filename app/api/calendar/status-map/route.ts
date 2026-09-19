@@ -21,7 +21,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { jobStatusMap, maintenanceRequests } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { databaseSafeFailure } from "../../../lib/database-failure";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +41,9 @@ function colour(value: unknown): string | null {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
 
     const mappings = await db
       .select()

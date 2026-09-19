@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { maintenanceBoardCells, maintenanceBoardColumns } from "../../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
 import { resolveBoard } from "../../../lib/board-registry";
 import { RETENTION_DAYS, sendColumnToBin } from "../../../lib/recycle-bin";
@@ -50,7 +50,9 @@ function keyFrom(title: string) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const board = await resolveBoard(db, orgId, url.searchParams.get("board") ?? undefined);
 

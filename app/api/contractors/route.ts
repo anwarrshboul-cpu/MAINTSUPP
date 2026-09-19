@@ -51,7 +51,7 @@ import {
   contractorCertifications,
   maintenanceRequests,
 } from "../../../db/schema";
-import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 import {
   aliasesByContractor,
   linkedContractorIds,
@@ -91,7 +91,9 @@ function parseStringArray(value: string | null) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const { db, orgId } = viewGuard.scope;
 
     const url = new URL(request.url);
     const named = url.searchParams.get(SCOPE_PARAM);

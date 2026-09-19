@@ -187,12 +187,31 @@ export async function GET(request: Request) {
       loadPeople(scope.db, scope.orgId),
       resolvePermissions(scope.db, scope.orgId, scope.actor.role),
     ]);
+    /*
+     * `people` IS THE DIRECTORY, AND ONLY ONE CONTROL USES IT.
+     *
+     * The teams themselves stay legible to everyone, and the module's own note
+     * above says why: "a rota is meant to be legible", and a client seeing who
+     * maintains their sites is the point of the screen.
+     *
+     * `people` is a different list. It is every active membership in the
+     * workspace with an email and a role — not "who maintains my sites" but the
+     * staff directory — and it exists for exactly one thing: the picker that
+     * adds somebody to a team. Only a `teams.manage` holder can use that picker,
+     * and the routes below already refuse everyone else. So the list was served
+     * to every member to populate a control none of them could operate.
+     *
+     * Withheld in the payload rather than at the door, for the same reason as
+     * `board/members`: gating the route would take the rota away from a client,
+     * and `ROLE_CEILINGS` would take it away from a manager permanently.
+     */
+    const mayManage = can(subject, MANAGE);
     return Response.json({
       organisation: { id: scope.organisation.id, name: scope.organisation.name },
       // The screen hides its controls from this; the routes below enforce it.
-      canManage: can(subject, MANAGE),
+      canManage: mayManage,
       teams: list,
-      people,
+      people: mayManage ? people : [],
     });
   } catch (error) {
     return unavailable(error);
