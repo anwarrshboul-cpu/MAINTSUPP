@@ -120,15 +120,41 @@ export async function GET(request: Request) {
     const me = scope.identityEmail.toLowerCase();
     return Response.json({
       organisation: { id: scope.organisation.id, name: scope.organisation.name },
-      members: rows.map((row) => ({
-        id: row.id,
-        email: row.email,
-        name: row.fullName?.trim() || row.email,
-        role: row.role,
-        title: row.jobTitle,
-        avatarColour: row.avatarColour,
-        isMe: row.email.toLowerCase() === me,
-      })),
+      /*
+       * THE ADDRESS IS WITHHELD FROM A READER WHO MAY NOT SEE PEOPLE.
+       *
+       * The roster itself stays open to every member, and deliberately: this is
+       * the Assigned-To cell's only source of names, it fires on every board
+       * render, and a `client` holds `board.view` and renders the board. Putting
+       * `users.view` on the route would give them a picker that 403s — and would
+       * do it permanently to a `manager`, who needs to assign work and whom
+       * `ROLE_CEILINGS` bars from ever holding `users.view`.
+       *
+       * What a picker needs is an id, a name and a colour. It does not need
+       * everybody's email address, which is what made this the workspace
+       * directory rather than a list of who can be assigned. So the field goes,
+       * and only for callers without `users.view`.
+       *
+       * `name` already falls back to the address when somebody has no full name
+       * — an account that has been invited and not yet completed. Falling back
+       * to the role instead would be a worse name and the same disclosure, so
+       * the fallback becomes a neutral placeholder.
+       *
+       * `isMe` is computed from the row before it is narrowed, so the caller can
+       * still recognise themselves in a list that no longer carries addresses.
+       */
+      members: rows.map((row) => {
+        const isMe = row.email.toLowerCase() === me;
+        return {
+          id: row.id,
+          email: canViewPeople || isMe ? row.email : null,
+          name: row.fullName?.trim() || (canViewPeople || isMe ? row.email : "Unnamed member"),
+          role: row.role,
+          title: row.jobTitle,
+          avatarColour: row.avatarColour,
+          isMe,
+        };
+      }),
       pending,
       canInvite,
       inviteAs,

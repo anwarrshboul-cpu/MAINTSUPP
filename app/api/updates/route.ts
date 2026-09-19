@@ -82,7 +82,9 @@ export async function GET(request: Request) {
   let orgId: string;
   let actor: Awaited<ReturnType<typeof scopedDb>>["actor"];
   try {
-    ({ db, orgId, actor } = await scopedDb(request));
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    ({ db, orgId, actor } = viewGuard.scope);
   } catch (error) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;

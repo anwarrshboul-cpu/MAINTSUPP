@@ -28,7 +28,6 @@ import { BOARD_IDS, type BoardId } from "../../../lib/automations/store";
 import { DEFAULT_BOARD_KEY, isBoardNotFound, resolveBoard } from "../../../lib/board-registry";
 import {
   anonymousRefusal,
-  scopedDb,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
 
@@ -184,7 +183,9 @@ async function boardIdFrom(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const boardId = await boardIdFrom(request, db, orgId);
     const record = await loadForm(db, orgId, boardId);
     /*

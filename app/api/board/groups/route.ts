@@ -51,7 +51,9 @@ async function countItems(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const board = await resolveBoard(db, orgId, url.searchParams.get("board") ?? undefined);
 

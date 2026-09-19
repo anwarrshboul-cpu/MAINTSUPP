@@ -243,6 +243,41 @@ const MAX_FAILURES = 5;
 const LOCKOUT_MS = 15 * 60_000;
 
 /*
+ * THE SECOND COUNTER, KEYED ON THE ADDRESS ALONE.
+ *
+ * The paragraph above rejects keying on email alone, and it is right about the
+ * case it describes: at five attempts and a fifteen-minute lockout, an
+ * address-only key hands anybody a way to lock a colleague out by typing their
+ * email wrong on purpose. That reasoning stands and the counter above is
+ * unchanged.
+ *
+ * What it leaves open is the other direction. Because the key carries the IP,
+ * an attacker spread across N addresses gets 5N attempts per fifteen minutes
+ * against ONE account, and N is cheap. With no MFA, no CAPTCHA and an
+ * eight-entry blocklist, that is the most realistic route to a takeover in this
+ * product.
+ *
+ * So there is a second counter, and the numbers are what make it safe rather
+ * than the key: **thirty failures an hour, and sixty seconds**. The trade is
+ * deliberately lopsided.
+ *
+ *   - For an attacker it is the difference between 5N guesses per quarter hour
+ *     and thirty per hour however many addresses they rent. That is the whole
+ *     point: the cap stops scaling with their budget.
+ *   - For somebody being harassed it is at worst a minute's wait, and only
+ *     after thirty wrong attempts in an hour. A fifteen-minute lockout after
+ *     five is a denial-of-service tool; a one-minute pause after thirty is not,
+ *     and calling both "keying on email" would flatten a real difference.
+ *
+ * It is a mitigation, not a cure. Thirty guesses an hour still breaks a weak
+ * password eventually, and the honest fix for credential stuffing is MFA, which
+ * this product does not have yet. This buys time and bounds the damage.
+ */
+const ACCOUNT_WINDOW_MS = 60 * 60_000;
+const ACCOUNT_MAX_FAILURES = 30;
+const ACCOUNT_LOCKOUT_MS = 60_000;
+
+/*
  * Pruning is probabilistic, roughly one write in twenty.
  *
  * The table is fed by attacker-chosen emails, so it has to be bounded, but a
@@ -257,15 +292,22 @@ function failureKey(email: string, ip: string) {
   return `${normaliseEmail(email)}|${ip}`;
 }
 
-/** Seconds the caller must wait, or 0 when they may try now. */
-export async function signInRetryAfter(
-  d1: D1DatabaseLike,
-  email: string,
-  ip: string,
-): Promise<number> {
+/**
+ * The address-only key, which cannot collide with the per-IP one.
+ *
+ * `failureKey` is `<email>|<ip>`, and an email always contains `@`, so no
+ * address-and-IP pair can ever produce the string `account|<email>`. The two
+ * key spaces share one table without a prefix column because they share every
+ * other property — same window arithmetic, same pruning, same failure mode.
+ */
+function accountKey(email: string) {
+  return `account|${normaliseEmail(email)}`;
+}
+
+async function blockedSeconds(d1: D1DatabaseLike, key: string): Promise<number> {
   const row = (await d1
     .prepare("SELECT blocked_until FROM sign_in_failures WHERE key = ?")
-    .bind(failureKey(email, ip))
+    .bind(key)
     .first()
     .catch(() => null)) as { blocked_until?: number | null } | null;
 
@@ -274,14 +316,41 @@ export async function signInRetryAfter(
   return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
 }
 
-export async function recordSignInFailure(
+/**
+ * Seconds the caller must wait, or 0 when they may try now.
+ *
+ * The longer of the two counters wins. Both are read before the password is
+ * verified, so neither lets an attacker spend the server's 210,000-iteration
+ * derivations.
+ */
+export async function signInRetryAfter(
   d1: D1DatabaseLike,
   email: string,
   ip: string,
-) {
-  const now = Date.now();
-  const key = failureKey(email, ip);
+): Promise<number> {
+  const [perIp, perAccount] = await Promise.all([
+    blockedSeconds(d1, failureKey(email, ip)),
+    blockedSeconds(d1, accountKey(email)),
+  ]);
+  return Math.max(perIp, perAccount);
+}
 
+/**
+ * Bump one counter by one failure.
+ *
+ * Extracted so the per-IP and per-address counters cannot drift apart: they are
+ * the same arithmetic with different numbers, and two copies of a CASE ladder
+ * this fiddly is two chances to get the window restart wrong in only one of
+ * them.
+ */
+async function bumpFailureCounter(
+  d1: D1DatabaseLike,
+  key: string,
+  now: number,
+  windowMs: number,
+  maxFailures: number,
+  lockoutMs: number,
+) {
   /*
    * One statement, so the read-modify-write cannot interleave.
    *
@@ -312,7 +381,7 @@ export async function recordSignInFailure(
            ELSE sign_in_failures.blocked_until
          END`,
     )
-    .bind(key, now, FAILURE_WINDOW_MS, MAX_FAILURES, LOCKOUT_MS)
+    .bind(key, now, windowMs, maxFailures, lockoutMs)
     .run()
     .catch(() => {
       // A throttling write that fails must not take sign-in down with it. The
@@ -320,6 +389,34 @@ export async function recordSignInFailure(
       // lost is the counting, and losing that is better than locking every
       // account out of a working system.
     });
+}
+
+export async function recordSignInFailure(
+  d1: D1DatabaseLike,
+  email: string,
+  ip: string,
+) {
+  const now = Date.now();
+
+  /* Both counters, every failure. Sequential rather than concurrent: they are
+     two writes to one table and the second is cheap, whereas two in-flight
+     statements on one D1 handle buy nothing here. */
+  await bumpFailureCounter(
+    d1,
+    failureKey(email, ip),
+    now,
+    FAILURE_WINDOW_MS,
+    MAX_FAILURES,
+    LOCKOUT_MS,
+  );
+  await bumpFailureCounter(
+    d1,
+    accountKey(email),
+    now,
+    ACCOUNT_WINDOW_MS,
+    ACCOUNT_MAX_FAILURES,
+    ACCOUNT_LOCKOUT_MS,
+  );
 
   if (Math.random() < PRUNE_CHANCE) {
     await d1
@@ -327,21 +424,34 @@ export async function recordSignInFailure(
         `DELETE FROM sign_in_failures
          WHERE blocked_until < ?1 AND ?1 - first_at > ?2`,
       )
-      .bind(now, FAILURE_WINDOW_MS)
+      /* The LONGER of the two windows, so the sweep cannot collect a live
+         per-address row. Those count over an hour; pruning on the per-IP
+         fifteen minutes would delete a twenty-minute-old row that is still
+         accumulating and silently reset the attacker's budget. Collecting late
+         is a storage question, as the note above says; collecting early is a
+         correctness one. */
+      .bind(now, ACCOUNT_WINDOW_MS)
       .run()
       .catch(() => {});
   }
 }
 
-/** Clears the counter. Called on success, so normal use never accumulates. */
+/**
+ * Clears both counters. Called on success, so normal use never accumulates.
+ *
+ * The per-address counter is cleared too, and that is what stops this being a
+ * denial-of-service tool: somebody typing another person's address wrongly
+ * thirty times buys a minute, and the moment the real owner signs in the count
+ * is gone. A correct password always resets the budget it never spent.
+ */
 export async function clearSignInFailures(
   d1: D1DatabaseLike,
   email: string,
   ip: string,
 ) {
   await d1
-    .prepare("DELETE FROM sign_in_failures WHERE key = ?")
-    .bind(failureKey(email, ip))
+    .prepare("DELETE FROM sign_in_failures WHERE key IN (?, ?)")
+    .bind(failureKey(email, ip), accountKey(email))
     .run()
     .catch(() => {});
 }

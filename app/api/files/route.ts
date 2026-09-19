@@ -24,6 +24,7 @@ import {
 } from "../../../db/schema";
 import { boardKeyForRequest } from "../../lib/board-registry";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { requireCapability, resolvePermissions } from "../../lib/permissions";
 import { auditActor, recordAudit } from "../../lib/audit";
 import {
   kindForColumnKey,
@@ -268,7 +269,27 @@ async function listFiles(request: Request) {
    * A contractor does not need this endpoint: the share link returns the
    * photographs for its own job.
    */
-  const { db, orgId, siteScope } = await scopedDb(request);
+  /*
+   * `board.view`, resolved the long way round ON PURPOSE.
+   *
+   * The obvious spelling is `scopedDbWithCapability(request, "board.view")`, and
+   * `tests/workstream-seven-official-upload-authority.test.mjs` (W07-01) refuses
+   * it for this file — correctly. The POST in this same module serves CONTRACTOR
+   * and PUBLIC-FORM uploads that carry a token and no session, and
+   * `scopedDbWithCapability` throws for an anonymous caller rather than
+   * returning a refusal. The test guards the whole file because the cost of that
+   * helper appearing on the upload path is an outage for callers this route has
+   * to keep serving.
+   *
+   * The listing does not serve anonymous callers — it never did — so it can ask
+   * the same question in two steps instead, which is exactly what
+   * `app/api/audit/route.ts` does. Same enforcement, and the file keeps the
+   * property the upload path depends on.
+   */
+  const { db, orgId, siteScope, actor } = await scopedDb(request);
+  const subject = await resolvePermissions(db, orgId, actor.role);
+  const refusal = requireCapability(subject, "board.view");
+  if (refusal) return refusal;
 
   /*
    * THE MEMBERSHIP'S SITE RESTRICTION REACHES THE DOCUMENTS, NOT ONLY THE ROWS.
@@ -284,9 +305,18 @@ async function listFiles(request: Request) {
    * a join, because this `where` is reused by the count query below and a join
    * would have to be repeated identically in two places to stay true.
    *
-   * A document with NEITHER anchor — a contractor's insurance certificate, a
-   * job's evidence — is deliberately untouched: it is not about a site, and a
-   * restriction on sites has nothing to say about it.
+   * THREE anchors are narrowed, not two. The job anchor was missing, and this
+   * paragraph used to justify the omission by calling a job's evidence "not
+   * about a site". A contractor's insurance certificate is not about a site; a
+   * job's evidence is, because `maintenance_requests.site_id` exists and the
+   * job happened there. Without the third filter a member confined to three
+   * stores could list the before and after photographs of a job at a fourth.
+   *
+   * A document naming none of the three is still deliberately untouched.
+   *
+   * `/api/files/[id]` applies the identical rule to the bytes — see
+   * `outsideSiteScope` there. The two must agree: a listing filter alone would
+   * leave the documents downloadable to anyone who learned an id elsewhere.
    */
   const permittedSites =
     siteScope && siteScope.length
@@ -311,6 +341,31 @@ async function listFiles(request: Request) {
             .from(units)
             .where(
               and(eq(units.organisationId, orgId), inArray(units.siteId, siteScope ?? [])),
+            ),
+        ),
+      )
+    : undefined;
+  /* The job anchor, resolved through `maintenance_requests.site_id`. A job that
+     names no site is admitted by the `isNull` arm on the subquery's own terms:
+     it is selected because its site is null OR permitted, so a jobless document
+     and a job with no site both pass, and only a job at a store outside the
+     membership is excluded. */
+  const requestScopeFilter = permittedSites
+    ? or(
+        isNull(attachments.requestId),
+        inArray(
+          attachments.requestId,
+          db
+            .select({ id: maintenanceRequests.id })
+            .from(maintenanceRequests)
+            .where(
+              and(
+                eq(maintenanceRequests.organisationId, orgId),
+                or(
+                  isNull(maintenanceRequests.siteId),
+                  inArray(maintenanceRequests.siteId, siteScope ?? []),
+                ),
+              ),
             ),
         ),
       )
@@ -380,6 +435,7 @@ async function listFiles(request: Request) {
     eq(attachments.organisationId, orgId),
     siteScopeFilter,
     unitScopeFilter,
+    requestScopeFilter,
     requestId ? eq(attachments.requestId, requestId) : undefined,
     kind ? eq(attachments.kind, kind) : undefined,
     columnFilter,

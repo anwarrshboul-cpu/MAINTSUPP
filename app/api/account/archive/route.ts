@@ -37,7 +37,6 @@ import {
 } from "../../../../db/schema";
 import {
   anonymousRefusal,
-  scopedDb,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
 
@@ -47,7 +46,9 @@ const RESTORABLE = new Set(["job", "group", "board"]);
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const context = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const context = viewGuard.scope;
     const orgId = context.orgId;
 
     const [jobRows, groupRows, boardRows, teamRows] = await Promise.all([

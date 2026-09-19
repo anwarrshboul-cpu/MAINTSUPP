@@ -52,7 +52,6 @@ import { ensureDatabase } from "../../../db/init";
 import { contractorSites, contractors, sites } from "../../../db/schema";
 import {
   anonymousRefusal,
-  scopedDb,
   scopedDbWithCapability,
   type ScopedDatabase,
 } from "../../lib/tenant-db";
@@ -255,7 +254,9 @@ export async function GET(request: Request) {
     const named = readSide(url);
     if ("refusal" in named) return named.refusal;
 
-    const scope = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const scope = viewGuard.scope;
     const { db, orgId } = scope;
     const query = text(url.searchParams.get("q"), MAX_QUERY);
 

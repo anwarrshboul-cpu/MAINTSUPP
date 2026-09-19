@@ -29,7 +29,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { reminderRules } from "../../../db/schema";
-import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 import { databaseSafeFailure } from "../../lib/database-failure";
 import {
   createReminder,
@@ -118,7 +118,9 @@ function computeNextSendAt(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const subjectType = text(url.searchParams.get("subjectType"), 40);
     const subjectId = text(url.searchParams.get("subjectId"), 120);

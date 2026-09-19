@@ -293,7 +293,9 @@ async function setIdForKey(db: ScopedDb, orgId: string, key: string) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const key = url.searchParams.get("key");
 

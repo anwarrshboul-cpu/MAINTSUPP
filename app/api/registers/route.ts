@@ -36,7 +36,6 @@ import { ensureDatabase } from "../../../db/init";
 import { registerColumns } from "../../../db/schema";
 import {
   anonymousRefusal,
-  scopedDb,
   scopedDbWithCapability,
   type ScopedDatabase,
 } from "../../lib/tenant-db";
@@ -157,7 +156,9 @@ export async function GET(request: Request) {
     const named = readRegister(new URL(request.url).searchParams.get("register"));
     if ("refusal" in named) return named.refusal;
 
-    const scope = await scopedDb(request);
+    const viewGuard = await scopedDbWithCapability(request, "board.view");
+    if (viewGuard.denied) return viewGuard.denied;
+    const scope = viewGuard.scope;
     const columns = await loadRegisterColumns(scope.db, scope.orgId, named.register);
     const values = await loadRegisterValues(scope.db, scope.orgId, named.register);
 

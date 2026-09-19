@@ -341,7 +341,9 @@ function forDigest(item: Scanned) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { db, orgId } = await scopedDb(request);
+    const guard = await scopedDbWithCapability(request, "board.view");
+    if (guard.denied) return guard.denied;
+    const { db, orgId } = guard.scope;
     const scanned = await scan(db, orgId);
 
     return Response.json({
