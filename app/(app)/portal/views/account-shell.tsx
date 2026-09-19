@@ -19,6 +19,7 @@ import { BrandMark, Icon, type IconName } from "../../../components";
 import { AccountMenu, type AccountSnapshot } from "../account-menu";
 import { useAppliedTheme } from "../theme";
 import { ACCOUNT_PANELS } from "./account-panels";
+import { useModuleAvailable } from "../../../lib/client-capabilities";
 import { AccountError, AccountLoading } from "./account-ui";
 import { AccountProfilePanel } from "./account-profile";
 import {
@@ -48,22 +49,54 @@ import "./account-views.css";
  * reimplemented — and shown in the rail so the account area does not look like
  * it is missing them.
  */
+/*
+ * `module` names the portal module each link opens, where one does — §19. A module
+ * this workspace has switched off has to leave the navigation, and this rail is
+ * navigation: the page guards already refuse `/dashboard/admin` and
+ * `/dashboard/teams` when their module is off, so an unfiltered link would offer a
+ * destination that bounces straight to Overview.
+ *
+ * "Import data" names none. It is a query parameter on the dashboard rather than a
+ * module, and nothing in the registry governs it.
+ */
 const ELSEWHERE = [
-  { href: "/dashboard/admin", label: "Administration", icon: "shield" as IconName },
+  {
+    href: "/dashboard/admin",
+    label: "Administration",
+    icon: "shield" as IconName,
+    module: "admin-users",
+  },
+  { href: "/dashboard/teams", label: "Teams", icon: "users" as IconName, module: "team" },
   /*
-   * The platform console — §5. Listed unconditionally here, unlike in the avatar
-   * menu, because this rail has no access to the capability hooks the menu uses and
-   * adding a fetch to it for one link would be the second read of `/api/context`
-   * that `tests/shared-context-and-navigation-reads.test.mjs` exists to prevent.
-   * `requirePlatformAdmin` refuses anyone else on arrival, so the cost of listing
-   * it is one redirect rather than an exposure.
+   * The platform console — §5. `module: null` because the registry does not govern
+   * it: `/admin` is not a portal module, it is a different shell.
+   *
+   * Listed unconditionally, unlike in the avatar menu. This rail already reads three
+   * module signals, and a fourth hook for one link that `requirePlatformAdmin`
+   * refuses on arrival anyway would buy nothing — the cost of listing it is one
+   * redirect, not an exposure.
    */
-  { href: "/admin", label: "Platform console", icon: "building" as IconName },
-  { href: "/dashboard/teams", label: "Teams", icon: "users" as IconName },
-  { href: "/dashboard?manage=import", label: "Import data", icon: "upload" as IconName },
+  { href: "/admin", label: "Platform console", icon: "building" as IconName, module: null },
+  {
+    href: "/dashboard?manage=import",
+    label: "Import data",
+    icon: "upload" as IconName,
+    module: null,
+  },
 ];
 
 export function AccountShell({ panel }: { panel: string }) {
+  /*
+   * Which of these rail entries this workspace still has.
+   *
+   * `!== false` throughout: an unanswered question keeps the entry. A workspace
+   * that has switched nothing off is every workspace today, so flashing three
+   * links away on each page load would be the more visible fault — and the guards
+   * behind them refuse regardless. See `useModuleAvailable`.
+   */
+  const trashModule = useModuleAvailable("recycle-bin");
+  const adminModule = useModuleAvailable("admin-users");
+  const teamModule = useModuleAvailable("team");
   const [snapshot, setSnapshot] = useState<AccountSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -200,7 +233,13 @@ export function AccountShell({ panel }: { panel: string }) {
           {groups.map((group) => (
             <div key={group}>
               <h2>{group}</h2>
-              {ACCOUNT_PANELS.filter((entry) => entry.group === group).map((entry) => (
+              {ACCOUNT_PANELS.filter((entry) => entry.group === group)
+                /* `trash` is the Recycle Bin module at a second address — the
+                   section and this panel render the same `AccountTrashPanel`. Every
+                   other panel here is this person's own account and belongs to no
+                   module. */
+                .filter((entry) => entry.key !== "trash" || trashModule !== false)
+                .map((entry) => (
                 <a
                   key={entry.key || "profile"}
                   href={`/dashboard/account${entry.key ? `/${entry.key}` : ""}`}
@@ -215,7 +254,13 @@ export function AccountShell({ panel }: { panel: string }) {
           ))}
           <div>
             <h2>Elsewhere</h2>
-            {ELSEWHERE.map((entry) => (
+            {ELSEWHERE.filter((entry) =>
+              entry.module === "admin-users"
+                ? adminModule !== false
+                : entry.module === "team"
+                  ? teamModule !== false
+                  : true,
+            ).map((entry) => (
               <a key={entry.href} href={entry.href}>
                 <Icon name={entry.icon} size={16} />
                 {entry.label}

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { requirePageSession } from "../../../lib/page-guard";
+import { requireModuleAccess, requirePageSession } from "../../../lib/page-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -43,5 +43,15 @@ export default async function AdminReconcileRedirect() {
    * reconciler rather than back on a redirect.
    */
   await requirePageSession("/dashboard/reconcile");
+  /*
+   * And the module, here rather than only at the far end.
+   *
+   * The catch-all guards `/dashboard/reconcile` too, so this is not the only
+   * check — it is the one that keeps the forward honest. Without it a workspace
+   * with Reconcile switched off would be sent to a URL whose sole purpose is to
+   * bounce it straight back to Overview, and the address bar would flicker
+   * through a screen the workspace does not have.
+   */
+  await requireModuleAccess("reconcile", "/dashboard/reconcile");
   redirect("/dashboard/reconcile");
 }
