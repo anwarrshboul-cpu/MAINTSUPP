@@ -41,13 +41,45 @@ test("every url is on that origin, and none of them redirects", () => {
   }
 });
 
-test("it lists exactly the marketing pages that exist", async () => {
+test("it lists exactly the STATIC marketing pages that exist", async () => {
+  /*
+   * RE-POINTED when the website CMS added `app/(marketing)/p/[slug]/page.tsx`.
+   *
+   * This walk used to claim every `page.tsx` under `app/(marketing)`, and that was
+   * right while every one of them was a file at a fixed address. A dynamic segment
+   * is not: `[slug]` begins with neither `_` nor `(`, so the walker descended into
+   * it and added the literal string "/p/[slug]" to the set of addresses it demanded
+   * the sitemap contain. No sitemap can legitimately contain that, so the test
+   * would have failed for a page that is correctly absent.
+   *
+   * What the assertion was written to protect is unchanged and still enforced
+   * below: a STATIC marketing page cannot be added or removed without
+   * `public/sitemap.xml` following, because that file is generated from a
+   * hand-maintained route list in `scripts/generate-sitemap.mjs` and nothing else
+   * would notice the two disagreeing.
+   *
+   * The second assertion is new, and it is the honest statement of where the CMS
+   * stands rather than a hole left open. `public/sitemap.xml` is a committed
+   * artifact whose per-route `lastmod` comes from `git log` over that route's
+   * source files; a database-driven URL has no source file and no commit, so it
+   * has no date to put there. Emitting one would mean either a fabricated
+   * `lastmod` or a build that reads the production database. Until a dynamic
+   * sitemap exists, a CMS page is deliberately not listed — `CMS_OMISSIONS` in
+   * `app/lib/cms-blocks.ts` says so in the console, and this asserts it in the
+   * file. When that changes, this is the assertion to change with it.
+   */
   const found = new Set();
+  const dynamicRoutes = [];
   const walk = async (dir, prefix) => {
     for (const item of await readdir(dir, { withFileTypes: true })) {
-      if (item.name === "page.tsx") found.add(prefix || "/");
-      /* `_sections` holds components, not routes, and a route group's
-         parentheses never reach the URL. Neither is a page. */
+      if (item.name === "page.tsx") {
+        if (prefix.includes("[")) dynamicRoutes.push(prefix);
+        else found.add(prefix || "/");
+      }
+      /* `_sections` and `_cms` hold components, not routes, and a route group's
+         parentheses never reach the URL. Neither is a page. A `[segment]` IS a
+         route, but not one with a fixed address, so it is collected separately
+         above rather than skipped and forgotten. */
       if (item.isDirectory() && !item.name.startsWith("_") && !item.name.startsWith("(")) {
         await walk(`${dir}/${item.name}`, `${prefix}/${item.name}`);
       }
@@ -59,8 +91,20 @@ test("it lists exactly the marketing pages that exist", async () => {
   assert.deepEqual(
     [...listed].sort(),
     [...found].sort(),
-    "a marketing page was added or removed without the sitemap following",
+    "a static marketing page was added or removed without the sitemap following",
   );
+
+  assert.deepEqual(
+    dynamicRoutes.sort(),
+    ["/p/[slug]"],
+    "the CMS route is the only dynamic marketing route; a second one needs its own decision about the sitemap",
+  );
+  for (const { loc } of entries) {
+    assert.ok(
+      !new URL(loc).pathname.startsWith("/p/"),
+      `${loc} is a CMS page, and the sitemap has no date it could honestly give one`,
+    );
+  }
 });
 
 test("every lastmod is a real date that has already happened", () => {

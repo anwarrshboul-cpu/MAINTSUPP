@@ -424,7 +424,11 @@ test("the console lists the inbox because the inbox now has a server side", asyn
   const section = platformSection("leads");
   assert.ok(section, "leads must be in the catalogue");
   assert.equal(section.label, "Website enquiries");
-  assert.equal(PLATFORM_SECTIONS.length, 6);
+  /* SEVEN once the website CMS and the enquiries inbox are both merged: each
+     phase added one entry, and each phase's own test said six while it was the
+     only one landed. `platform-admin-shell.test.mjs` compares against its own
+     ENTRIES list rather than a literal, so it needed no change. */
+  assert.equal(PLATFORM_SECTIONS.length, 7);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the
