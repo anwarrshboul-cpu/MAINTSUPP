@@ -1,3 +1,4 @@
+import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default function CookiesPage() {
   return (
     <main className="m-section">
       <div className="m-shell m-shell--narrow m-prose">
+          <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Cookie notice", path: "/cookies" }]} />
         <h1>Cookie notice</h1>
 
         <h2>The short version</h2>
