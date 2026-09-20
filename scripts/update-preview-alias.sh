@@ -69,9 +69,14 @@ ALIAS="${ALIAS:-maintsupp-preview.vercel.app}"
 # deployment. Override it on the day the domain legitimately changes, so that
 # the change is stated by whoever makes it rather than discovered later.
 EXPECTED_PRODUCTION="${EXPECTED_PRODUCTION:-https://maintsupp.com}"
-# The apex is the same project and stays acceptable, so that this guard
-# does not fire on the day the primary domain is switched between the two.
-EXPECTED_PRODUCTION_ALT="${EXPECTED_PRODUCTION_ALT:-https://maintsupp.com}"
+# THE OTHER DOMAIN, and it has to be a different value from the one above or
+# this pair does nothing. Measured on the live project: `maintsupp.com` has no
+# redirect and `www.maintsupp.com` 308s to it, and BOTH are production domains of
+# this project. `vercel project ls` reports whichever is PRIMARY, so accepting
+# only one means the guard fires on a perfectly good deployment the day the
+# primary is switched. Both constants read `https://maintsupp.com` until now,
+# which is how this pair came to have no effect at all.
+EXPECTED_PRODUCTION_ALT="${EXPECTED_PRODUCTION_ALT:-https://www.maintsupp.com}"
 
 die() { printf '\n  REFUSED: %s\n\n' "$1" >&2; exit 1; }
 say() { printf '  %s\n' "$1"; }

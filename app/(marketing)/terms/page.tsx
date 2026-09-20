@@ -1,8 +1,26 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Terms | MAINTSUPP",
+  /*
+   * The BARE title, so the root template in `app/layout.tsx` supplies the suffix
+   * once. This read `"Terms | MAINTSUPP"`, and the template is `%s | MAINTSUPP`,
+   * so the rendered title was `"Terms | MAINTSUPP | MAINTSUPP"`.
+   * `contractors/page.tsx` records the same lesson from the same cause; it needed
+   * `absolute` because it wants a shape the template does not give. This page wants
+   * exactly what the template gives, so it says only its own name.
+   */
+  title: "Terms",
   description: "Terms of use for the Maintsupp website and client portal.",
+  /*
+   * DECLARED, because the root declares one. `app/layout.tsx` sets
+   * `alternates: { canonical: "/" }` and a page that declares none inherits it,
+   * resolved against `metadataBase` — so this page used to emit
+   * `<link rel="canonical" href="https://maintsupp.com/">` and tell every crawler
+   * it was the homepage, while `public/sitemap.xml` submitted it as its own URL.
+   * `tests/marketing-canonicals.test.mjs` now refuses a marketing page that
+   * declares none.
+   */
+  alternates: { canonical: "https://maintsupp.com/terms" },
 };
 
 /** DRAFT — REQUIRES OWNER AND LEGAL REVIEW BEFORE PUBLICATION. */
