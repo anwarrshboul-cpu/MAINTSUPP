@@ -9,7 +9,8 @@
  *      for the measured reason rather than a stylistic one;
  *   2. that the public POST — the half that already worked — is untouched;
  *   3. that the status vocabulary is closed and agrees with the column's default;
- *   4. that this phase adds NO migration, so the schema fingerprint cannot move;
+ *   4. that a NEW public enquiry cannot land in a customer's workspace, and that the
+ *      status workflow itself still adds no column;
  *   5. that the console reads the vocabulary from the server rather than copying it.
  *
  * Comments are stripped before any ABSENCE assertion. Several times in this program
@@ -31,6 +32,12 @@ import {
   leadStatus,
 } from "../app/lib/lead-status.ts";
 import { PLATFORM_SECTIONS, platformSection } from "../app/lib/platform-sections.ts";
+import {
+  WEBSITE_LEADS_COMPANY_ID,
+  WEBSITE_LEADS_WORKSPACE_ID,
+  WEBSITE_LEADS_WORKSPACE_NAME,
+  WEBSITE_LEADS_WORKSPACE_SLUG,
+} from "../db/website-leads-workspace.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) => readFile(path.join(root, file), "utf8");
@@ -84,12 +91,27 @@ test("both new methods answer to platform staff, and neither to a capability", a
   );
 });
 
-test("the route records the mis-filing it was designed around", async () => {
+test("the route records the mis-filing it was designed around, and what remains of it", async () => {
   const route = await read("app/api/leads/route.ts");
   /* Kept as a source pin rather than only a comment, because the reason the gate is
      what it is must survive somebody later deciding a capability would be tidier. */
   assert.match(route, /PRIMARY active organisation/);
-  assert.match(route, /NOT fixed here/);
+
+  /*
+   * And it must be PRECISE about what is fixed. It once said the mis-filing was "NOT
+   * fixed here", which was true before the intake correction and false after it —
+   * code describing itself wrongly is worse than code that says nothing. The
+   * distinction it has to draw now is between a new enquiry (filed correctly) and
+   * the rows stored before the correction (still under the customer's workspace
+   * until they are re-homed).
+   */
+  assert.match(route, /A NEW enquiry is no longer mis-filed/);
+  assert.match(route, /stored BEFORE that correction/);
+  assert.doesNotMatch(
+    route,
+    /The mis-filing itself is NOT fixed here/,
+    "that sentence stopped being true when the intake workspace landed",
+  );
 });
 
 test("the read crosses workspaces the way /api/audit does", async () => {
@@ -190,26 +212,162 @@ test("exactly one status is the entry point and at least two close an enquiry", 
 /* No migration                                                        */
 /* ------------------------------------------------------------------ */
 
-test("this phase adds no migration, so the fingerprint cannot move", async () => {
+test("the status workflow itself still adds no column", async () => {
   /*
-   * THE POINT: `leads.status` already existed with the right type and the right
-   * default. What was missing was a vocabulary, a write path and a screen — none of
-   * which is a schema change.
+   * `leads.status` already existed with the right type and the right default. What
+   * was missing was a vocabulary, a write path and a screen — none of which is a
+   * schema change, and none was made into one.
    *
-   * Asserted rather than assumed for two reasons. A column added here would move
-   * `SCHEMA_FINGERPRINT`, which costs a full migration replay on the next cold
-   * start; and the website-CMS branch is waiting on a merge and already moves it, so
-   * a second mover would have turned a one-line textual conflict into a
-   * recomputation nobody expected.
+   * The phase DOES now carry a migration, but only for the intake workspace (see
+   * below). No column was added to `leads`, and no table about leads or their status
+   * was created.
    */
   const init = await read("db/init.ts");
-  assert.doesNotMatch(
-    decommented(init),
-    /site_pages|lead_notes|lead_status|leads_status/,
-    "nothing about leads or their status belongs in a migration in this phase",
-  );
   const leadColumns = init.slice(init.indexOf("CREATE TABLE IF NOT EXISTS leads"));
   assert.match(leadColumns.slice(0, 600), /status TEXT NOT NULL DEFAULT 'New'/);
+  assert.doesNotMatch(
+    decommented(init),
+    /lead_notes|lead_status|leads_status|ALTER TABLE leads/,
+    "nothing was added to the leads table",
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* The intake workspace — a public enquiry cannot reach a customer      */
+/* ------------------------------------------------------------------ */
+
+test("the intake workspace is seeded, internal, and keyed by a fixed id", async () => {
+  const seed = await read("db/website-leads-workspace.ts");
+  const init = await read("db/init.ts");
+
+  assert.equal(WEBSITE_LEADS_WORKSPACE_ID, "org_maintsupp_website_leads");
+  assert.equal(WEBSITE_LEADS_COMPANY_ID, `company-${WEBSITE_LEADS_WORKSPACE_ID}`);
+  assert.equal(WEBSITE_LEADS_WORKSPACE_NAME, "MAINTSUPP Website Leads");
+  assert.equal(WEBSITE_LEADS_WORKSPACE_SLUG, "maintsupp-website-leads");
+
+  /*
+   * `kind = 'internal'` is what makes this workspace the platform's alone:
+   * `reachableOrganisationIds` drops an internal company's workspaces from every
+   * customer's reach, so a membership row there grants a customer account nothing.
+   */
+  assert.match(seed, /kind[^\n]*'internal'/);
+
+  /*
+   * THE MARK IS KEYED ON THE WORKSPACE ID, never on the name — the same reasoning
+   * `db/init.ts` records for the demo company: a name is something anybody with the
+   * platform console can change, and a rename must not be able to turn the sales
+   * pipeline into a customer's workspace.
+   */
+  assert.match(
+    seed,
+    /SET kind = 'internal'[\s\S]*?WHERE kind <> 'internal'[\s\S]*?SELECT client_company_id FROM organisations WHERE id = \?/,
+  );
+
+  /* Created in `applyMigrations`, not `repairInvariants`: it has work to do once. */
+  const start = init.indexOf("async function applyMigrations");
+  const end = init.indexOf("\n}\n", start);
+  assert.match(init.slice(start, end), /await ensureWebsiteLeadsWorkspace\(d1\);/);
+
+  /* And its id is fingerprinted, because changing it changes both where the seed
+     creates the workspace and where the intake path writes. */
+  const fingerprint = await read("db/schema-fingerprint.ts");
+  assert.match(fingerprint, /"db\/website-leads-workspace\.ts"/);
+});
+
+test("the intake workspace is NOT the demo workspace", async () => {
+  /*
+   * Reusing the internal-company MECHANISM is right; reusing the demo WORKSPACE
+   * would not be. That workspace holds demonstration jobs, sites and documents that
+   * exist to be reset, and making it the semantic owner of the sales pipeline would
+   * put real enquiries among sample data.
+   */
+  /* Read from source, not imported: `db/demo-workspace.ts` has a VALUE import of
+     ".", which is a directory import Node's ESM resolver refuses. */
+  const demo = await read("db/demo-workspace.ts");
+  const DEMO_WORKSPACE_ID = /DEMO_WORKSPACE_ID = "([^"]+)"/.exec(demo)?.[1];
+  assert.ok(DEMO_WORKSPACE_ID, "the demo workspace id must be findable");
+  assert.notEqual(WEBSITE_LEADS_WORKSPACE_ID, DEMO_WORKSPACE_ID);
+  assert.notEqual(WEBSITE_LEADS_COMPANY_ID, `company-${DEMO_WORKSPACE_ID}`);
+});
+
+test("a public enquiry CANNOT be written to a customer workspace", async () => {
+  /*
+   * THE REGRESSION THIS EXISTS TO PREVENT, asserted as an absence rather than as a
+   * presence — because one correct line satisfies "it writes to the right place",
+   * while what is actually needed is that no path leads to the wrong one.
+   *
+   * The fault was never "organisation ordering". `resolveTenantAccess` picks
+   * `activeOrganisations.find(id === PRIMARY_ORGANISATION_ID)`, and that constant is
+   * `org_000000000000000000000001` — which on this installation is **Sunnamusk UK, a
+   * real client company**. A hard-coded constant naming a customer is worse than
+   * ordering, because it is stable and therefore invisible.
+   */
+  const route = await read("app/api/leads/route.ts");
+  const post = route.slice(route.indexOf("export async function POST"));
+  const postCode = decommented(post);
+
+  /* The scope is still resolved through `scopedDb` — both tenancy surveys require
+     it — but its `orgId` must not reach a single write in this method. */
+  assert.match(postCode, /scopedDb\(request, \{ allowAnonymous: true \}\)/);
+  assert.doesNotMatch(
+    postCode,
+    /organisationId: orgId/,
+    "the anonymous scope's organisation is a customer's workspace; nothing may be filed under it",
+  );
+  assert.doesNotMatch(
+    postCode,
+    /\borgId\b/,
+    "orgId must not be destructured or referenced at all in the public intake path",
+  );
+
+  /* The destination is the fixed internal id, read from the database. */
+  assert.match(postCode, /WEBSITE_LEADS_WORKSPACE_ID/);
+  assert.match(postCode, /organisationId: intake\.id/);
+
+  /* The notification rows go to the same workspace as the lead, or a replay would
+     resolve a lead that is not in the workspace the message claims. */
+  assert.equal(
+    (postCode.match(/organisationId: intake\.id/g) ?? []).length,
+    3,
+    "the lead and both notification rows must all name the intake workspace",
+  );
+
+  /* NO FALLBACK. If the workspace is missing this refuses; it does not reach for
+     whatever workspace happens to be available. */
+  assert.match(postCode, /if \(!intake\)/);
+  assert.match(postCode, /status: 503/);
+  assert.doesNotMatch(
+    postCode,
+    /intake\?\.id \?\?|intake\.id \|\||\?\? orgId|\|\| orgId/,
+    "a fallback is the fault this correction removes",
+  );
+  assert.doesNotMatch(
+    postCode,
+    /PRIMARY_ORGANISATION_ID/,
+    "the constant that names a customer's workspace must not appear here",
+  );
+});
+
+test("the intake destination cannot come from the request", async () => {
+  /*
+   * The property both tenancy surveys are about. A destination the submitter can
+   * name would be strictly worse than the defect being fixed: today a stranger's
+   * enquiry lands in one wrong workspace, and a request-controlled one would let
+   * them choose which.
+   */
+  const route = decommented(await read("app/api/leads/route.ts"));
+  const post = route.slice(route.indexOf("export async function POST"));
+  for (const forbidden of [
+    /payload\.organisation/i,
+    /payload\.workspace/i,
+    /searchParams\.get\("org/i,
+    /headers\.get\("x-organisation/i,
+  ]) {
+    assert.doesNotMatch(post, forbidden, "the workspace must never come from the caller");
+  }
+  /* And it is a constant compared for equality, not a search over a list. */
+  assert.match(post, /eq\(organisations\.id, WEBSITE_LEADS_WORKSPACE_ID\)/);
+  assert.doesNotMatch(post, /orderBy|LIMIT 1 OFFSET|\[0\]\.id/);
 });
 
 /* ------------------------------------------------------------------ */
@@ -315,7 +473,12 @@ test("the screen shows which workspace each enquiry is filed under", async () =>
    */
   assert.match(route, /workspaceName: workspaceNames\.get\(row\.organisationId\)/);
   assert.match(view, /filedUnder/);
-  assert.match(view, /filed under a client workspace/i);
+  /* Re-pointed with the notice's wording, which changed when the intake fix made
+     "filed under a client workspace" true of only the historical rows. What is
+     asserted is unchanged: the screen must say where they are filed AND flag the
+     client case explicitly. */
+  assert.match(view, /Where these enquiries are filed/);
+  assert.match(view, /arrived before that was/);
 });
 
 test("the screen shows whether the alert email actually went out", async () => {

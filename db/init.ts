@@ -13,6 +13,7 @@ import {
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { backfillLegacyMemberships } from "./legacy-memberships";
+import { ensureWebsiteLeadsWorkspace } from "./website-leads-workspace";
 import { getD1 } from ".";
 import { defaultBoardOptions } from "./seed-options";
 import { maintenanceFormConfiguration, maintenanceOptions } from "./monday-board-spec";
@@ -262,6 +263,12 @@ async function applyMigrations(d1: D1DatabaseLike) {
    * create, so each gets a company of its own on a fresh database too.
    */
   await ensureClientCompanies(d1);
+  /* The workspace MAINTSUPP's own website enquiries are filed under. AFTER
+     `ensureClientCompanies`, because it needs `client_companies.kind` to exist, and
+     before `ensureTenantIdentities` so the workspace is present when identities are
+     reconciled. See `db/website-leads-workspace.ts` for why a public enquiry must
+     not land in `PRIMARY_ORGANISATION_ID`, which names a client company. */
+  await ensureWebsiteLeadsWorkspace(d1);
   await ensureTenantIdentities(d1);
 
   await ensureStageTwoFoundation(d1);

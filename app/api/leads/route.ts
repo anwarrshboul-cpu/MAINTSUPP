@@ -1,5 +1,6 @@
 import { ensureDatabase } from "../../../db/init";
 import { leads, organisations } from "../../../db/schema";
+import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../db/website-leads-workspace";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
@@ -32,27 +33,35 @@ function clean(value: unknown, max: number) {
  *
  * ⚠️ WHY THIS IS GATED ON PLATFORM STAFF AND EMPHATICALLY NOT ON A CAPABILITY.
  *
- * This is the finding that decided the whole design, and it is measured rather than
- * assumed. A public enquiry has no account behind it, so `POST` below resolves its
- * scope with `allowAnonymous: true` — and an anonymous request resolves to the
- * PRIMARY active organisation. On Staging, all 8 stored leads therefore sit in
- * `org_000000000000000000000001`, which is **a client company's workspace**, not
- * MAINTSUPP's.
+ * Because these rows belong to the platform, not to the workspace whose id they
+ * carry — and that was measured rather than assumed. A public enquiry has no account,
+ * so `POST` resolves its scope with `allowAnonymous: true`, and an anonymous request
+ * resolves to the PRIMARY active organisation. That constant,
+ * `org_000000000000000000000001`, names **a client company's workspace** on this
+ * installation, and all 8 leads stored before this correction sit in it.
  *
- * So the rows are MAINTSUPP's own inbound sales pipeline, filed under a customer.
- * A `leads.view` capability granted to workspace roles would have shown that
- * customer's Owner every enquiry MAINTSUPP has ever received from its own website,
- * including the names and email addresses of their competitors. `scopedDb`'s
+ * A `leads.view` capability granted to workspace roles would therefore have shown
+ * that customer's Owner every enquiry MAINTSUPP has ever received from its own
+ * website, including the names and email addresses of their competitors. `scopedDb`'s
  * organisation filter would have delivered it correctly and the leak would have
  * looked like the feature working.
  *
- * `scope.platformAdmin` is therefore the gate, exactly as the website CMS decided
- * for the same underlying reason: the row says it belongs to an organisation, and
- * the truth is that it belongs to the platform.
+ * `scope.platformAdmin` is the gate, exactly as the website CMS decided, for the same
+ * underlying reason: the row says it belongs to an organisation and the truth is that
+ * it belongs to the platform.
  *
- * **The mis-filing itself is NOT fixed here.** Re-homing live rows out of a
- * customer's workspace is a data change to a customer's tenant and belongs to the
- * owner, not to a read path. It is recorded as a finding.
+ * WHAT IS FIXED, AND WHAT IS NOT, STATED PRECISELY.
+ *
+ * **A NEW enquiry is no longer mis-filed.** `POST` below writes to a dedicated
+ * platform-owned intake workspace, resolved by a fixed id — see
+ * `db/website-leads-workspace.ts`.
+ *
+ * **The rows stored BEFORE that correction are still under the customer's
+ * workspace** until they are re-homed, which is a data change to a customer's tenant
+ * and is a separate, individually-verified operation rather than something a read
+ * path does. The inbox reads across every workspace a platform admin may see, so
+ * both the old and the new rows appear either way, and the screen names the workspace
+ * each one is filed under.
  *
  * WHY IT READS ACROSS WORKSPACES. `scope.organisationIds` is already widened for a
  * platform admin — `crossOrganisation: platformAdmin` — so `inArray` over it is
@@ -313,10 +322,48 @@ export async function POST(request: Request) {
 
     await ensureDatabase();
     // The public lead form has no account behind it by definition.
-    const { db, orgId } = await scopedDb(request, { allowAnonymous: true });
+    const { db } = await scopedDb(request, { allowAnonymous: true });
+
+    /*
+     * ⚠️ THE WORKSPACE THIS IS FILED UNDER, AND WHY IT IS NOT `orgId`.
+     *
+     * `scopedDb` still resolves the scope — that is what the two tenancy surveys
+     * require, and it is how the database handle is obtained. But its `orgId` for an
+     * anonymous request is `PRIMARY_ORGANISATION_ID`, a hard-coded constant that on
+     * this installation names **Sunnamusk UK, a real client company**. Writing
+     * MAINTSUPP's own sales enquiries there filed the platform's pipeline inside a
+     * customer's tenant; measured, all 8 stored leads sat in it.
+     *
+     * So the destination is resolved from the DATABASE, by the fixed id of a
+     * platform-owned internal workspace — never from the request, and never from
+     * organisation ordering. `ensureWebsiteLeadsWorkspace` creates it on the boot
+     * path, which the `ensureDatabase()` above has just run.
+     *
+     * THERE IS NO FALLBACK TO A CUSTOMER WORKSPACE, and that is the deliberate
+     * trade-off. If the intake workspace cannot be found this refuses with a 503 and
+     * the submitter is asked to try again, rather than silently filing a stranger's
+     * contact details into a client's workspace. Losing one submission to a state the
+     * boot path makes almost impossible is a smaller harm than re-introducing the
+     * fault this route was corrected for.
+     */
+    const [intake] = await db
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(eq(organisations.id, WEBSITE_LEADS_WORKSPACE_ID))
+      .limit(1);
+    if (!intake) {
+      console.error(
+        "[leads] the website-leads intake workspace is missing; refusing rather than filing under a customer",
+      );
+      return Response.json(
+        { error: "The portfolio review request could not be saved." },
+        { status: 503 },
+      );
+    }
+
     const [created] = await db.insert(leads).values({
       id: crypto.randomUUID(),
-      organisationId: orgId,
+      organisationId: intake.id,
       name,
       company,
       email,
@@ -340,7 +387,7 @@ export async function POST(request: Request) {
     });
     const [alertResult, confirmationResult] = await Promise.all([
       sendNotification(db, {
-        organisationId: orgId,
+        organisationId: intake.id,
         channel: "email",
         event: "lead.created",
         subjectType: "lead",
@@ -356,7 +403,7 @@ export async function POST(request: Request) {
       (async () => {
         const confirmation = leadConfirmationTemplate({ name });
         return sendNotification(db, {
-          organisationId: orgId,
+          organisationId: intake.id,
           channel: "email",
           event: "lead.confirmation",
           subjectType: "lead",

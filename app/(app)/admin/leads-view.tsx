@@ -12,16 +12,20 @@
  *
  * ⚠️ WHY THIS SCREEN NAMES THE WORKSPACE EACH ENQUIRY IS FILED UNDER.
  *
- * Because it is not MAINTSUPP's. A public enquiry has no account, so the intake
- * route resolves to the PRIMARY active organisation — measured on Staging, that is a
- * client company's workspace, and all 8 stored leads sit in it. The rows are
- * MAINTSUPP's own sales pipeline filed under a customer.
+ * Because for some of them it is not MAINTSUPP's. A public enquiry has no account, so
+ * the intake route used to resolve to the PRIMARY active organisation — measured, a
+ * client company's workspace, and the 8 leads stored before the correction sit in it.
  *
- * That is why the gate is `platformAdmin` and not a capability: a workspace
- * capability would have shown that customer every enquiry MAINTSUPP has received
- * from its own website. Showing the workspace name in the table is how the person
- * reading the screen can see the situation for themselves rather than take a
- * comment's word for it, and it is the prompt to fix the filing.
+ * A NEW enquiry now goes to a dedicated platform-owned intake workspace
+ * (`db/website-leads-workspace.ts`). The historical rows stay where they are until
+ * they are re-homed, which is a data change to a customer's tenant and is done
+ * deliberately rather than by a screen.
+ *
+ * So this column is not decoration: while both kinds exist it is the only way to see
+ * which is which, and it is read off the data rather than described in prose, so it
+ * cannot claim something that has stopped being true. It is also why the gate is
+ * `platformAdmin` and not a capability — a workspace capability would have shown that
+ * customer every enquiry MAINTSUPP has received from its own website.
  *
  * BUILT ON THE ADMIN KIT. `views/admin-shell.tsx` owns the four states, the flash
  * and `adminWrite`; `views/admin-console.css` owns `.admin-field`, `.admin-notice`,
@@ -176,12 +180,13 @@ export function LeadsInboxView() {
       {/* The finding, stated on the screen rather than only in the code. It reads
           off the data, so it cannot claim something that has stopped being true. */}
       {filedUnder.length > 0 ? (
-        <AdminNotice tone="info" icon="alert" title="These enquiries are filed under a client workspace">
-          A public enquiry has no account behind it, so the intake route files it under the primary
-          active workspace — currently <strong>{filedUnder.join(", ")}</strong>. They are
-          MAINTSUPP&rsquo;s own enquiries, not that client&rsquo;s, which is why this screen answers to
-          platform staff and why no workspace capability opens it. Re-filing the existing rows is a
-          change to a customer&rsquo;s workspace and has not been made here.
+        <AdminNotice tone="info" icon="alert" title="Where these enquiries are filed">
+          These are MAINTSUPP&rsquo;s own enquiries, which is why this screen answers to platform
+          staff and why no workspace capability opens it. They are currently filed under{" "}
+          <strong>{filedUnder.join(", ")}</strong>. A new enquiry goes to the platform&rsquo;s own
+          intake workspace; anything still showing a client&rsquo;s name arrived before that was
+          corrected and has not been re-filed, because moving a row out of a customer&rsquo;s
+          workspace is a deliberate change rather than something this screen does.
         </AdminNotice>
       ) : null}
 
