@@ -632,7 +632,7 @@ test("the footer renames the portal link and adds the contractor route, nav unto
     "the shared nav entry and the footer link — no third typed copy",
   );
   /* The legal line is byte-for-byte what it was. */
-  assert.match(chrome, /Maintsupp is a trading name of Maintauk Ltd\. Registered in England &amp; Wales,/);
+  assert.match(chrome, /MAINTSUPP LTD\. Registered in England &amp; Wales,/);
 });
 
 test("the founder section renders nothing in place of the photograph", async () => {
@@ -896,7 +896,7 @@ test("every icon sits on its title's first line, at every width", async () => {
   for (const line of [
     "Vetted contractors", "Insurance & competence checked",
     "Documented evidence", "Standard on every job",
-    "Maintsupp", "A trading name of Maintauk Ltd",
+    "Maintsupp", "MAINTSUPP LTD",
   ]) {
     assert.ok(cta.includes(line), `the strip still reads "${line}"`);
   }
