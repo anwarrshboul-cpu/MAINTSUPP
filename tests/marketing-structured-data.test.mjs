@@ -60,6 +60,9 @@ test("every existing non-homepage marketing route has visible breadcrumbs", asyn
     assert.match(page, /<Breadcrumbs items=/, route);
     assert.ok(page.includes(`path: "/${route}"`), route);
   }
+  const cms = await readFile(new URL("../app/(marketing)/p/[slug]/page.tsx", import.meta.url), "utf8");
+  assert.match(cms, /<Breadcrumbs items=/);
+  assert.ok(cms.includes("path: `/p/${page.slug}`"));
   const component = await readFile(new URL("../app/(marketing)/_components/breadcrumbs.tsx", import.meta.url), "utf8");
   assert.match(component, /aria-label="Breadcrumb"/);
   assert.match(component, /aria-current="page"/);
