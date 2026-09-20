@@ -1,3 +1,4 @@
+import { organization, website, jsonLd } from "./_components/structured-data";
 import type { Metadata } from "next";
 
 /*
@@ -121,34 +122,14 @@ export default function HomePage() {
           land on it without any of them changing. */}
       <ReportJob />
 
-      {/*
-        Organization only — and STILL only, now that the FAQ is back.
-
-        The reason has changed and the outcome has not. It used to be that the
-        homepage had no FAQ section, so claiming `FAQPage` here would have been
-        markup pointing at content that was not on the page — the kind of thing
-        that earns a manual action rather than a rich result. V3 renders the
-        questions again, so that objection is gone and this block COULD carry
-        the markup. It still does not, because /faqs publishes the same
-        `FAQPage` from the same `content.ts` array, and two URLs claiming the
-        same nine questions is a duplicate rather than twice the coverage. One
-        canonical home for the schema, on the page whose whole subject is the
-        questions; the homepage renders them visibly and says nothing about it
-        in JSON-LD.
-      */}
+      {/* The homepage owns the business and WebSite graph. FAQPage stays on
+          /faqs, where the shared questions already have their canonical home. */}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
-          __html: JSON.stringify({
+          __html: jsonLd({
             "@context": "https://schema.org",
-            "@type": "Organization",
-            name: "Maintsupp",
-            legalName: "Maintauk Ltd",
-            url: "https://maintsupp.com/",
-            telephone: "+44 7852 224644",
-            email: "info@maintsupp.com",
-            identifier: "17262302",
-            areaServed: "GB",
+            "@graph": [organization, website],
           }),
         }}
       />
