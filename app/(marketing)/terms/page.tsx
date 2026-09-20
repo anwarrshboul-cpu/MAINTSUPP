@@ -39,7 +39,7 @@ export default function TermsPage() {
 
         <h2>Who we are</h2>
         <p>
-          Maintsupp is a trading name of Maintauk Ltd, registered in England and
+          MAINTSUPP LTD, registered in England and
           Wales, company number 17262302.
         </p>
 
