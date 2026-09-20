@@ -36,6 +36,7 @@ import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import { cleanSlug } from "../../../lib/cms-blocks.ts";
 import { readPublishedPage, type CmsPage } from "../../../lib/cms-repository.ts";
+import { Breadcrumbs } from "../../_components/breadcrumbs";
 import { CmsBlocks } from "../../_cms/blocks.tsx";
 
 /*
@@ -126,6 +127,7 @@ export default async function CmsPageRoute({
   return (
     <main className="m-section">
       <div className="m-shell m-shell--narrow">
+        <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: page.title, path: `/p/${page.slug}` }]} />
         <h1>{page.title}</h1>
         <CmsBlocks blocks={page.blocks} />
       </div>
