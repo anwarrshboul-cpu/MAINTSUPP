@@ -419,10 +419,37 @@ test("all three methods answer to platform staff, and GET is gated too", async (
     const slice = route.slice(route.indexOf(`export async function ${method}(`));
     assert.match(
       slice.slice(0, 400),
-      /const scope = await platformScope\(request\);\s*\n\s*if \(!scope\) return FORBIDDEN;/,
+      /const scope = await platformScope\(request\);\s*\n\s*if \(!scope\) return forbidden\(\);/,
       `${method} must be gated before it does anything`,
     );
   }
+
+  /*
+   * ⚠️ AND THE REFUSAL MUST BE BUILT PER CALL, NOT SHARED.
+   *
+   * This route shipped with a module-level `const` holding a `Response.json(…)`,
+   * returned from all three methods. A `Response` body is a stream that can be
+   * consumed once, so the first refusal in a serverless instance answered 403 and
+   * every one after it in the same instance became a 500 — measured on a deployed
+   * Preview with a real signed-in non-platform-admin: GET 403, PUT 500, DELETE 500.
+   *
+   * The authorization was right and the answer was wrong, which is the worse
+   * combination: a 500 is what a client retries, and it makes an ordinary refusal
+   * look like an outage. No other route in `app/api/` shares a Response instance,
+   * which is why nothing caught it and why no SOURCE test could — the pin that all
+   * three methods are gated identically passed, because they are.
+   */
+  assert.doesNotMatch(
+    decommented(route),
+    /^const\s+[A-Z_]+\s*=\s*Response\.json\(/m,
+    "a module-level Response is consumed once; build the refusal per call",
+  );
+  assert.match(route, /function forbidden\(\) \{/);
+  assert.equal(
+    (route.match(/return forbidden\(\);/g) ?? []).length,
+    3,
+    "all three methods must refuse through the fresh-response helper",
+  );
 
   /*
    * NOT a capability, and the route says why at length. Every capability in this

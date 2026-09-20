@@ -62,10 +62,31 @@ function unavailable(error?: unknown) {
   );
 }
 
-const FORBIDDEN = Response.json(
-  { error: "The website is administered by MAINTSUPP platform staff." },
-  { status: 403 },
-);
+/**
+ * The refusal, built FRESH on every call.
+ *
+ * ⚠️ This was a module-level `const FORBIDDEN = Response.json(…)` returned from all
+ * three methods, and that is a bug with a very specific shape: a `Response` body is a
+ * stream that can be consumed once, so the first refusal in a serverless instance
+ * answered 403 and every refusal after it in the same instance became a **500** while
+ * the runtime tried to serialise a body that had already been read.
+ *
+ * Measured on a deployed Preview with a real signed-in non-platform-admin: `GET`
+ * answered 403 and `PUT` and `DELETE` answered 500. The authorization decision was
+ * correct and the answer was not — a 500 tells a caller "we broke" where the truth is
+ * "you may not", and it is the shape a client retries.
+ *
+ * No source test could see this. The pin asserting all three methods are gated
+ * identically passed, because they ARE; what was not reusable was the gate's answer.
+ * It took an authenticated request against a deployment, exercising more than one
+ * method in one instance.
+ */
+function forbidden() {
+  return Response.json(
+    { error: "The website is administered by MAINTSUPP platform staff." },
+    { status: 403 },
+  );
+}
 
 /** `scope.platformAdmin` or nothing. See the header for why not a capability. */
 async function platformScope(request: Request) {
@@ -85,7 +106,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const scope = await platformScope(request);
-    if (!scope) return FORBIDDEN;
+    if (!scope) return forbidden();
 
     return Response.json({
       canEdit: true,
@@ -106,7 +127,7 @@ export async function PUT(request: Request) {
   try {
     await ensureDatabase();
     const scope = await platformScope(request);
-    if (!scope) return FORBIDDEN;
+    if (!scope) return forbidden();
 
     const payload = (await request.json().catch(() => null)) as {
       slug?: unknown;
@@ -242,7 +263,7 @@ export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
     const scope = await platformScope(request);
-    if (!scope) return FORBIDDEN;
+    if (!scope) return forbidden();
 
     const slug = cleanSlug(new URL(request.url).searchParams.get("slug"));
     if (!slug) {
