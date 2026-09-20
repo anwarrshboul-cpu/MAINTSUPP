@@ -99,6 +99,10 @@ export const FINGERPRINTED_SOURCES: readonly string[] = [
   "db/init.ts",
   "db/schema.ts",
   "db/demo-workspace.ts",
+  /* Holds the intake workspace's fixed id and its four seed statements. Changing
+     that id decides which workspace the seed creates AND which one the public
+     enquiry path writes to, so it is a migration change in every sense. */
+  "db/website-leads-workspace.ts",
   "db/seed-board-structure.ts",
   "db/seed-store-documentation.ts",
   "db/seed-options.ts",
@@ -130,7 +134,7 @@ export const FINGERPRINTED_SOURCES: readonly string[] = [
  * the only thing standing between a changed migration and a database that
  * thinks it is already up to date.
  */
-export const SCHEMA_FINGERPRINT = "e9dcfbdd";
+export const SCHEMA_FINGERPRINT = "c34d7262";
 
 /** The one row the state lives in. A single-row table, keyed by a constant. */
 export const SCHEMA_STATE_KEY = "migrations";

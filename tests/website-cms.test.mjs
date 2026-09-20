@@ -600,14 +600,35 @@ test("the console lists the screen because the screen has an API", async () => {
   const section = platformSection("pages");
   assert.ok(section, "pages must be in the catalogue");
   assert.equal(section.label, "Website pages");
-  assert.equal(PLATFORM_SECTIONS.length, 6);
+  /* SEVEN once the website CMS and the enquiries inbox are both merged: each
+     phase added one entry, and each phase's own test said six while it was the
+     only one landed. `platform-admin-shell.test.mjs` compares against its own
+     ENTRIES list rather than a literal, so it needed no change. */
+  assert.equal(PLATFORM_SECTIONS.length, 7);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
      this API enforces none, because every capability here is per-workspace and this
      site is not in a workspace. */
   assert.equal(section.capability, null);
-  for (const other of PLATFORM_SECTIONS.filter((entry) => entry.key !== "pages")) {
+
+  /*
+   * EXACTLY TWO entries may be null, and they are named rather than counted.
+   *
+   * This loop used to exclude only `pages`, which was right while it was the sole
+   * nullable entry. The enquiries inbox is the second, for a related but distinct
+   * reason that `platform-sections.ts` states separately: its rows carry a
+   * customer's `organisation_id` and belong to the platform anyway. Naming both
+   * keeps the assertion strict — a third nullable entry has to be added here
+   * deliberately, which is the point of the rule.
+   */
+  const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
+  assert.deepEqual(
+    nullable.sort(),
+    ["leads", "pages"],
+    "only the two platform-owned surfaces answer to no capability",
+  );
+  for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);
   }
 

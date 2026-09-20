@@ -369,7 +369,24 @@ test("the portfolio review form no longer asks the three dropped questions", asy
 
 test("the leads route stopped requiring what the form stopped asking", async () => {
   const route = await read("app/api/leads/route.ts");
-  const guard = route.slice(route.indexOf("if (!name || !company"), route.indexOf("await ensureDatabase"));
+  /*
+   * BOUNDED TO `POST`, which is the method this test is about.
+   *
+   * The slice used to run from the guard to `route.indexOf("await ensureDatabase")`,
+   * and that worked only while `POST` was the sole method calling it. When the
+   * enquiries inbox gave `GET` a real implementation, `GET` -- earlier in the file --
+   * called it too, so `indexOf` found a position BEFORE the guard and the slice came
+   * back EMPTY. An empty string matches nothing, so the five requirements below
+   * stopped being checked at all while appearing to pass or fail for the wrong
+   * reason. That is the same fault this test's own comment records further down: "the
+   * slice was silently empty... A guard that cannot fire is worse than no guard."
+   *
+   * Finding `POST` first makes the bound mean what it says, whatever else the file
+   * grows.
+   */
+  const post = route.slice(route.indexOf("export async function POST"));
+  const guard = post.slice(post.indexOf("if (!name || !company"), post.indexOf("await ensureDatabase"));
+  assert.ok(guard.length > 40, "the guard slice must not be empty -- see the comment above");
 
   assert.doesNotMatch(guard, /regions\.length/, "regions must not be required");
   assert.doesNotMatch(guard, /challenge\.length/, "the 20-character floor must be gone");

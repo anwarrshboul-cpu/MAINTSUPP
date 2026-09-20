@@ -56,10 +56,15 @@ const decommented = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 /**
  * The console entries, by the route file each lives in.
  *
- * SIX since the website CMS. `pages` was added the day `/api/site-pages` existed,
- * which is the rule in `platform-sections.ts` being kept rather than bent: a rail
- * entry is a promise that there is something behind it. The four screens with no
- * server side are still absent, and the test below still proves it.
+ * SEVEN. `pages` was added the day `/api/site-pages` existed and `leads` the day
+ * `GET /api/leads` stopped being a 501 — which is the rule in
+ * `platform-sections.ts` being kept rather than bent: a rail entry is a promise that
+ * there is something behind it. The four screens with no server side are still
+ * absent, and the test below still proves it.
+ *
+ * THE ORDER MATTERS: the assertion below deep-equals this list against
+ * `PLATFORM_SECTION_KEYS`, so these must stay in the catalogue's order. `pages`
+ * precedes `leads` because that is the order the two phases merged in.
  */
 const ENTRIES = [
   ["", "app/(app)/admin/page.tsx", "/admin"],
@@ -68,13 +73,14 @@ const ENTRIES = [
   ["roles", "app/(app)/admin/roles/page.tsx", "/admin/roles"],
   ["audit", "app/(app)/admin/audit/page.tsx", "/admin/audit"],
   ["pages", "app/(app)/admin/pages/page.tsx", "/admin/pages"],
+  ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
 ];
 
 /* ------------------------------------------------------------------ */
 /* The catalogue                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the console lists six screens, and every one has a route", async () => {
+test("the console lists seven screens, and every one has a route", async () => {
   assert.equal(PLATFORM_SECTIONS.length, ENTRIES.length);
   assert.deepStrictEqual(
     [...PLATFORM_SECTION_KEYS],
