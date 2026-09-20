@@ -254,7 +254,7 @@ test("no price is shown + VAT", async () => {
   }
   assert.match(
     flat,
-    /Prices shown are the total payable\. Maintauk Ltd is not currently VAT registered\./,
+    /Prices shown are the total payable\. MAINTSUPP LTD is not currently VAT registered\./,
     "and that statement must actually be on the page",
   );
   for (const substitute of [/ex\.?\s*VAT/i, /exclud\w* VAT/i, /plus VAT/i, /VAT on top/i]) {
@@ -1048,7 +1048,7 @@ test("every nav anchor names a section that exists", async () => {
 test("the footer carries the legal line verbatim", async () => {
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
   for (const fragment of [
-    "Maintsupp is a trading name of Maintauk Ltd",
+    "MAINTSUPP LTD",
     "company no. 17262302",
     "C/O MJR Accounting & Tax Services",
     "One Canada Square, London, E14 5AA",
