@@ -1,0 +1,121 @@
+/**
+ * The enquiries inbox: layout only.
+ *
+ * `views/admin-console.css` owns `.admin-console`, `.admin-toolbar`, `.admin-field`,
+ * `.admin-notice`, `.admin-flash`, `.admin-panel` and `.admin-table`, and this
+ * screen uses all seven as they are. `tests/platform-admin-shell.test.mjs` has an
+ * assertion named for the alternative — "the console does not restate the admin
+ * kit's own styling" — because a second definition of a shared class is drift
+ * waiting for the first change to either copy.
+ *
+ * Tokens only: no hex literal, no colour function, and no breakpoint. The two grids
+ * below collapse to one column on a narrow screen through `auto-fit` with a floor,
+ * which needs no media query at all — and the whitelist for this area is
+ * 640 / 767 / 768 / 1024 / 1280, so a width spent here would be one of five.
+ */
+
+.leads-admin__total {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.leads-admin__list a {
+  color: var(--brand-primary);
+}
+
+/* Open against closed, as a word and not only a tint. Whether an enquiry is still
+   waiting on somebody is the most consequential fact on this screen, and a colour
+   alone says nothing to a reader who cannot distinguish the two. */
+.leads-admin__state {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.leads-admin__state--open {
+  background: var(--status-yellow-bg);
+  color: var(--status-yellow-fg);
+}
+.leads-admin__state--closed {
+  background: var(--status-green-bg);
+  color: var(--status-green-fg);
+}
+
+.leads-admin__detail {
+  margin-top: 14px;
+}
+.leads-admin__detail h3 {
+  margin: 0 0 12px;
+}
+.leads-admin__detail h4 {
+  margin: 18px 0 8px;
+}
+
+.leads-admin__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.leads-admin__facts dt {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-2);
+}
+.leads-admin__facts dd {
+  margin: 3px 0 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* The submitter's own prose, up to 900 characters. `pre-wrap` keeps the line breaks
+   they typed: a paragraph they separated is one they meant to separate, and
+   collapsing it would change what they said. */
+.leads-admin__challenge {
+  margin: 0;
+  padding: 12px 14px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.leads-admin__challenge--empty {
+  color: var(--muted);
+  font-style: italic;
+  white-space: normal;
+}
+
+.leads-admin__moves {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.leads-admin__hint {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.leads-admin__omissions {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.leads-admin__omissions li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+.leads-admin__foot {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 16px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}

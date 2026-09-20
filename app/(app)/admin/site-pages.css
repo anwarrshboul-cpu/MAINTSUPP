@@ -1,0 +1,109 @@
+/**
+ * The website-pages editor: layout only.
+ *
+ * WHAT IS DELIBERATELY NOT HERE. `views/admin-console.css` owns `.admin-console`,
+ * `.admin-toolbar`, `.admin-field`, `.admin-notice`, `.admin-flash`, `.admin-panel`
+ * and `.admin-table`, and this screen uses all seven of them as they are.
+ * `tests/platform-admin-shell.test.mjs` has an assertion named for the alternative
+ * — "the console does not restate the admin kit's own styling" — because a second
+ * definition of a shared class is drift waiting for the first change to either copy.
+ *
+ * So everything below is either a `cms-admin` class the kit has no opinion about,
+ * or a rule scoped inside one. Tokens only: no hex literal, no colour function, and
+ * no breakpoint at all — the block editor is a single column that already narrows,
+ * and the whitelist for this area is 640 / 767 / 768 / 1024 / 1280.
+ */
+
+.cms-admin__list a {
+  color: var(--brand-primary);
+}
+
+/* Published against draft, as a word rather than only a colour. A tinted pill
+   alone would say nothing to a reader who cannot distinguish the two tints, and
+   whether a page is public is the most consequential fact on this screen. */
+.cms-admin__state {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cms-admin__state--live {
+  background: var(--status-green-bg);
+  color: var(--status-green-fg);
+}
+.cms-admin__state--draft {
+  background: var(--status-yellow-bg);
+  color: var(--status-yellow-fg);
+}
+
+.cms-admin__omissions {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.cms-admin__omissions li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+/* The page's own fields, above its blocks. A two-up grid on a wide screen without
+   a media query: `auto-fit` with a floor collapses to one column on its own, so a
+   phone gets the single column it needs and this file spends no breakpoint. */
+.cms-admin__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+/* The publication state spans the row. It is the one field on this panel that
+   decides whether anything here is public, so it does not sit in a column beside
+   a meta description as though it were the same kind of choice. */
+.cms-admin__publish {
+  grid-column: 1 / -1;
+}
+
+.cms-admin__block {
+  margin-top: 14px;
+}
+.cms-admin__block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.cms-admin__block-head small {
+  color: var(--muted);
+}
+
+.cms-admin__pairs {
+  display: block;
+  margin-top: 12px;
+}
+.cms-admin__pairs-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* A question and its answer are one row, with the remove control at its end, so a
+   pair cannot be visually separated from the button that deletes it. */
+.cms-admin__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.cms-admin__pairs > small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-2);
+}

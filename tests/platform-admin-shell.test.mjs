@@ -53,25 +53,39 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) => readFile(path.join(root, file), "utf8");
 const decommented = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** The five console entries, by the route file each lives in. */
+/**
+ * The console entries, by the route file each lives in.
+ *
+ * SEVEN. `pages` was added the day `/api/site-pages` existed and `leads` the day
+ * `GET /api/leads` stopped being a 501 — which is the rule in
+ * `platform-sections.ts` being kept rather than bent: a rail entry is a promise that
+ * there is something behind it. The four screens with no server side are still
+ * absent, and the test below still proves it.
+ *
+ * THE ORDER MATTERS: the assertion below deep-equals this list against
+ * `PLATFORM_SECTION_KEYS`, so these must stay in the catalogue's order. `pages`
+ * precedes `leads` because that is the order the two phases merged in.
+ */
 const ENTRIES = [
   ["", "app/(app)/admin/page.tsx", "/admin"],
   ["clients", "app/(app)/admin/clients/page.tsx", "/admin/clients"],
   ["users", "app/(app)/admin/users/page.tsx", "/admin/users"],
   ["roles", "app/(app)/admin/roles/page.tsx", "/admin/roles"],
   ["audit", "app/(app)/admin/audit/page.tsx", "/admin/audit"],
+  ["pages", "app/(app)/admin/pages/page.tsx", "/admin/pages"],
+  ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
 ];
 
 /* ------------------------------------------------------------------ */
 /* The catalogue                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the console lists five screens, and every one has a route", async () => {
-  assert.equal(PLATFORM_SECTIONS.length, 5);
+test("the console lists seven screens, and every one has a route", async () => {
+  assert.equal(PLATFORM_SECTIONS.length, ENTRIES.length);
   assert.deepStrictEqual(
     [...PLATFORM_SECTION_KEYS],
     ENTRIES.map(([key]) => key),
-    "the catalogue and the route files must name the same five screens in the same order",
+    "the catalogue and the route files must name the same screens in the same order",
   );
   for (const [key, file, route] of ENTRIES) {
     await read(file); // throws if the route is missing
@@ -194,7 +208,7 @@ test("the catalogue is a plain module a server component can read", async () => 
 /* The two guards                                                      */
 /* ------------------------------------------------------------------ */
 
-test("all five entries call both guards, in the order that matters", async () => {
+test("every entry calls both guards, in the order that matters", async () => {
   for (const [key, file, route] of ENTRIES) {
     const source = await read(file);
     const code = decommented(source);
@@ -455,7 +469,7 @@ test("each screen names itself in the document title", async () => {
     assert.ok(match, `${file} must set a metadata title`);
     titles.add(match[1]);
   }
-  assert.equal(titles.size, ENTRIES.length, "five screens, five distinct titles");
+  assert.equal(titles.size, ENTRIES.length, "one distinct browser title per screen");
 });
 
 /* ------------------------------------------------------------------ */
@@ -553,7 +567,7 @@ test("the platform signal shares the one context read", async () => {
   );
 });
 
-test("the five console paths are in the auth-guard's live list", async () => {
+test("every console path is in the auth-guard's live list", async () => {
   const guard = await read("tests/portal-auth-guard.test.mjs");
   const list = guard.slice(guard.indexOf("PROTECTED_PATHS"), guard.indexOf("];", guard.indexOf("PROTECTED_PATHS")));
   for (const [, , route] of ENTRIES) {

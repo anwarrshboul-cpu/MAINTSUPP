@@ -2326,3 +2326,58 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
    the crop is vertical, and each stage sets its own `object-position` inline
    where centring it would cut the subject's head off. */
 .wf__photo{display:block;width:100%;aspect-ratio:auto;object-fit:cover;object-position:center}
+
+/* ------------------------------------------------------------------ *
+ * CMS BLOCKS (/p/<slug>)
+ *
+ * SPACING ONLY, AND NO MEDIA QUERY AT ALL. Everything visual below is
+ * borrowed: .m-section and .m-shell give the page its frame, .m-eyebrow,
+ * .m-lead, .m-prose and .btn--primary give each block its type and its
+ * button. What was missing was the vertical rhythm BETWEEN blocks, since
+ * a CMS page is an arbitrary stack rather than a designed sequence.
+ *
+ * Not one declaration here opens a breakpoint, and that is deliberate.
+ * Four separate tests cap the number of distinct widths in this file --
+ * the tightest at 28 against 23 in use -- so five remain for the whole
+ * future of the site. A block library that spent them on itself would be
+ * taking them from the pages that still have to be designed. Reusing
+ * classes that already narrow correctly on a phone costs none.
+ * ------------------------------------------------------------------ */
+.cms-block { margin-top: var(--gap-block); }
+.cms-block:first-child { margin-top: 0; }
+
+/* A heading block owns the gap under itself, so the block after it does not
+   also add one and leave a double step below every heading. */
+.cms-block--heading { margin-bottom: calc(var(--gap-block) * -0.4); }
+.cms-block--heading h2 { margin: 0 0 10px; }
+.cms-block--heading .m-lead { margin-bottom: 0; }
+
+.cms-block--bullets h3,
+.cms-block--faq h3 { margin: 0 0 10px; }
+.cms-list { margin: 0; padding-left: 20px; }
+.cms-list li { margin: 6px 0; font-size: 16px; line-height: 1.6; }
+
+/* A definition list, not an accordion: readable with no script, and the right
+   element for a pair. The pair is a block so a question and its answer cannot
+   be separated by a column break or a page break. */
+.cms-faq { margin: 0; }
+.cms-faq__pair {
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+  break-inside: avoid;
+}
+.cms-faq__pair:first-child { border-top: 0; padding-top: 0; }
+.cms-faq dt { font-weight: 600; color: var(--charcoal); }
+.cms-faq dd { margin: 6px 0 0; font-size: 16px; line-height: 1.6; color: var(--slate); }
+
+/* The one block with a call to action. A tinted card rather than a bare
+   heading, so a stack of paragraphs does not end in something that reads like
+   another paragraph that happens to be a link. */
+.cms-block--cta {
+  padding: var(--gap-pad);
+  background: var(--steel-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+}
+.cms-block--cta h3 { margin: 0 0 8px; }
+.cms-block--cta p { margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: var(--slate); }

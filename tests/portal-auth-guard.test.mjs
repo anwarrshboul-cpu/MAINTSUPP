@@ -71,7 +71,7 @@ const PROTECTED_PATHS = [
   "/dashboard/account/security",
   "/dashboard/teams",
   "/admin/reconcile",
-  /* The Platform Super Admin console — §5. Every one of its five entries is
+  /* The Platform Super Admin console — §5. Every one of its seven entries is
      protected by TWO guards, and this list checks the first: an anonymous request
      must reach `/login?next=<the address asked for>` and carry no body. The second
      guard, `requirePlatformAdmin`, is asserted by
@@ -82,6 +82,8 @@ const PROTECTED_PATHS = [
   "/admin/users",
   "/admin/roles",
   "/admin/audit",
+  "/admin/pages",
+  "/admin/leads",
 ];
 
 /**

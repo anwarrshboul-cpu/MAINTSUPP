@@ -23,10 +23,10 @@
  * dashboard sidebar "would duplicate navigation another part of the app owns and
  * would drift from it the first time either changed".
  *
- * WHY FIVE SCREENS AND NOT TEN
+ * WHY SEVEN SCREENS AND NOT TEN
  *
- * The console is the shell plus the screens that EXIST. Five platform reads exist
- * today and every one is mounted here:
+ * The console is the shell plus the screens that EXIST. Seven platform surfaces
+ * exist today and every one is mounted here:
  *
  *   Dashboard   `GET /api/admin/clients` totals — platform-wide already
  *   Clients     `AdminClientsView`
@@ -35,6 +35,12 @@
  *   Audit       `GET /api/audit`, which is already platform-wide for a Super
  *               Admin and is the only route that also returns workspace-less
  *               events
+ *   Pages       `/api/site-pages` — a real read, write and delete, and a real
+ *               public page at `/p/<slug>`
+ *   Enquiries   `/api/leads`, whose GET was a hard 501 until it was listed
+ *
+ * The last two both prove the rule below rather than weakening it: each was listed
+ * on the day it had a server side, and not before.
  *
  * Branding, Integrations, Billing and platform Settings are NOT listed. Each
  * needs a server side that does not exist — in Billing's case a payment
@@ -110,6 +116,49 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     icon: "list",
     blurb: "What happened, who did it, and where — across every workspace.",
     capability: "audit.read",
+  },
+  /*
+   * Website pages, added when its API arrived — which is the rule above being
+   * kept rather than bent. `app/api/site-pages/route.ts` is a real read, a real
+   * write and a real delete, gated on the same `scope.platformAdmin` this console
+   * is, and `/p/<slug>` is a real public page.
+   *
+   * `capability: null` is the honest answer, and this was the first entry to need
+   * it. The five above name the capability their own API enforces so the console
+   * and the API cannot drift. This API enforces no capability at all: every
+   * capability in this product is per-workspace, and MAINTSUPP's own marketing
+   * site is not in a workspace — there is one of it, and an anonymous visitor
+   * has no account to scope by. Reaching this console IS the rule, which is the
+   * case the field was declared nullable for.
+   */
+  {
+    key: "pages",
+    label: "Website pages",
+    icon: "document",
+    blurb: "The pages of maintsupp.com that are edited rather than coded.",
+    capability: null,
+  },
+  /*
+   * Website enquiries, added when its API arrived — the same rule, kept again.
+   * `GET /api/leads` was a hard 501, so there genuinely was nothing behind a rail
+   * entry; now there is a read, a status write and an audit trail.
+   *
+   * `capability: null` here for a STRONGER reason than the entry above, and it is
+   * worth keeping both statements because they are not the same argument. A public
+   * enquiry has no account, so the intake route once filed it under the PRIMARY
+   * active organisation — measured, a client company's workspace. A workspace
+   * capability would therefore have shown that customer every enquiry MAINTSUPP has
+   * ever received from its own website, and `scopedDb` would have delivered it
+   * correctly. New enquiries now go to a platform-owned intake workspace
+   * (`db/website-leads-workspace.ts`), and `platformAdmin` remains the only honest
+   * gate for reading any of them.
+   */
+  {
+    key: "leads",
+    label: "Website enquiries",
+    icon: "inbox",
+    blurb: "What the public enquiry form has taken, and where each one has got to.",
+    capability: null,
   },
 ] as const;
 

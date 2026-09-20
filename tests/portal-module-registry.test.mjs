@@ -292,12 +292,25 @@ test("three capabilities are never named on any module, whatever the reason", as
   }
 
   /* And the migration must not seed one either — a row cannot set the capability
-     at all, which is the structural version of this rule. */
+     at all, which is the structural version of this rule.
+
+     RE-POINTED from a fixed 3,000-character window to this function's own body,
+     bounded by its closing brace.
+
+     The window was a proxy for "this stage" and it stopped being one the moment
+     another stage was added after it: the website-CMS migration landed inside the
+     3,000 characters, and its header explains in prose why `navigation.edit` is the
+     wrong instrument for an installation-wide table. A sentence agreeing with this
+     rule was read as breaking it.
+
+     Bounding at the next declaration was not enough either — measured, that still
+     swept in the following stage's doc comment. A closing brace at column zero is
+     the end of a top-level function in this file, since everything inside one is
+     indented, so this reads the stage and nothing else. */
   const init = await read("db/init.ts");
-  const stage = init.slice(
-    init.indexOf("async function ensurePortalModuleSettings"),
-    init.indexOf("async function ensurePortalModuleSettings") + 3000,
-  );
+  const start = init.indexOf("async function ensurePortalModuleSettings");
+  const end = init.indexOf("\n}\n", start);
+  const stage = init.slice(start, end === -1 ? undefined : end);
   for (const capability of never) {
     assert.ok(
       !stage.includes(capability),

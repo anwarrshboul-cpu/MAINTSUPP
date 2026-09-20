@@ -50,12 +50,19 @@ const DECLARING = [
   "app/(marketing)/contractors/page.tsx",
   /* These four declared NO canonical until the marketing-canonical fix, so each
      inherited the root's `canonical: "/"` and claimed to be the homepage. They now
-     state their own absolute URL, which puts them in this test's subject — added by
-     hand because the header above says why this list is not a glob. */
+     state their own absolute URL, which puts them in this test's subject. */
   "app/(marketing)/faqs/page.tsx",
   "app/(marketing)/privacy/page.tsx",
   "app/(marketing)/terms/page.tsx",
   "app/(marketing)/cookies/page.tsx",
+  /* And the CMS route, which builds its canonical and its og:url from the page's
+     slug in `generateMetadata` rather than from a literal. It has to declare one for
+     the same reason the four above now do.
+
+     All five were added BY HAND, in two separate phases, because the header above
+     says why this list is not a glob: a glob would silently stop covering a file
+     that moved, and noticing exactly that is what this test is for. */
+  "app/(marketing)/p/[slug]/page.tsx",
   "public/robots.txt",
   "public/sitemap.xml",
   "worker/index.ts",
