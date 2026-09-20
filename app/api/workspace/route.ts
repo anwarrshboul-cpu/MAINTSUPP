@@ -45,6 +45,7 @@ import {
   scopedDb,
   scopedDbWithCapability,
 } from "../../lib/tenant-db";
+import { poundsFromPenceSum, sumCostPenceSql } from "../../lib/cost-sql";
 import { getContractor, listContractors } from "../../lib/contractor-repository";
 import {
   CANONICAL_REGISTER,
@@ -839,7 +840,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         assigned: count(),
         completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
         urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spendPence: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -855,7 +856,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         assigned: count(),
         completed: sql<number>`sum(case when ${completedJobPredicate} then 1 else 0 end)`,
         urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = ${"Urgent"} and not (${completedJobPredicate}) then 1 else 0 end)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spendPence: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -1216,7 +1217,15 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
       assignedJobs: Number(byId?.assigned ?? 0) + Number(byName?.assigned ?? 0),
       completedJobs: Number(byId?.completed ?? 0) + Number(byName?.completed ?? 0),
       urgentJobs: Number(byId?.urgent ?? 0) + Number(byName?.urgent ?? 0),
-      spend: Number(byId?.spend ?? 0) + Number(byName?.spend ?? 0),
+      /*
+       * ADDED IN PENCE, divided once.
+       *
+       * These are two separate aggregates -- the jobs joined by `contractor_id` and
+       * the ones matched only by name -- and this is the line that merges them.
+       * Converting each to pounds first and adding would round twice and then add two
+       * floats, which is the accumulation the SQL change exists to remove.
+       */
+      spend: poundsFromPenceSum(Number(byId?.spendPence ?? 0) + Number(byName?.spendPence ?? 0)),
       /* Zero is a real answer here, not an absent one — see the type. */
       documentCount: documentsByContractor.get(contractor.id) ?? 0,
       /*

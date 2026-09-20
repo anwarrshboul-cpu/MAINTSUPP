@@ -1682,6 +1682,22 @@ function splitColumnDefinitions(body: string): string[] {
  */
 async function ensureLegacyColumns(d1: D1DatabaseLike) {
   const additions: Array<[string, string, string]> = [
+    /*
+     * The same money as `cost`, in integer pence -- section 72.
+     *
+     * ADDITIVE, NULLABLE, AND `cost` IS UNTOUCHED, which is D7's conditions 1, 2 and 3
+     * by construction. `cost` is a float and the only float money column in this
+     * schema holding data; money lives in `*_pence INTEGER` in 44 columns across 23
+     * tables, so this follows the convention rather than inventing one.
+     *
+     * NO BACKFILL HERE, deliberately. `applyMigrations` runs on the boot path of a
+     * request, and a backfill placed here would be an unbounded UPDATE over every
+     * workspace's financial history on somebody's first page load. The column arrives
+     * empty and `app/lib/cost-sql.ts` copes: it prefers `cost_pence` and falls back to
+     * `round(cost * 100)`, so an un-backfilled workspace reads exactly as it does
+     * today. The backfill is a separate, individually reconciled operation.
+     */
+    ["maintenance_requests", "cost_pence", "INTEGER"],
     ["maintenance_requests", "approved_by", "TEXT"],
     ["maintenance_requests", "invoice", "TEXT"],
     ["maintenance_requests", "form_url", "TEXT"],

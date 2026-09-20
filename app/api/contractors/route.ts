@@ -51,6 +51,7 @@ import {
   contractorCertifications,
   maintenanceRequests,
 } from "../../../db/schema";
+import { poundsFromPenceSum, sumCostPenceSql } from "../../lib/cost-sql";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 import {
   aliasesByContractor,
@@ -202,7 +203,10 @@ export async function GET(request: Request) {
                 assigned: count(),
                 completed: sql<number>`sum(case when ${maintenanceRequests.stage} = 'Completed' then 1 else 0 end)`,
                 urgent: sql<number>`sum(case when ${maintenanceRequests.priority} = 'Urgent' and ${maintenanceRequests.stage} <> 'Completed' then 1 else 0 end)`,
-                spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+                /* PENCE, summed as integers. `sum(cost)` accumulated floats; see
+                   `app/lib/cost-sql.ts` for why the round precedes the cast and why
+                   `cost_pence` is preferred with the decimal as the fallback. */
+                spendPence: sumCostPenceSql,
               })
               .from(maintenanceRequests)
               .where(
@@ -246,7 +250,9 @@ export async function GET(request: Request) {
             assigned: number;
             completed: number;
             urgent: number;
-            spend: number;
+            /* Pence, matching the select above. This is the empty-workspace branch of
+               the ternary, so its shape has to follow or the two arms do not unify. */
+            spendPence: number;
           }>,
           [] as Array<{ contractorId: string | null; total: number }>,
           [] as Array<typeof contractorCertifications.$inferSelect>,
@@ -343,7 +349,8 @@ export async function GET(request: Request) {
           assignedJobs: Number(jobs?.assigned ?? 0),
           completedJobs: Number(jobs?.completed ?? 0),
           urgentJobs: Number(jobs?.urgent ?? 0),
-          spend: Number(jobs?.spend ?? 0),
+          /* Divided once, here, at the edge -- on an exact integer. */
+          spend: poundsFromPenceSum(Number(jobs?.spendPence ?? 0)),
           documentCount: documentsById.get(contractor.id) ?? 0,
           /*
            * WHERE THIS RECORD LIVES — the record id, the scope it belongs to,
