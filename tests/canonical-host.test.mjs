@@ -48,6 +48,21 @@ const DECLARING = [
   "app/layout.tsx",
   "app/(marketing)/page.tsx",
   "app/(marketing)/contractors/page.tsx",
+  /* These four declared NO canonical until the marketing-canonical fix, so each
+     inherited the root's `canonical: "/"` and claimed to be the homepage. They now
+     state their own absolute URL, which puts them in this test's subject. */
+  "app/(marketing)/faqs/page.tsx",
+  "app/(marketing)/privacy/page.tsx",
+  "app/(marketing)/terms/page.tsx",
+  "app/(marketing)/cookies/page.tsx",
+  /* And the CMS route, which builds its canonical and its og:url from the page's
+     slug in `generateMetadata` rather than from a literal. It has to declare one for
+     the same reason the four above now do.
+
+     All five were added BY HAND, in two separate phases, because the header above
+     says why this list is not a glob: a glob would silently stop covering a file
+     that moved, and noticing exactly that is what this test is for. */
+  "app/(marketing)/p/[slug]/page.tsx",
   "public/robots.txt",
   "public/sitemap.xml",
   "worker/index.ts",
@@ -188,10 +203,29 @@ test("the preview-alias guard accepts both of this project's production domains"
      day the primary is switched between the apex and www. Both belong to this
      project, so both are accepted and the guard still catches a third. Pinned
      here rather than in the alias suite because the reason lives with the
-     one-host rule. */
+     one-host rule.
+
+     RE-POINTED, and it found a real defect rather than merely being stale. This
+     expected www as `EXPECTED_PRODUCTION` and the apex as the ALT, which was right
+     before the host migration. Afterwards the script was changed to the apex --
+     correctly -- but its ALT was changed to the apex too, so BOTH constants held
+     the same value and the pair could not do the one thing its own comment says it
+     is for. Measured on the live project: `maintsupp.com` has no redirect,
+     `www.maintsupp.com` 308s to it, and both are production domains of this
+     project. So the primary is the apex and the OTHER one is www. */
   const script = await load("scripts/update-preview-alias.sh");
-  assert.match(script, /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/www\.maintsupp\.com\}"/);
-  assert.match(script, /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-https:\/\/maintsupp\.com\}"/);
+  assert.match(script, /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-https:\/\/maintsupp\.com\}"/);
+  assert.match(script, /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-https:\/\/www\.maintsupp\.com\}"/);
+  /* And the two must differ, which is the property that actually matters and the
+     one nothing was checking. */
+  const primary = /EXPECTED_PRODUCTION="\$\{EXPECTED_PRODUCTION:-([^}]+)\}"/.exec(script);
+  const alternate = /EXPECTED_PRODUCTION_ALT="\$\{EXPECTED_PRODUCTION_ALT:-([^}]+)\}"/.exec(script);
+  assert.ok(primary && alternate, "both constants must be declared");
+  assert.notEqual(
+    primary[1],
+    alternate[1],
+    "two identical constants accept one domain and pretend to accept two",
+  );
   assert.match(
     script,
     /production_verdict "\$before" "\$after" "\$EXPECTED_PRODUCTION\|\$EXPECTED_PRODUCTION_ALT"/,

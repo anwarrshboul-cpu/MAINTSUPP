@@ -82,6 +82,72 @@
   --status-red-wash: #ffeaec;
   --status-blue-wash: #e7f7fe;
 
+  /*
+   * ===========================================================================
+   * CHART SERIES — the always-dark dashboards' accents, on :root where an
+   * override can reach them.
+   *
+   * WHY THESE EXIST AT ALL. The four Operations-Centre dashboards are a
+   * deliberately always-dark island: `ops/ov-dash.css` sets `color-scheme: dark`
+   * on `.ov-dash` and declares its own grounds there. It also used to declare its
+   * own accents there, and that is what made the brand colours stop at the edge
+   * of a chart. A CSS custom property resolves from the NEAREST ancestor that
+   * declares it, so a `:root` override emitted by `resolveThemeCss` can never
+   * reach a property `.ov-dash` declares for itself -- specificity and document
+   * order are both irrelevant. These are a new set of names the island does NOT
+   * declare, so the island references them and the override is what they resolve
+   * to.
+   *
+   * DECLARED ONCE, WITH NO DARK COUNTERPART, exactly as `--rail-*` is and for the
+   * same reason: the surface is always dark, so a light-theme value would be
+   * solved against the wrong ground. `deriveChartRung` takes no mode.
+   *
+   * THE VALUES ARE THE SHIPPED PALETTE, UNCHANGED. Each is
+   * `solveForContrast(base, #102630, 3)` -- `AA_FILL`, because a series is a
+   * graphical object rather than text -- and every shipped base already clears it
+   * with room (4.83:1 for danger, 11:1 for warning), so the solve returns the base
+   * untouched. A workspace that has chosen nothing sees precisely what it saw
+   * before.
+   * ===========================================================================
+   */
+  --chart-primary: #12b4a8;
+  --chart-info: #38bdf8;
+  --chart-success: #25d98b;
+  --chart-warning: #ffd447;
+  --chart-danger: #ff4d5e;
+  --chart-attention: #ff8a3d;
+
+  /*
+   * ===========================================================================
+   * TYPEFACES — the two families the portal sets, on :root so a workspace can
+   * change them.
+   *
+   * WHY THESE EXIST. `app/brand-overrides.css` named `Inter` for the body and
+   * `Manrope` for headings, and the portal loaded NEITHER: there is no
+   * `@font-face` anywhere, no font file in the tree, no `next/font`, and the
+   * `(app)` layout emits no font `<link>`. So the typeface a customer saw was
+   * already whatever their own machine happened to have, and two machines
+   * rendered the product differently. Naming a face you do not ship is not a
+   * default -- it is an accident with a plausible-looking cause.
+   *
+   * WHY ONLY THE FAMILY. The family funnels through one declaration per role, so
+   * a token reaches all of it. Sizes funnel nowhere: 2,043 `font-size`
+   * declarations across `app/**`, ten of which read a `var()`. A size token would
+   * move ten rules. See the header of `app/lib/theme-tokens.ts`.
+   *
+   * DECLARED ONCE, no dark counterpart. A typeface does not change with the
+   * theme, and restating it would invite the two blocks to drift.
+   *
+   * EVERY CHOICE RESOLVES LOCALLY. `FONT_STACKS` in `theme-tokens.ts` lists only
+   * stacks that need no network request -- no layout shift, no third party on the
+   * critical path, and nothing new to license. The board's line lengths,
+   * truncation points and tabular-figure alignments were measured against
+   * metrics like these.
+   * ===========================================================================
+   */
+  --type-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --type-display: Manrope, Inter, ui-sans-serif, system-ui, sans-serif;
+
   --text-primary: #132537;
   --text-secondary: #4e5f6f;
   --text-muted: #64707b;
@@ -1645,7 +1711,7 @@ body {
   margin: 0;
   background: var(--canvas);
   color: var(--ink);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--type-body);
   text-rendering: optimizeLegibility;
 }
 
@@ -10721,7 +10787,7 @@ th.sheet-column--name {
 .evidence-viewer button,
 .evidence-viewer input,
 .evidence-viewer select {
-  font-family: "Segoe UI", var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: "Segoe UI", var(--type-body);
   letter-spacing: normal;
 }
 

@@ -75,9 +75,20 @@ import {
  * This layout is async now, which it was not before. It wraps every screen that
  * loads `globals.css`, so putting the lookup here is what stops the next page
  * from forgetting it — the same argument `page-guard.ts` makes for putting the
- * session check at the route entry. The cost is bounded deliberately: the read
- * is cached per isolate for 30 seconds by `theme-repository.ts`, and it is
- * skipped entirely for a request with no session.
+ * session check at the route entry.
+ *
+ * THE COST, AND A CORRECTION. This comment used to say the read "is cached per
+ * isolate for 30 seconds by `theme-repository.ts`". It is not, and has not been
+ * since authenticated QA against the deployed Preview proved that cache wrong: a
+ * value was changed, the database showed the new state, and the API kept answering
+ * with the old one, because the write invalidated one serverless instance while the
+ * read landed on another. The cache was removed and
+ * `tests/theme-token-foundation.test.mjs` now asserts its ABSENCE.
+ *
+ * So the real bound is the other half of that sentence, which is still true: the
+ * read is skipped entirely for a request with no session, and what remains is one
+ * indexed lookup per document request on a table that is empty for every workspace
+ * that has chosen nothing.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const themeCss = await organisationThemeCss();

@@ -1,4 +1,4 @@
-import { requirePageSession } from "../../../lib/page-guard";
+import { requireModuleAccess, requirePageSession } from "../../../lib/page-guard";
 import PortalApp, { type Section } from "../../portal/portal-app";
 
 export const dynamic = "force-dynamic";
@@ -112,6 +112,25 @@ export default async function DashboardPage({
    * assertion caught it.
    */
   const session = await requirePageSession(
+    section?.length ? `/dashboard/${section.join("/")}` : "/dashboard",
+  );
+
+  /*
+   * AND WHETHER THIS WORKSPACE STILL HAS THAT MODULE.
+   *
+   * `initialSection` above is resolved from a static table and passed through
+   * unchecked — deliberately, so a stale bookmark lands on Overview rather than
+   * a blank screen. That is the right answer for a key that never existed. It is
+   * the wrong one for a module an administrator has switched off, or one this
+   * actor's role may not reach: until now both rendered the shell and left the
+   * refusing to the APIs inside it.
+   *
+   * Every built-in section except `team` routes through this file, so this is
+   * the one place that has to remember. `tests/portal-auth-guard.test.mjs`
+   * enumerates every page and is extended to say so.
+   */
+  await requireModuleAccess(
+    initialSection,
     section?.length ? `/dashboard/${section.join("/")}` : "/dashboard",
   );
 

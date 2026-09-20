@@ -13,6 +13,7 @@ import {
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { backfillLegacyMemberships } from "./legacy-memberships";
+import { ensureWebsiteLeadsWorkspace } from "./website-leads-workspace";
 import { getD1 } from ".";
 import { defaultBoardOptions } from "./seed-options";
 import { maintenanceFormConfiguration, maintenanceOptions } from "./monday-board-spec";
@@ -262,6 +263,12 @@ async function applyMigrations(d1: D1DatabaseLike) {
    * create, so each gets a company of its own on a fresh database too.
    */
   await ensureClientCompanies(d1);
+  /* The workspace MAINTSUPP's own website enquiries are filed under. AFTER
+     `ensureClientCompanies`, because it needs `client_companies.kind` to exist, and
+     before `ensureTenantIdentities` so the workspace is present when identities are
+     reconciled. See `db/website-leads-workspace.ts` for why a public enquiry must
+     not land in `PRIMARY_ORGANISATION_ID`, which names a client company. */
+  await ensureWebsiteLeadsWorkspace(d1);
   await ensureTenantIdentities(d1);
 
   await ensureStageTwoFoundation(d1);
@@ -343,6 +350,17 @@ async function applyMigrations(d1: D1DatabaseLike) {
      statements and no seed — see `ensureThemeTokens` for why the absence of a
      row is the correct state rather than an unfinished one. */
   await ensureThemeTokens(d1);
+
+  /* The portal module registry. Two guarded DDL statements and no seed — see
+     `ensurePortalModuleSettings` for why the absence of a row is the shipped
+     state rather than a backfill waiting to happen. */
+  await ensurePortalModuleSettings(d1);
+
+  /* The website CMS. Four guarded DDL statements and no seed — see
+     `ensureSitePages` for why these two tables are installation-wide rather than
+     per-organisation, and why an empty `site_pages` is a correct installation
+     rather than an unfinished one. */
+  await ensureSitePages(d1);
 
   await repairOrphanedSectionBoards(d1);
 
@@ -6027,6 +6045,146 @@ const SLA_TARGET_SEED: ReadonlyArray<{
  * Placed after `ensureAssetsFoundation` only for reading order. It references
  * `organisations` and nothing else, so it could run at any point after Stage 1.
  */
+/**
+ * The portal module registry — which sections a workspace has switched off.
+ *
+ * A TABLE OF ITS OWN, AND NOT THREE COLUMNS ON `workspace_sections`.
+ *
+ * Extending that table was the obvious move and it is the wrong one. Every
+ * reader of it assumes an owner-created row in the `section:` namespace:
+ * `sectionsToCatalogue` DROPS a key without that prefix, so seeded built-ins
+ * would exist and draw nothing; `MAX_SECTIONS` counts rows rather than
+ * owner-created ones, so nineteen seeded rows would eat half of every
+ * workspace's budget; `loadWorkspaceSections` is a bare `.select()` that feeds
+ * both the section manager and the sidebar, so the built-ins would appear as
+ * phantom "added sections" and draw every module twice; and
+ * `repairOrphanedSectionBoards` reads that whole table on every boot, on the
+ * warm path. A module is also switched off, not deleted for thirty days, so the
+ * archive/recycle-bin lifecycle there does not apply.
+ *
+ * `enabled` is a PLAIN INTEGER and is deliberately NOT added to
+ * `BOOLEAN_COLUMNS` in `db/sqlite-to-postgres.ts`. That map is consulted by bare
+ * column NAME for comparisons, and `board_automations.enabled` is TEXT
+ * (`'on'`/`'off'`) — listing this one would start rewriting statements against
+ * that table and would break the two invariants `tests/node-pg-d1.test.mjs`
+ * holds. Keeping the column a real integer on both dialects means there is
+ * nothing to translate, which is the same choice `boards.position` and
+ * `job_access_tokens.use_count` already make.
+ *
+ * NO SEED HERE. A module with no row is enabled, exactly as a capability with
+ * no `role_capabilities` row takes its built-in default and a colour with no
+ * `theme_tokens` row takes the shipped palette. So an empty table is the
+ * shipped product, every organisation has one today, and this stage costs two
+ * guarded DDL statements rather than nineteen inserts per tenant per replay.
+ * `app/lib/portal-modules.ts` holds the list; the code decides what EXISTS and a
+ * row only ever records a workspace switching one off.
+ */
+async function ensurePortalModuleSettings(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS portal_module_settings (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         module_key TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* One row per module per organisation, so a save is an upsert rather than
+       an append and two administrators cannot leave two rows disagreeing. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS portal_module_settings_key_idx ON portal_module_settings(organisation_id, module_key)",
+    ),
+  ]);
+}
+
+/**
+ * THE WEBSITE CMS — pages and the blocks they are made of.
+ *
+ * INSTALLATION-WIDE, NOT PER-ORGANISATION, and that is the one architectural
+ * decision in this stage.
+ *
+ * Every other content table in this schema carries an `organisation_id`, because
+ * every other one holds a CUSTOMER's data. These two hold MAINTSUPP's own
+ * marketing site: there is one `maintsupp.com`, its pages are the same for every
+ * visitor, and a visitor has no account to scope by. Adding an organisation
+ * column would have invited exactly one question with no good answer — whose
+ * homepage is this? — and `resolveTenantAccess` would have had to invent a tenant
+ * for an anonymous reader to make it work.
+ *
+ * Authority comes from the platform instead: `navigation.edit`-style capabilities
+ * are per-workspace and wrong here, so these are administered from the Platform
+ * Super Admin console behind `requirePlatformAdmin`, which answers "is this
+ * MAINTSUPP staff" rather than "what may you do in your workspace".
+ *
+ * NO SEED, DELIBERATELY. An empty `site_pages` is a correct installation: the six
+ * static marketing routes are the site today and this stage does not touch them.
+ * Owner decision D5 is that the live homepage is NOT converted in this phase, so
+ * a seeded row would either duplicate a page that already exists or create one
+ * nobody asked for.
+ *
+ * WHY `published` IS A PLAIN INTEGER. `db/sqlite-to-postgres.ts` rewrites 0/1
+ * into Postgres booleans for the columns named in `BOOLEAN_COLUMNS`, matched by
+ * BARE COLUMN NAME across the whole schema. `published` is not in that list, so
+ * an integer has nothing to translate and behaves identically on both dialects —
+ * the same reasoning `portal_module_settings.enabled` records. Note what this
+ * rules out: `visible`, `active` and `archived` ARE in that map, so none of them
+ * could have been used here without becoming a boolean on Postgres.
+ *
+ * WHY THE BLOCK BODY IS ONE TEXT COLUMN. A block's fields differ by kind — a hero
+ * has an eyebrow and a headline, an FAQ has a list of pairs — and a column per
+ * field per kind would be a schema change for every new block. The shape is
+ * validated in `app/lib/cms-blocks.ts` against a closed catalogue before anything
+ * is stored, so the looseness is in the column and not in what reaches it.
+ */
+async function ensureSitePages(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS site_pages (
+         id TEXT PRIMARY KEY,
+         slug TEXT NOT NULL,
+         title TEXT NOT NULL,
+         /* What a search engine and a link preview show. Separate from the
+            title, because a page heading and a browser-tab title want different
+            lengths. NULL means "use the title", decided at render. */
+         meta_title TEXT,
+         meta_description TEXT,
+         published INTEGER NOT NULL DEFAULT 0,
+         published_at TEXT,
+         updated_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* One page per slug. Enforced by the database rather than by the writer's
+       care, because two rows with one slug is a coin toss over which page the
+       public sees. */
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS site_pages_slug_idx ON site_pages(slug)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS site_blocks (
+         id TEXT PRIMARY KEY,
+         page_id TEXT NOT NULL REFERENCES site_pages(id),
+         /* A key from the block catalogue in app/lib/cms-blocks.ts. Validated on
+            write; an unknown kind renders nothing rather than failing. */
+         kind TEXT NOT NULL,
+         position INTEGER NOT NULL DEFAULT 0,
+         /* The block's fields as JSON, validated against its kind before storage.
+            See the header for why this is one column and not a table per kind. */
+         body TEXT NOT NULL DEFAULT '{}',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    /* Read together, always: every query is "the blocks of this page, in order". */
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS site_blocks_page_idx ON site_blocks(page_id, position)",
+    ),
+  ]);
+}
+
 async function ensureThemeTokens(d1: D1DatabaseLike) {
   await d1.batch([
     d1.prepare(

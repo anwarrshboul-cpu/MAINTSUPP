@@ -47,14 +47,31 @@
    * 10.37:1, amber 11.00:1, critical 4.83:1, blue 7.30:1, green 8.48:1,
    * orange 6.67:1; `--accent-teal-light` (3.15:1) is a fill only.
    */
-  --accent-primary: #12b4a8;
-  --accent-secondary: #55e8d8;
-  --accent-amber: #ffd447;
-  --accent-critical: #ff4d5e;
-  --accent-blue: #38bdf8;
-  --accent-teal-light: #147d77;
-  --accent-green: #25d98b;
-  --accent-orange: #ff8a3d;
+  --accent-primary: var(--chart-primary);
+  /*
+   * These reference `--chart-*` rather than carrying a literal, and that is what
+   * makes a brand colour reach a chart at all.
+   *
+   * A CSS custom property resolves from the NEAREST ancestor that declares it, so
+   * while `.ov-dash` declared these values itself, a `:root` block emitted by
+   * `resolveThemeCss` could never reach them -- specificity and document order are
+   * both irrelevant to that. `--chart-*` is a set of names this island does NOT
+   * declare, so it resolves from `:root`, where the override lands.
+   *
+   * `--chart-*` is solved against the DARK ground in both themes, because this
+   * island is dark in both -- see `deriveChartRung`. That is the same treatment
+   * `--rail-*` already gets, for the same reason.
+   *
+   * Every value below is byte-identical to the literal it replaced, so nothing
+   * moves for a workspace that has chosen no colour.
+   */
+  --accent-secondary: var(--brand-light);
+  --accent-amber: var(--chart-warning);
+  --accent-critical: var(--chart-danger);
+  --accent-blue: var(--chart-info);
+  --accent-teal-light: var(--brand-muted);
+  --accent-green: var(--chart-success);
+  --accent-orange: var(--chart-attention);
   --muted: #8099a3;
   --text-primary: #f5fafc;
   --text-secondary: #b8c8ce;
@@ -67,7 +84,7 @@
   --oi-missing: var(--accent-orange);
 
   /* A week-bar at rest: the muted turquoise, the latest week the full one. */
-  --oi-bar-rest: #147d77;
+  --oi-bar-rest: var(--brand-muted);
 
   /* The shared tokens, repointed at the approved dark surfaces and inks. */
   --ov-frame: #07131c;

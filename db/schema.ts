@@ -3933,3 +3933,132 @@ export const themeTokens = sqliteTable(
     uniqueIndex("theme_tokens_key_idx").on(table.organisationId, table.tokenKey),
   ],
 );
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE PORTAL MODULE REGISTRY — a sparse overlay, never the module list.
+ *
+ * `app/lib/portal-modules.ts` decides which modules EXIST. A row here only ever
+ * records that one workspace has switched one off, so an empty table is the
+ * shipped product and every organisation has one today — the same shape
+ * `role_capabilities` uses for permissions and `theme_tokens` for colours.
+ *
+ * `enabled` is a PLAIN integer, not `{ mode: "boolean" }`, and deliberately not
+ * in `BOOLEAN_COLUMNS`. That map is consulted by bare column NAME, and
+ * `board_automations.enabled` is TEXT — listing this one would rewrite
+ * statements against that table and break both invariants in
+ * `tests/node-pg-d1.test.mjs`. An integer on both dialects has nothing to
+ * translate, which is what `boards.position` already does.
+ *
+ * THERE IS NO `required_capability` COLUMN, AND THAT IS THE POINT.
+ *
+ * One was here through the first draft of this table, "reserved" for a
+ * per-workspace override of the capability a module answers to. It was never read
+ * and never written, and it was removed before this branch merged, because a
+ * reserved column is an invitation and this particular invitation is a trap.
+ *
+ * `can()` in `app/lib/permissions.ts` consults `isForbiddenForRole` BEFORE it
+ * reads any override row, and the write side refuses to store such a row at all.
+ * So a stored capability naming something a role may never hold — `settings.edit`
+ * for a manager, `data.delete` for an owner — makes that module permanently
+ * unreachable for that role, and NO Super Admin can give it back through the
+ * product. The recovery is a code change and a deploy.
+ *
+ * The mapping therefore stays a code constant in `portal-modules.ts`, where three
+ * of the nineteen modules are deliberately NULL because no single capability is
+ * faithful to their existing rule. A row here decides one thing only: whether this
+ * workspace has switched a module off.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const portalModuleSettings = sqliteTable(
+  "portal_module_settings",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    /** A key from `PORTAL_MODULES`, e.g. `maintenance`. */
+    moduleKey: text("module_key").notNull(),
+    /** 1 or 0. Compared as an integer — see the note above. */
+    enabled: integer("enabled").notNull().default(1),
+    updatedByEmail: text("updated_by_email"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("portal_module_settings_key_idx").on(table.organisationId, table.moduleKey),
+  ],
+);
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * THE WEBSITE CMS — MAINTSUPP's own marketing pages, not a customer's data.
+ *
+ * NO `organisation_id`, AND THAT IS THE DECISION THIS PAIR OF TABLES RESTS ON.
+ *
+ * Every other content table above carries one, because every other one holds a
+ * CUSTOMER's data. These hold `maintsupp.com`: there is one of it, its pages read
+ * the same to every visitor, and a visitor has no account to scope by. An
+ * organisation column would have invited one question with no good answer — whose
+ * homepage is this? — and forced `resolveTenantAccess` to invent a tenant for an
+ * anonymous reader.
+ *
+ * Authority comes from the platform rather than the workspace: these are
+ * administered behind `requirePlatformAdmin`, which answers "is this MAINTSUPP
+ * staff", not "what may you do in your workspace".
+ *
+ * `published` is a PLAIN integer. `db/sqlite-to-postgres.ts` rewrites 0/1 into
+ * Postgres booleans for the columns in `BOOLEAN_COLUMNS`, matched by bare column
+ * NAME across the whole schema — and `published` is not one of them, so an integer
+ * has nothing to translate. Measured before choosing: `visible`, `active` and
+ * `archived` ARE in that map, so none of them could have been used here without
+ * silently becoming a boolean on one dialect only.
+ * ──────────────────────────────────────────────────────────────────────────── */
+export const sitePages = sqliteTable(
+  "site_pages",
+  {
+    id: text("id").primaryKey(),
+    /** The URL segment under `/p/`. Lowercase, hyphenated, validated on write. */
+    slug: text("slug").notNull(),
+    /** The page's own heading. */
+    title: text("title").notNull(),
+    /**
+     * What a search engine and a link preview show. Separate from `title` because
+     * a page heading and a browser-tab title want different lengths; null means
+     * "use the title", decided at render rather than copied on write.
+     */
+    metaTitle: text("meta_title"),
+    metaDescription: text("meta_description"),
+    /** 1 or 0. Compared as an integer — see the note above. */
+    published: integer("published").notNull().default(0),
+    /** When it was first published, for the record. Null while it is a draft. */
+    publishedAt: text("published_at"),
+    updatedByEmail: text("updated_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("site_pages_slug_idx").on(table.slug)],
+);
+
+export const siteBlocks = sqliteTable(
+  "site_blocks",
+  {
+    id: text("id").primaryKey(),
+    pageId: text("page_id").notNull().references(() => sitePages.id),
+    /**
+     * A key from the catalogue in `app/lib/cms-blocks.ts`. Validated on write, and
+     * narrowed again at render — an unknown kind draws nothing rather than
+     * failing, the same rule the icon renderer follows.
+     */
+    kind: text("kind").notNull(),
+    position: integer("position").notNull().default(0),
+    /**
+     * The block's fields as JSON.
+     *
+     * One column rather than a table per kind: a hero has an eyebrow and a
+     * headline, an FAQ has a list of pairs, and a column per field per kind would
+     * make every new block a schema change. The looseness is in the column and not
+     * in what reaches it — `cms-blocks.ts` validates the shape against the kind
+     * before anything is stored.
+     */
+    body: text("body").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  /* Read together, always: every query is "the blocks of this page, in order". */
+  (table) => [index("site_blocks_page_idx").on(table.pageId, table.position)],
+);

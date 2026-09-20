@@ -463,7 +463,13 @@ test("the duplicate Vercel hostname redirects, and Preview deployments do not", 
   assert.ok(host, "local-check must declare the host it probes");
   assert.notEqual(host[1], "maintsupp-portal.vercel.app", "the harness must not probe the redirected host");
   assert.equal(host[1], "maintsupp.com", "it probes the canonical host");
-  assert.match(worker, /const CANONICAL_ORIGIN = "https:\/\/www\.maintsupp\.com";/);
+  /* RE-POINTED from www to the apex. Production moved to the apex and this pin was
+     not followed, so it has been failing against correct code ever since. Measured
+     on the live project: `maintsupp.com` carries no redirect and
+     `www.maintsupp.com` 308s to it, so the apex is the host the worker should
+     canonicalise ON to. Corroborated by `public/sitemap.xml`, which is apex-only
+     and whose own test refuses any `://www.` entry. */
+  assert.match(worker, /const CANONICAL_ORIGIN = "https:\/\/maintsupp\.com";/);
   assert.match(worker, /url\.hostname === DUPLICATE_HOST/, "an exact host match, never a suffix");
   /* Comments stripped: the note above the constant has to name the mistake it
      is warning against, and a check that fails on its own rationale pushes the
@@ -492,7 +498,10 @@ test("the homepage canonical is the address the brief names", async () => {
      domain setting rather than a code change, and it is flagged in the release
      notes rather than guessed at here. */
   const homepage = await read("app/(marketing)/page.tsx");
-  assert.match(homepage, /alternates: \{ canonical: "https:\/\/www\.maintsupp\.com\/" \}/);
+  /* RE-POINTED from www to the apex, for the same reason and with the same
+     evidence as the worker pin above. A canonical naming a host that 308s asks the
+     crawler to index an address that immediately redirects. */
+  assert.match(homepage, /alternates: \{ canonical: "https:\/\/maintsupp\.com\/" \}/);
 });
 
 test("the portal mock captions an address that exists", async () => {

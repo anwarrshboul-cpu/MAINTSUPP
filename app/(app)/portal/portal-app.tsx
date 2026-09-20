@@ -178,6 +178,7 @@ import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
 import { installSessionGuard } from "./session-guard";
 import { useGreeting } from "./use-greeting";
 import { fetchRuntimeContext } from "../../lib/runtime-context";
+import { governingModule } from "../../lib/portal-modules";
 import { fetchNavigation } from "./navigation-store";
 import { publishedBoardOptions } from "../../lib/board-option-registry";
 import { RECOMMENDED_EVIDENCE_CATEGORIES } from "../../lib/workspace-data";
@@ -217,6 +218,8 @@ import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
+import { PortalModulesPanel } from "./views/portal-modules-panel";
+import { NavIconsPanel } from "./views/nav-icons-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -386,6 +389,18 @@ type RuntimeWorkspaceContext = {
    * every reader treats as "do not offer" rather than "denied".
    */
   capabilities?: Record<string, boolean>;
+  /**
+   * The portal modules this workspace has switched on AND this actor may reach
+   * — Master Specification §19, resolved server-side.
+   *
+   * Optional for the same reason `capabilities` is, and read the same way: a
+   * MISSING field means "not answered", which leaves every existing rule in
+   * `navCatalogue` deciding on its own. An EMPTY array would mean "none", and
+   * the server never sends one — `overview` and `settings` cannot be switched
+   * off, so a resolved answer always names at least the modules this actor's
+   * capabilities reach.
+   */
+  modules?: string[];
 };
 
 type WorkspaceManagerState = {
@@ -1711,6 +1726,17 @@ export default function PortalApp({
   }, [documents, requests, workspace]);
 
   /*
+   * The module check, held where an effect that mounts once can reach it.
+   *
+   * `moduleAvailable` is derived below, from a context read that lands about two
+   * seconds after mount. The popstate listener is registered once, on purpose —
+   * re-registering it whenever the context settles would tear down and re-add a
+   * window listener for no gain — so it cannot close over the memo. A ref is the
+   * standard answer and the only one that keeps the listener stable.
+   */
+  const moduleAvailableRef = useRef<((key: string) => boolean) | null>(null);
+
+  /*
    * Back and Forward, resolved the SAME WAY the server resolves a typed URL.
    *
    * This read `pathname.split("/")[1]` — one segment — while `sectionRoutes`
@@ -1737,9 +1763,25 @@ export default function PortalApp({
       const workspaceSection =
         segments[0] === "s" && segments[1] ? `section:${segments[1]}` : null;
       const slug = segments.join("/");
-      setActiveSection(
-        workspaceSection ?? routeSections[slug] ?? routeSections[segments[0] ?? ""] ?? "overview",
-      );
+      const resolved =
+        workspaceSection ?? routeSections[slug] ?? routeSections[segments[0] ?? ""] ?? "overview";
+      /*
+       * AND THE SAME MODULE CHECK A CLICK GETS.
+       *
+       * This handler calls `setActiveSection` directly rather than `setSection`,
+       * deliberately — `setSection` pushes history, and responding to a popstate
+       * by pushing would fight the Back button. But that also routed around the
+       * registry: a history entry made before a module was switched off (an
+       * administrator disables Reports in another tab; a colleague presses Back)
+       * re-rendered the disabled surface with no document request for any guard
+       * to see.
+       *
+       * `moduleAvailableRef` rather than the memo itself, because this effect
+       * mounts its listener once and must not be torn down and re-added every
+       * time the context settles.
+       */
+      const allowed = moduleAvailableRef.current;
+      setActiveSection(allowed && !allowed(resolved) ? "overview" : resolved);
       setMobileNavOpen(false);
     };
     window.addEventListener("popstate", syncSectionFromHistory);
@@ -2018,6 +2060,50 @@ export default function PortalApp({
    * workspace added. Existence, never arrangement — the merge in
    * `app/api/navigation/layout.ts` still decides order and visibility.
    */
+  /*
+   * THE MODULE REGISTRY, AS THE SIDEBAR SEES IT.
+   *
+   * `/api/context` resolves `modules` with the same `resolveModuleAccess` the
+   * page guards call, so an entry this sidebar draws and a route that refuses to
+   * open it cannot disagree. That is the property that route's own comment
+   * already claims for `capabilities`, applied to the thing §19 actually asks
+   * for: a module switched off has to LEAVE the navigation, and the client
+   * builds its own catalogue, so the server has to tell it.
+   *
+   * `null` means NOT ANSWERED — not "none". A browser holding a payload from
+   * before this field existed, or a context read still in flight, must not empty
+   * the sidebar; the capability chain below then decides alone, exactly as it
+   * did before this phase.
+   */
+  const moduleAvailable = useMemo<((key: string) => boolean) | null>(() => {
+    const listed = runtimeContext?.modules;
+    if (!Array.isArray(listed)) return null;
+    const available = new Set(listed);
+    /*
+     * `governingModule` follows `MODULE_ALIASES`, so `units` answers for Assets —
+     * `/dashboard/units` renders the Assets screen, and leaving it ungoverned
+     * would leave the whole register open at a second URL after Assets was
+     * switched off.
+     *
+     * A key it returns null for — a `section:` key, a built-in from a newer
+     * deployment than the one that answered — is not the registry's to refuse.
+     * Silence is not denial anywhere else in this chain either. Workspace
+     * sections are handled separately, below, because what they draw is a
+     * surface rather than a key.
+     */
+    return (key: string) => {
+      const governing = governingModule(key);
+      return !governing || available.has(governing);
+    };
+  }, [runtimeContext]);
+
+  /* Kept current for the popstate listener above, which mounts once. Assigned in
+     an effect rather than during render, because a render must not write to a
+     ref that another handler reads — see the note on the ref itself. */
+  useEffect(() => {
+    moduleAvailableRef.current = moduleAvailable;
+  }, [moduleAvailable]);
+
   const navCatalogue = useMemo<SidebarNavEntry[]>(
     () =>
       [
@@ -2029,6 +2115,18 @@ export default function PortalApp({
           group: entry.group,
         })),
       ].filter((entry) => {
+        /*
+         * THE REGISTRY FIRST, COMPOSED WITH THE RULES BELOW RATHER THAN
+         * REPLACING THEM.
+         *
+         * Every capability rule in this chain is left exactly as it was, and so
+         * are the tests that transcribe it as source text. The registry can only
+         * ever take an entry AWAY — it never adds one the chain would have
+         * withheld — so no rule below can be widened by accident, and a
+         * workspace that has never touched the switches gets the catalogue it
+         * gets today.
+         */
+        if (moduleAvailable && !moduleAvailable(entry.key)) return false;
         /*
          * The audit trail is the one built-in section whose EXISTENCE is
          * decided by a capability rather than only its contents.
@@ -2101,7 +2199,7 @@ export default function PortalApp({
         if (entry.key !== "audit") return true;
         return runtimeContext?.capabilities?.["audit.read"] === true;
       }),
-    [runtimeContext, workspaceSections],
+    [moduleAvailable, runtimeContext, workspaceSections],
   );
 
   /*
@@ -2154,12 +2252,34 @@ export default function PortalApp({
     !workspaceSectionsLoaded &&
     typeof activeSection === "string" &&
     activeSection.startsWith("section:");
+  /*
+   * AND A WORKSPACE SECTION CANNOT BE A THIRD DOOR ONTO A DISABLED MODULE.
+   *
+   * `SECTION_SURFACES` offers eight surfaces and every one of them is a BUILT-IN
+   * MODULE KEY — maintenance, store-documentation, documents, stores, compliance,
+   * calendar, contractors, reports. So a section named "Site reports" on the
+   * `reports` surface went on drawing the whole Reports screen, for every member,
+   * after Reports had been switched off: the section's own key is
+   * `section:<slug>`, which the registry rightly has no opinion about, and the
+   * surface underneath was never checked.
+   *
+   * Only a Super Admin can create such a section (`navigation.edit`), which limits
+   * how it arises. It does not limit who it exposes the screen to.
+   *
+   * `page-guard.ts` makes the same check on a document request, where it costs one
+   * indexed read. This is the in-page half, which that guard never sees.
+   */
+  const surfaceWithheld =
+    !!activeCustom && moduleAvailable !== null && !moduleAvailable(rawSurface);
+
   const activeSurface: Section = (
-    rawSurface in sectionMeta
-      ? rawSurface
-      : sectionPending
-        ? "__pending"
-        : "overview"
+    surfaceWithheld
+      ? "overview"
+      : rawSurface in sectionMeta
+        ? rawSurface
+        : sectionPending
+          ? "__pending"
+          : "overview"
   ) as Section;
 
   /*
@@ -2431,7 +2551,18 @@ export default function PortalApp({
     return () => window.clearTimeout(timer);
   }, [workspaceSectionsLoaded, workspaceSections, activeSection]);
 
-  const setSection = (section: string) => {
+  const setSection = (requested: string) => {
+    /*
+     * A CARD MUST NOT OPEN A MODULE THIS WORKSPACE HAS SWITCHED OFF.
+     *
+     * The sidebar no longer offers one, but the sidebar is not the only way in:
+     * `openSectionWithQuery` reaches this from an Overview counter, from a site
+     * row, from a compliance chip. The page guard catches a document request for
+     * the same address; this catches the in-page navigation the guard never
+     * sees. Overview is where it lands, because Overview is already where every
+     * other unresolvable section in this file falls back to.
+     */
+    const section = moduleAvailable && !moduleAvailable(requested) ? "overview" : requested;
     setActiveSection(section);
     setMobileNavOpen(false);
     /*
@@ -3862,6 +3993,7 @@ export default function PortalApp({
           )}
           {activeSurface === "settings" && (
             <SettingsView
+              navCatalogue={navCatalogue}
               settings={currentSettings}
               /*
                * The categories actually in use, counted from the jobs on
@@ -6601,6 +6733,7 @@ function SettingsView({
   settings,
   categories,
   busy,
+  navCatalogue,
   onSave,
   onNotify,
 }: {
@@ -6608,6 +6741,15 @@ function SettingsView({
   /** Every category the workspace's jobs actually use. */
   categories: string[];
   busy: boolean;
+  /*
+   * The live sidebar catalogue, passed down rather than rebuilt.
+   *
+   * `sectionMeta` is the single source for a built-in section's icon, and FOUR test
+   * files slice that declaration by source position — moving it or deriving a second
+   * copy is the most expensive edit in this area. The Navigation icons panel reads it
+   * from here instead.
+   */
+  navCatalogue: SidebarNavEntry[];
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
@@ -6686,6 +6828,20 @@ function SettingsView({
           need `settings.edit`, and are audited. See
           views/brand-colours-panel.tsx for why the two are not one card. */}
       <BrandColoursPanel />
+
+      {/* And which screens exist at all — Master Specification §19. Reserved to
+          Super Admin (`navigation.edit`), so the panel renders nothing for every
+          other role rather than showing a refusal; see
+          views/portal-modules-panel.tsx for why a 403 is an answer here and a
+          read-only card next door. */}
+      <PortalModulesPanel />
+
+      {/* And which glyph each sidebar entry wears — the third workspace-wide
+          presentation decision, beside the palette and the module switches. It takes
+          the live catalogue as a prop rather than rebuilding it: `sectionMeta` is the
+          one source for a built-in section's icon, and four tests slice that
+          declaration by source position, so it is read from here and never moved. */}
+      <NavIconsPanel catalogue={navCatalogue} />
 
       <section className="panel settings-card">
         <div className="settings-card__heading">

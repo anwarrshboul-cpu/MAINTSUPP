@@ -42,9 +42,23 @@ type ThemeToken = {
   label: string;
   group: string;
   description: string;
+  /*
+   * Colour or typeface, decided by the SERVER. Read rather than inferred from the
+   * key, so a token added later cannot be mis-rendered by this file guessing from
+   * its name.
+   */
+  kind: "colour" | "font";
   value: string;
   isDefault: boolean;
   seedInput: string;
+  /*
+   * The typefaces a workspace may choose, for a font token only. The server owns
+   * this list because it is the same list `validateThemeToken` refuses anything
+   * outside — a copy here would be a second source of truth for what is really a
+   * safety boundary, and the first divergence would be a select offering a face the
+   * API rejects.
+   */
+  choices: Array<{ key: string; label: string }> | null;
 };
 
 type ContrastWarning = {
@@ -104,7 +118,7 @@ export function BrandColoursPanel() {
             <Icon name="image" size={19} />
           </span>
           <div>
-            <h2>Brand colours</h2>
+            <h2>Brand colours and typeface</h2>
             <p>{failure}</p>
           </div>
         </div>
@@ -161,24 +175,51 @@ export function BrandColoursPanel() {
           <Icon name="image" size={19} />
         </span>
         <div>
-          <h2>Brand colours</h2>
+          <h2>Brand colours and typeface</h2>
           <p>
             {canEdit
               ? "Applies to everyone in this workspace, on both the dark and light themes."
               : "Applies to everyone in this workspace. You do not have permission to change these."}
           </p>
           {/*
-           * Said on the screen rather than only in a release note. These colours
-           * repaint the navigation, buttons, links, logo, badges and status
-           * chips, but NOT the charts and meters: those draw from palettes held
-           * in TypeScript rather than from these tokens, and consolidating them
-           * is its own piece of work. Letting somebody change their brand and
-           * then wonder why the donut is still teal would be the "configuration
-           * that does not affect components" this product is not allowed to ship.
+           * THIS SENTENCE USED TO SAY THE OPPOSITE, and the change is the whole of
+           * the chart-token phase.
+           *
+           * It read: "Charts and meters keep the MAINTSUPP palette for now — they
+           * are drawn from their own colour set, which is not yet configurable
+           * here." That was true and it was also the "configuration that does not
+           * affect components" this product is not allowed to ship — somebody
+           * changed their brand and the donut stayed teal.
+           *
+           * The dashboards now read `--chart-*`, which every brand and status token
+           * derives alongside its own family, so the series follow. What still does
+           * not follow is named below rather than left for somebody to discover: the
+           * greys that mean "not recorded", and the two ordinal ramps, which need a
+           * derivation this product does not have yet. Naming them is the honest
+           * half of the claim.
            */}
           <p className="brand-colours__scope">
-            Charts and meters keep the MAINTSUPP palette for now — they are drawn
-            from their own colour set, which is not yet configurable here.
+            The dashboard charts follow these colours too. Two things deliberately
+            do not: the greys that mean “not recorded”, so an absence can never be
+            mistaken for a category, and the graded teal scales on the spend
+            matrix.
+          </p>
+          {/*
+            * THE TYPEFACE'S OWN BOUNDARY, said here rather than discovered.
+            *
+            * Every face offered resolves on the reader's own machine, so choosing
+            * one costs no download and shifts no layout. What is NOT offered is a
+            * text size: the product sets over two thousand sizes individually, so a
+            * size control would move a handful of them and leave the rest — and the
+            * form fields are deliberately pinned at 16px because a smaller one makes
+            * iPhones zoom in and never zoom back out.
+            */}
+          <p className="brand-colours__scope">
+            The typeface applies across the portal. Text <em>sizes</em> are not
+            configurable — they are set per surface so the board and the dashboards
+            stay legible at their own densities. Code and monospaced figures keep
+            their own face, and the pages handed to contractors and to people
+            accepting an invitation keep the MAINTSUPP face.
           </p>
         </div>
       </div>
@@ -188,24 +229,70 @@ export function BrandColoursPanel() {
           const value = draft[token.key] ?? token.value;
           return (
             <div className="brand-colour" key={token.key}>
-              <label className="brand-colour__swatch" htmlFor={`tt-${token.key}`}>
-                <input
-                  id={`tt-${token.key}`}
-                  type="color"
-                  value={value}
-                  disabled={!canEdit || busy}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      [token.key]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
+              {token.kind === "font" ? (
+                /*
+                 * A SELECT, not a text field, and that is the safety boundary made
+                 * visible. `validateThemeToken` accepts only a key from
+                 * `FONT_STACKS` and stores the KEY — the stack is looked up on the
+                 * server at render, so no part of what is typed here could ever
+                 * reach the `<style>` element. A free-text font field would be a
+                 * much harder string to make safe than a hex.
+                 *
+                 * Native `<select>` rather than a custom listbox: it is one control
+                 * with keyboard, screen-reader and mobile behaviour already correct,
+                 * and this panel has six of them at most.
+                 */
+                <div className="brand-colour__face">
+                  {/*
+                    * `aria-label` rather than a visually-hidden `<span>`: the row
+                    * already shows `token.label` in its body, so a second copy would
+                    * be read twice by a screen reader — and the only
+                    * visually-hidden utility in this product lives in
+                    * `section-manager.css`, which this panel does not import, so the
+                    * span would simply have rendered as visible text.
+                    */}
+                  <select
+                    aria-label={token.label}
+                    id={`tt-${token.key}`}
+                    value={value}
+                    disabled={!canEdit || busy}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        [token.key]: event.target.value,
+                      }))
+                    }
+                  >
+                    {(token.choices ?? []).map((choice) => (
+                      <option key={choice.key} value={choice.key}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <label className="brand-colour__swatch" htmlFor={`tt-${token.key}`}>
+                  <input
+                    id={`tt-${token.key}`}
+                    type="color"
+                    value={value}
+                    disabled={!canEdit || busy}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        [token.key]: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              )}
               <div className="brand-colour__body">
                 <strong>{token.label}</strong>
                 <small>{token.description}</small>
-                <code>{value}</code>
+                {/* A hex is worth showing literally; a font KEY is not — the
+                    select already shows the label, and "inter" underneath it would
+                    be noise. */}
+                {token.kind === "colour" ? <code>{value}</code> : null}
               </div>
               {canEdit && !token.isDefault ? (
                 <button

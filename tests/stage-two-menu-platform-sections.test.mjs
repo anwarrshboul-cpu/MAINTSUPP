@@ -324,8 +324,13 @@ test("W02-02 the Add New Section button exists and calls the endpoint that creat
   assert.match(portal, /<SectionManager/);
   assert.match(
     portal,
-    /onChanged=\{\(\) => \{\s*void reloadWorkspaceSections\(\);/,
-    "a section added in the dialog must be in the sidebar behind it",
+    /onChanged=\{\(\) => \{\s*void reloadWorkspaceSections\(\{ force: true \}\);/,
+    "a section added in the dialog must be in the sidebar behind it. Re-pointed, " +
+      "not relaxed: the call gained `{ force: true }` in an earlier batch, which " +
+      "makes the contract STRONGER — the reload now bypasses the memo instead of " +
+      "possibly answering the dialog with the catalogue it had before the write. " +
+      "Pinning the argument keeps that, because dropping it would reintroduce a " +
+      "new section that does not appear until the next page load.",
   );
 });
 
