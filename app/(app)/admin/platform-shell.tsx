@@ -75,6 +75,7 @@ import {
   platformSectionPath,
 } from "../../lib/platform-sections";
 import { PlatformOverview } from "./platform-overview";
+import { SitePagesView } from "./site-pages-view";
 import "./platform-shell.css";
 
 export function PlatformShell({
@@ -130,6 +131,8 @@ export function PlatformShell({
         return <AdminRolesView />;
       case "audit":
         return <AuditLog />;
+      case "pages":
+        return <SitePagesView />;
       default:
         return <PlatformOverview />;
     }
