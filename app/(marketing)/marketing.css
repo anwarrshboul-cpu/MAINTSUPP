@@ -1974,7 +1974,7 @@ fieldset.field:focus{outline:none}
   .mappin,.mappin.is-drop{transition:none;animation:none}
 }
 
-/* ==========================================================================
+/* ===================================================================
    MOBILE HARDENING — verified at 360px, 390px, 414px and 768px
    ========================================================================== */
 @media (max-width: 900px){
@@ -2126,7 +2126,7 @@ img,svg,table{max-width:100%}
 @media (prefers-reduced-motion: reduce){.ph__img{transition:none}}
 
 
-/* ==========================================================================
+/* ===================================================================
    MOBILE USABILITY — verified on a simulated iPhone in Chrome
    ========================================================================== */
 
@@ -2381,3 +2381,14 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
 }
 .cms-block--cta h3 { margin: 0 0 8px; }
 .cms-block--cta p { margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: var(--slate); }
+
+/* Breadcrumbs share the current page's content width. Wrapping and zero
+   minimum widths keep longer future sector names usable on small screens. */
+.m-breadcrumbs { margin: 0 0 24px; font-size: 0.875rem; line-height: 1.5; color: var(--ink); }
+.m-breadcrumbs ol { display: flex; flex-wrap: wrap; gap: 4px 10px; list-style: none; padding: 0; margin: 0; }
+.m-breadcrumbs li { display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
+.m-breadcrumbs a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.m-breadcrumbs a:hover { color: var(--teal); }
+.m-breadcrumbs a:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 2px; }
+.m-breadcrumbs [aria-current="page"] { font-weight: 600; }
+.m-breadcrumbs__separator { color: var(--muted); }
