@@ -1,4 +1,4 @@
-/* Marketing site — Stage 11, Group B.
+/* Marketing site â€” Stage 11, Group B.
    Standalone: this file never loads globals.css or brand-overrides.css.
    Breakpoints: 640 / 768 / 1024 only. Mobile-first, min-width only. */
 
@@ -6,7 +6,7 @@
    the earlier `.m-*` chrome. Deliberately supplies ONLY custom properties:
    this element wraps the whole marketing site, so setting colour, background,
    font or padding here would override the ported design system below. `--ink`
-   and `--teal` are omitted for exactly that reason — they now resolve to the
+   and `--teal` are omitted for exactly that reason â€” they now resolve to the
    landing page's own values. */
 .m-root {
   --paper: #ffffff;
@@ -165,7 +165,7 @@
 .m-card ul, .m-evidence, .m-trades ul, .m-sectors ul { margin: 12px 0 0; padding-left: 20px; }
 .m-card li, .m-evidence li, .m-trades li, .m-sectors li { margin: 5px 0; font-size: 15px; }
 
-/* Accordions — stages, sectors and faq share one pattern.
+/* Accordions â€” stages, sectors and faq share one pattern.
    Trades left this group when it became a rail; see .m-trades__ below. */
 .m-stages, .m-sectors, .m-faq {
   display: grid;
@@ -212,7 +212,7 @@
   padding: 0 16px 16px;
 }
 
-/* Trades — a rail, so all eight stay visible rather than hiding behind a click */
+/* Trades â€” a rail, so all eight stay visible rather than hiding behind a click */
 .m-trades { display: grid; gap: 18px; margin-top: 22px; }
 
 .m-trades__rail {
@@ -266,7 +266,7 @@
 
 .m-evidence { list-style: none; padding: 0; }
 .m-evidence li { padding: 12px 0 12px 26px; border-bottom: 1px solid var(--line); position: relative; }
-.m-evidence li::before { content: "✓"; position: absolute; left: 0; color: var(--teal); font-weight: 700; }
+.m-evidence li::before { content: "âœ“"; position: absolute; left: 0; color: var(--teal); font-weight: 700; }
 
 .m-faq--static article { padding: 18px; }
 .m-faq--static h2 { font-size: 17px; }
@@ -295,7 +295,7 @@
   background: #182830;
   color: #e8eef0;
   font: inherit;
-  /* 16px minimum — iOS zooms on focus below this and never zooms back. */
+  /* 16px minimum â€” iOS zooms on focus below this and never zooms back. */
   font-size: 16px;
 }
 
@@ -319,7 +319,7 @@
 .m-footer a:hover { color: var(--teal); }
 .m-footer__legal { margin: 28px 0 0; padding-top: 20px; border-top: 1px solid #24363f; font-size: 13px; color: #8fa2ab; }
 
-/* Sticky mobile CTA — E2 */
+/* Sticky mobile CTA â€” E2 */
 
 
 /* Prose pages */
@@ -355,7 +355,7 @@
   .m-section * { transition: none !important; animation: none !important; }
 }
 
-/* ── Photographs (Stage 12, F1–F6) ───────────────────────────────────────── */
+/* â”€â”€ Photographs (Stage 12, F1â€“F6) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .m-photo {
   position: relative;
@@ -364,7 +364,7 @@
   overflow: hidden;
   border-radius: var(--radius-sm);
   /* The placeholder sits underneath and stays if the photograph never
-     arrives — the old loader's guarantee that a broken image box is never
+     arrives â€” the old loader's guarantee that a broken image box is never
      shown, kept. */
   background: linear-gradient(135deg, #dbe4e8 0%, #eef3f4 55%, #dbe4e8 100%);
 }
@@ -397,12 +397,12 @@
   .m-photo img { transition: none; opacity: 1; }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    THE LANDING PAGE DESIGN SYSTEM
 
    Ported verbatim from the owner's standalone landing page
    (index.html, inline <style>, lines 33-855). Tokens, breakpoints and
-   rules are theirs and are deliberately unmodified — this is the
+   rules are theirs and are deliberately unmodified â€” this is the
    canonical design, not an interpretation of it.
 
    Note it uses max-width queries and widths beyond 640/768/1024/1280.
@@ -412,7 +412,7 @@
 
    The .m-* rules above are retained only for /faqs, /privacy, /terms
    and /cookies, which still use the earlier chrome.
-   ═══════════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 :root{
   /* Palette taken from the MAINTSUPP dashboards. Teal replaces amber entirely.
@@ -446,7 +446,7 @@
      30px / 14px / 22px repeated down the file, which meant the page could only
      be tightened on a phone by editing thirty declarations and hoping none was
      missed. They narrow together in the mobile block near the end of this
-     file — one place, one decision. */
+     file â€” one place, one decision. */
   --gap-block:26px;--gap-step:22px;--gap-card:14px;--gap-pad:22px;--ic-card:40px;
   --r-sm:8px;--r-md:12px;--r-lg:16px;--r-xl:20px;--r-pill:999px;
   --sh-xs:0 1px 2px rgba(6,19,28,.06);--sh-sm:0 2px 10px rgba(6,19,28,.07);
@@ -461,7 +461,7 @@
 
    The portal defaults to DARK (edd27c0). Its boot script, in
    app/(app)/portal/theme-boot.ts, stamps `data-theme` on <html> and <body> and
-   writes `documentElement.style.colorScheme` — an INLINE style, which outranks
+   writes `documentElement.style.colorScheme` â€” an INLINE style, which outranks
    every normal rule in this file. The app group's stylesheets are not the leak;
    they are never loaded here. The DOCUMENT is: <html> and <body> survive a
    client-side navigation, because React re-renders the tree beneath them rather
@@ -473,7 +473,7 @@
    An `!important` author declaration is the one thing that beats a normal
    inline style, so this is the rule that has to carry it. The marketing site is
    a light surface that paints its own colours and must never inherit the
-   dashboard's. `data-theme` itself is left alone deliberately — nothing in this
+   dashboard's. `data-theme` itself is left alone deliberately â€” nothing in this
    stylesheet selects on it, so removing the attribute would be tidying a
    document the app group owns, and the two would then fight on the way back. */
 :root{color-scheme:light!important}
@@ -497,7 +497,7 @@ a{color:var(--steel);text-underline-offset:3px}button{font:inherit}
 .section{padding-block:var(--section-y);position:relative}
 /* A trailing `p`/`.note` inside the last block of a section leaves its 1rem
    bottom margin sitting against the section's own padding, where it is not a
-   gap between anything — 16px of dead space per section, at every width. */
+   gap between anything â€” 16px of dead space per section, at every width. */
 .section > .wrap > *:last-child{margin-bottom:0}
 .section--tint{background:var(--cloud)}
 .section--dark{background:var(--navy);color:#fff}
@@ -567,7 +567,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .reveal{opacity:0;transform:translateY(20px);transition:opacity .55s var(--ease),transform .55s var(--ease)}
 .reveal.is-in{opacity:1;transform:none}
 /* The back-to-top button sits in the corner, and WHEN it is there is what
-   keeps it off everything else — see ScrollFurniture in chrome.tsx. It is
+   keeps it off everything else â€” see ScrollFurniture in chrome.tsx. It is
    shown only once it has come to rest in the footer's legal lane, below the
    last link on the page, so there is never any content beneath it to cover.
    An earlier attempt raised it 60px to clear a touch row; that only moved the
@@ -578,8 +578,8 @@ body.slots-enabled .slotbtn{display:inline-flex}
    `--cookie-lane` is the cookie banner's measured height, published by
    ScrollFurniture while the banner is up and zero the rest of the time. The
    banner is fixed to the same bottom edge at z-index 150, and the button's
-   lane is now the very end of the page — precisely and only where the banner
-   sits — so on a first visit the banner covered the button completely on every
+   lane is now the very end of the page â€” precisely and only where the banner
+   sits â€” so on a first visit the banner covered the button completely on every
    phone. It is lifted over the banner rather than buried under it, and the
    z-index goes above it so a frame of stale measurement cannot hide it either.
    The trigger needs no adjustment for this: it reads the button's `bottom`
@@ -588,7 +588,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    states.
 
    `--teal-text`, not `--navy`: the button now only ever appears over the
-   footer, and navy on `--navy-deep` is 1.10:1 — the white arrow was legible
+   footer, and navy on `--navy-deep` is 1.10:1 â€” the white arrow was legible
    but the button itself was invisible. The teal is 3.9:1 on that ground. */
 .totop{position:fixed;right:max(20px,env(safe-area-inset-right));bottom:calc(20px + var(--cookie-lane,0px) + env(safe-area-inset-bottom));z-index:calc(var(--z-sticky) + 60);width:46px;height:46px;display:grid;place-items:center;border-radius:50%;background:var(--teal-text);color:#fff;border:0;cursor:pointer;box-shadow:var(--sh-md);opacity:0;pointer-events:none;transform:translateY(10px);transition:opacity var(--t-base) var(--ease),transform var(--t-base) var(--ease)}
 .totop.is-on{opacity:1;pointer-events:auto;transform:none}
@@ -600,7 +600,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .utility a:hover{color:var(--teal-bright)}
 .utility__group{display:flex;gap:20px}
 /* Desktop reads two contact links at the top left as contact details without
-   a label. The phone needs telling — see the 680 block. */
+   a label. The phone needs telling â€” see the 680 block. */
 .utility__label{display:none}
 /* CONTACT DETAILS AT THE TOP OF A PHONE.
    This block used to be `.utility__contact{display:none}`: the bar could not
@@ -610,7 +610,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    bar wraps to two rows instead of hiding half of itself. `flex:1 1 100%`
    gives contact its own row and pushes Portal Login / Report a Job to the
    next; the inner wrap lets the email drop below the number at 320px, where
-   both together do not fit. 680px is the width this rule already used — the
+   both together do not fit. 680px is the width this rule already used â€” the
    marketing breakpoint set is capped and must not grow. */
 @media(max-width:680px){
   .utility__inner{align-items:flex-start;gap:0;min-height:0;padding-block:3px}
@@ -640,8 +640,8 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .nav{display:none;margin-left:auto}
 .nav__list{display:flex;align-items:center;gap:2px;list-style:none}
 /* `white-space:nowrap`: a nav label is a name, and a name does not break.
-   Without it the row was solving its width by folding labels in half — "How It
-   / Works", "Case / Study", "Portal / Login" — which read as a second header
+   Without it the row was solving its width by folding labels in half â€” "How It
+   / Works", "Case / Study", "Portal / Login" â€” which read as a second header
    row 24px deep. That was already happening to the four-item bar at 1120 and
    1160px; a fifth destination only widened the range it happened over. Held on
    one line the nav is 43px tall and the header 75px at every width from 1120 to
@@ -661,14 +661,14 @@ body.slots-enabled .slotbtn{display:inline-flex}
    carrying a logo, five destinations, Portal Login, Report a Job and this
    button. The button is the piece that gives: it was already folding to two
    lines at 1120 and 1160 with four destinations, and a fifth pushed it to
-   three — a 70px button inside a 75px header. Trimming the nav's padding does
+   three â€” a 70px button inside a 75px header. Trimming the nav's padding does
    not help, because `.hdr__actions{margin-left:auto}` hands every pixel saved
    to the gap rather than to the button. So the label shortens here exactly as
    it does on a phone, and the `aria-label` on the link keeps the spoken name
    "Book a Portfolio Review" at every width. */
 /* The band ends at 1219, not 1179. Restoring the long label at 1180 handed
-   the row back 72px it did not have, and `Report a Job` — the next piece to
-   give — folded to two lines from 1180 to 1213. The button that shortens is
+   the row back 72px it did not have, and `Report a Job` â€” the next piece to
+   give â€” folded to two lines from 1180 to 1213. The button that shortens is
    the one whose full name survives in its `aria-label`; the other would just
    be a wrapped label. Measured on the deployed build, not resized into: a
    resize leaves the header laid out at its previous width. */
@@ -677,7 +677,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 @media(max-width:360px){.logo__text em{display:none}.logo__text strong{font-size:1.12rem}}
 /* Portal Login and Report a Job ride with the nav.
    They are new to the header, and at 390px they pushed it 94px wider than the
-   viewport — a header cannot fit a logo, two links, two buttons and a burger.
+   viewport â€” a header cannot fit a logo, two links, two buttons and a burger.
    They appear at exactly the width the nav does, and below it the drawer
    carries both, so neither is ever unreachable. */
 .hdr__login,.hdr__report{display:none}
@@ -686,7 +686,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 /* WHITE ON WHITE. `btn--outline` is the hero's button: `color:#fff` with a
    half-opaque white border, drawn to sit on a dark photograph. The header is
    `background:#fff` in every state, so on this bar the label and its border
-   were invisible — the button occupied 121px of a row that was fighting for
+   were invisible â€” the button occupied 121px of a row that was fighting for
    space and showed nothing, and a reader could only find it by hovering.
    Overridden here rather than in `btn--outline`, which is correct where it is
    used on the hero. The colours are the ones `.burger` and `.drawer__close`
@@ -695,7 +695,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .hdr__report:hover{background:var(--cloud);border-color:var(--steel-mid);color:var(--navy)}
 .hdr__report:active{background:var(--border-soft)}
 /* Below the nav breakpoint the menu button leads on the left, ahead of the
-   logo — thumb-reachable and the first thing in the tab order. display:contents
+   logo â€” thumb-reachable and the first thing in the tab order. display:contents
    lifts the action buttons into the header's own flex row so they can be
    ordered independently without moving anything in the markup. */
 @media(max-width:1119px){
@@ -705,8 +705,8 @@ body.slots-enabled .slotbtn{display:inline-flex}
   .hdr__cta{order:0}
   .hdr__inner{gap:12px}
 }
-/* The drawer opens from the LEFT — the same edge the menu button sits on
-   below the nav breakpoint — over a backdrop that closes it on tap. The panel
+/* The drawer opens from the LEFT â€” the same edge the menu button sits on
+   below the nav breakpoint â€” over a backdrop that closes it on tap. The panel
    is pinned to the viewport's full height (the fixed backdrop is its box), so
    on a short phone the list scrolls inside the panel rather than the page. */
 .drawer{position:fixed;inset:0;z-index:var(--z-drawer);background:rgba(3,18,28,.6);animation:fadein var(--t-base) var(--ease)}
@@ -731,20 +731,20 @@ body.slots-enabled .slotbtn{display:inline-flex}
 
 /* ------------------------------------------------------------------ hero */
 .hero{position:relative;background:var(--navy-ink);color:#fff;overflow:hidden}
-/* The sky the photograph's own sky comes out of — see the band note below.
+/* The sky the photograph's own sky comes out of â€” see the band note below.
    Sampled off the approved file: its top row averages rgb(17,58,101), so the
    gradient ends there and the two skies meet as one. */
 .hero__media{position:absolute;inset:0;
   background:linear-gradient(180deg,#03121C 0%,#061A2B 30%,#0A2740 64%,#113A65 100%)}
 .hero__media .ph{position:absolute;inset:0;background:none}
 
-/* ── THE PHOTOGRAPH IS A BAND ACROSS THE HERO, NOT A FILL OF IT ───────────
-   The approved photograph is 1916x821 — 2.33:1 — and the hero is 1.62:1 at
+/* â”€â”€ THE PHOTOGRAPH IS A BAND ACROSS THE HERO, NOT A FILL OF IT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+   The approved photograph is 1916x821 â€” 2.33:1 â€” and the hero is 1.62:1 at
    1440 (889px tall) and 0.33:1 at 320 (977px tall). `object-fit:cover` on a
    box that shape scales the picture by its HEIGHT and pushes the width out
    over both sides. Measured in the browser before this rule existed: 69.4% of
    the picture's width survived at 1440, 52.7% at 1024, 42.5% at 768, 20.0% at
-   390 and 14.0% at 320 — a middle strip of skyline, with the two engineers
+   390 and 14.0% at 320 â€” a middle strip of skyline, with the two engineers
    and the plant panel cut off the left edge and the access platform cut off
    the right at EVERY width. That is the complaint this answers.
 
@@ -752,7 +752,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    width at its own aspect ratio and anchored to the bottom, where its subject
    is. Nothing is cropped and nothing is stretched: the panel, both engineers,
    the whole skyline and the access platform are all in frame at 320px and at
-   1440px alike. It also puts the photograph where the copy is not — the
+   1440px alike. It also puts the photograph where the copy is not â€” the
    headline and the lede sit against painted sky, and only the buttons and the
    live chip, which carry their own backgrounds, overlap the picture.
 
@@ -761,20 +761,20 @@ body.slots-enabled .slotbtn{display:inline-flex}
    picture's own ratio precisely so that it does not.
 
    The height is never touched. The hero is as tall as its content and not one
-   pixel taller — 889px at 1440, 838px at 390, exactly as before. */
+   pixel taller â€” 889px at 1440, 838px at 390, exactly as before. */
 .hero{--hero-band:1916/821}
 /* `.ph picture` and `.ph__art` both carry `inset:0` from the shared photo
    system further down this file, so these need the extra class to win. */
 .hero__media .ph > picture,
 .hero__media .ph > .ph__art{top:auto;bottom:0;height:auto;aspect-ratio:var(--hero-band);
   /* The top fifth of the band dissolves into the painted sky. It is sky in
-     the photograph too, so there is no horizon where the two meet — and the
+     the photograph too, so there is no horizon where the two meet â€” and the
      generated artwork gets the identical treatment, so a photograph that
      fails to load degrades to the same shape rather than to a hard rectangle
      in the middle of the fold. */
   -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 20%);
   mask-image:linear-gradient(180deg,rgba(0,0,0,0) 0%,#000 20%)}
-/* Was `background-position`, which an `<img>` ignores entirely — the comment
+/* Was `background-position`, which an `<img>` ignores entirely â€” the comment
    that used to sit here claimed to hold the framing on every width and the
    property it named could not move the picture by one pixel. `object-position`
    is the one that can. At the band ratio there is nothing to crop, so this is
@@ -782,10 +782,10 @@ body.slots-enabled .slotbtn{display:inline-flex}
    engineers stay, the access platform goes. */
 .hero .ph__img{object-position:25% bottom}
 
-/* THE SCRIM IS NOW A FLOOR, NOT A BLANKET. It used to run 77%→94% opaque top
+/* THE SCRIM IS NOW A FLOOR, NOT A BLANKET. It used to run 77%â†’94% opaque top
    to bottom below 980px, which over this photograph would have left a sixth
    of it visible. Contrast is measured against the pixels actually painted
-   behind each string, at every width — see the ratios in the hero notes. */
+   behind each string, at every width â€” see the ratios in the hero notes. */
 .hero__scrim{position:absolute;inset:0;z-index:5;background:
   linear-gradient(122deg,rgba(8,23,38,.36) 0%,rgba(8,23,38,0) 60%),
   linear-gradient(100deg,rgba(8,23,38,.5) 0%,rgba(11,32,53,.4) 44%,rgba(11,32,53,.18) 74%,rgba(11,32,53,.42) 100%)}
@@ -795,16 +795,16 @@ body.slots-enabled .slotbtn{display:inline-flex}
   .hero__scrim{background:linear-gradient(180deg,rgba(8,23,38,.7) 0%,rgba(9,27,45,.58) 42%,rgba(9,27,45,.3) 68%,rgba(9,27,45,.44) 100%)}
 }
 
-/* ── ON A PHONE IT IS A DIFFERENT PHOTOGRAPH, SO IT IS THE SAME RULE ──────
+/* â”€â”€ ON A PHONE IT IS A DIFFERENT PHOTOGRAPH, SO IT IS THE SAME RULE â”€â”€â”€â”€â”€â”€
    What used to be here was a workaround, and it is gone rather than tuned.
    The band was pushed to 60% of the HERO'S height and floated up into the
    fold, and `object-position:25% bottom` then chose which third of the width
-   to keep — because a 2.33:1 plate has no framing that survives a 0.47:1
+   to keep â€” because a 2.33:1 plate has no framing that survives a 0.47:1
    screen, and something had to be thrown away. What was thrown away, measured
    on the shipped build: the plant panel, the second engineer, St Paul's, the
    London Eye and the access platform. One hard hat and the Shard remained.
 
-   The plate is portrait now — 941x1452, 0.648:1, shot for this — so there is
+   The plate is portrait now â€” 941x1452, 0.648:1, shot for this â€” so there is
    nothing to work around. `--hero-band` is simply re-pointed at the new file's
    own ratio and the base rule above does the rest, unchanged: full width,
    pinned to the hero's foot, top fifth dissolving into the painted sky. The
@@ -812,8 +812,8 @@ body.slots-enabled .slotbtn{display:inline-flex}
 
    THE ARITHMETIC, WHICH IS WHY THIS IS THE MAXIMUM AND NOT A COMPROMISE. Cover
    makes the two axes reciprocal: a band `h` tall over a `W` wide viewport
-   shows `1.5433 x W / h` of the picture's width, so h = 1.5433W — the source's
-   own ratio — is the tallest band that still shows all of it, and anything
+   shows `1.5433 x W / h` of the picture's width, so h = 1.5433W â€” the source's
+   own ratio â€” is the tallest band that still shows all of it, and anything
    taller starts eating the width again. At 390 that is a 602px band in an
    838px hero: 72% of the fold is photograph and 100% of the photograph is in
    frame. The old rule filled 60% of the hero with 33% of the picture.
@@ -822,27 +822,27 @@ body.slots-enabled .slotbtn{display:inline-flex}
    plant panel, both engineers, the wet rooftop and its railing, the City
    cluster with St Paul's, the London Eye at the right edge, and the boom lift
    with a worker in its basket. Nothing is cropped at 430, 390, 375, 360 or
-   320 — only the share of the hero the band occupies changes, from 79% at 430
+   320 â€” only the share of the hero the band occupies changes, from 79% at 430
    to 51% at 320, because the hero grows as the headline wraps.
 
    The `<picture media>` in `photo.tsx` is set to this same 620px, so the file
    the browser fetches and the file this ratio describes are always the same
    file. Change one and the other has to move with it. */
 @media(max-width:620px){
-  /* Sky reaching the phone plate's own top row — rgb(3,27,58), sampled off the
-     approved file — by a third of the way down, and holding it from there, so
+  /* Sky reaching the phone plate's own top row â€” rgb(3,27,58), sampled off the
+     approved file â€” by a third of the way down, and holding it from there, so
      the band's top edge meets a matching sky wherever it happens to fall: the
      band starts 21% down the hero at 430 and 49% down at 320. Above that the
      gradient stays dark, which is where the headline is. */
   .hero__media{background:linear-gradient(180deg,#02101B 0%,#03141F 16%,#031B3A 34%,#031B3A 100%)}
   /* The whole phone treatment, in one number: the new plate's own pixels.
-     Nothing else in the band rule changes, which is the point — a second
+     Nothing else in the band rule changes, which is the point â€” a second
      photograph, not a second layout. */
   .hero{--hero-band:941/1452}
 }
 .hero__inner{position:relative;z-index:6;display:grid;gap:42px;align-items:center;padding-block:clamp(40px,4.6vw,66px)}
 /* One column, because the hero has one child.
-   This was `1.1fr .9fr` — the text against the intake form. The form is its own
+   This was `1.1fr .9fr` â€” the text against the intake form. The form is its own
    section now, and a two-column grid with a single child would have left the
    right-hand 45% of the fold empty. The measure is capped rather than left to
    run the full wrap: a 1200px-wide lede is unreadable. */
@@ -857,7 +857,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
    directly under a stroke, so the only way to make the copy clear AA over a
    photograph was to blacken the photograph. A tight near-opaque layer under
    the glyph plus the soft one around it puts the contrast exactly where the
-   letters are and nowhere else — measured against the pixels a glyph actually
+   letters are and nowhere else â€” measured against the pixels a glyph actually
    sits on, the lede went from 3.98:1 at 1280 to 6.41:1 with the picture no
    darker than before. */
 .hero__lede{max-width:47ch;color:#C2D2D9;font-size:1.06rem;text-shadow:0 1px 2px rgba(4,15,26,.92),0 0 5px rgba(4,15,26,.78),0 2px 18px rgba(4,15,26,.72)}
@@ -872,7 +872,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .hero__feed strong{color:#fff;display:block;font-family:var(--font-display);font-size:.86rem}
 .hero__feed span{display:block;color:#8AA2AC;font-size:.76rem}
 /* The feed rotates every 4.2s between items whose detail line is one line and
-   items whose detail line is two on a phone — measured at 390px the box
+   items whose detail line is two on a phone â€” measured at 390px the box
    alternated 85px / 104px and the whole page below it moved 19px with it,
    every few seconds. Two lines are reserved for the detail, three below 360,
    so a short item and a long one take the same room. */
@@ -894,14 +894,14 @@ body.slots-enabled .slotbtn{display:inline-flex}
 /* THE PAIRS ARE THE LAYOUT, NOT A DESKTOP LUXURY. The markup has always
    wrapped Site+Contact, Phone+Email and Postcode+Category in a `.qj__row`,
    but the two columns only switched on at `min-width:420px`, so every phone
-   narrower than that — 390, 375, 360, 320, which is most of them — got nine
+   narrower than that â€” 390, 375, 360, 320, which is most of them â€” got nine
    full-width fields in a single stack. That is the form the owner said got
    worse, and the label spacing was blamed for it.
 
    `repeat(2,minmax(0,1fr))` rather than `1fr 1fr`: `1fr` is `minmax(auto,1fr)`,
    and a grid item's automatic minimum is its min-content, which for a text
    input is the UA's ~20-character intrinsic width. At 320 that is wider than
-   the 121px track, so `1fr 1fr` would push the card — and the page — sideways.
+   the 121px track, so `1fr 1fr` would push the card â€” and the page â€” sideways.
    The `0` floor lets the track win; `.field{min-width:0}` below lets the item
    inside it shrink to match. No fixed widths, so the pairs scale with the card
    instead of breaking at some invented width. */
@@ -909,10 +909,10 @@ body.slots-enabled .slotbtn{display:inline-flex}
 .qj__note{display:flex;align-items:center;gap:7px;margin:0;font-size:.73rem;color:var(--slate)}
 /* `min-width:0` is what makes a field survive being half a phone wide: as a
    grid item its automatic minimum is the input's intrinsic width, which is
-   larger than the track it is being asked to sit in. Nothing else changes —
+   larger than the track it is being asked to sit in. Nothing else changes â€”
    at every width where the track is roomy this line has no effect at all. */
 /* `align-content:start` is the other half of pairing fields. Two fields in one
-   grid row are the same height as each other, so the shorter one is stretched —
+   grid row are the same height as each other, so the shorter one is stretched â€”
    and a stretched grid shares the slack out between its own rows, which slid
    its control down the page. Invisible until one field of a pair failed
    validation and grew an error line: measured at 1440, "Company"'s input sat
@@ -937,7 +937,7 @@ body.slots-enabled .slotbtn{display:inline-flex}
 /* Required marker. Red because that is the colour the field turns when the
    requirement is not met, so the mark and the error agree. */
 .req{color:var(--critical);font-weight:700}
-/* A fieldset used as a field — the urgency radios. UA styles give a fieldset a
+/* A fieldset used as a field â€” the urgency radios. UA styles give a fieldset a
    border, padding and a margin nothing else in this form has, and `display:grid`
    from `.field` does not apply to a fieldset in Chrome unless min-inline-size is
    released, which is why that line is here rather than inherited. */
@@ -953,7 +953,7 @@ fieldset.field:focus{outline:none}
    One "+ Add" button in a dashed drop zone. Pressing it opens a menu with
    the three sources (camera, video, files); on a desktop that is a small
    popover under the button, on a phone (<=760px) it is a bottom sheet over a
-   backdrop. The three hidden <input type=file> elements are unchanged — the
+   backdrop. The three hidden <input type=file> elements are unchanged â€” the
    menu only decides which one to click. */
 .upload{position:relative;display:grid;justify-items:center;gap:8px;padding:18px 14px;background:var(--cloud);
   border:1.5px dashed var(--border);border-radius:var(--r-sm);text-align:center;
@@ -1029,7 +1029,7 @@ fieldset.field:focus{outline:none}
 .switcher button{touch-action:manipulation}
 
 /* ------------------------------------------------ without vs with (table)
-   Two columns at EVERY width — see the note in problem.tsx. The icon has a
+   Two columns at EVERY width â€” see the note in problem.tsx. The icon has a
    fixed track inside each cell (`.comparetable__inner` is a 2-column grid)
    so it can never land on the text. `table-layout:fixed` splits the width
    50/50 whatever the copy does; `overflow-wrap:anywhere` is the safety net
@@ -1105,22 +1105,22 @@ fieldset.field:focus{outline:none}
 /* -------------------------------------------------------------- workflow */
 /* One column: the stage card takes the full width. The left-hand list of the
    seven stages is gone (it repeated every heading the card already shows),
-   so there is no second column to leave empty — the card, bar and arrows
+   so there is no second column to leave empty â€” the card, bar and arrows
    are the whole component at every width.
 
    `gap:0`, AND THE CHILDREN KEEP THEIR OWN MARGINS. This was `gap:24px` while
-   `.wf__bar`, `.wf__ctl` and `.wf__swipe` each also carried a `margin-top` —
+   `.wf__bar`, `.wf__ctl` and `.wf__swipe` each also carried a `margin-top` â€”
    margins do not collapse into a grid gap, so every one of those three
    distances was the sum of the two. The authored values rendered as
    42/40/34, and 116px of the 183px below the card on a phone was empty. One
    authority, not two: the gap is zero and each child states its own distance,
-   which is also the only way the three can differ — the bar sits nearer the
+   which is also the only way the three can differ â€” the bar sits nearer the
    card than the arrows do, and the hint sits nearest of all to the arrows it
    describes. A fifth child added here must bring its own `margin-top`. */
 .wf{display:grid;gap:0}
 .wf__stage{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
-/* `--amber-strong`, not `--amber`. Nothing outranks this rule — it is (0,2,1)
-   against the page-wide `:focus-visible` at (0,1,0) — the ring simply painted
+/* `--amber-strong`, not `--amber`. Nothing outranks this rule â€” it is (0,2,1)
+   against the page-wide `:focus-visible` at (0,1,0) â€” the ring simply painted
    whatever `--amber` holds, and the brand pass above set `--amber:#0DA1A9`,
    the teal. That token's own note says why the swap is not harmless here: the
    bright teal is 3.1:1 on white and light surfaces are meant to use #077E85 at
@@ -1129,7 +1129,7 @@ fieldset.field:focus{outline:none}
    that #077E85, so the ring keeps the brand hue and gains the contrast. */
 .wf__stage:focus-visible{outline:3px solid var(--amber-strong);outline-offset:3px}
 /* THE PHOTOGRAPH IS BANDED, NOT PANORAMIC. It used to be `aspect-ratio:21/9`,
-   which on a 1240px card is a 530px-tall picture — the badge, the title and
+   which on a 1240px card is a 530px-tall picture â€” the badge, the title and
    the explanation were all pushed below the fold, so a reader saw a photograph
    and had to scroll to find out which stage it belonged to. One fluid height
    replaces it: about 205px on a phone, 250px on a tablet, 330px on a desktop,
@@ -1146,7 +1146,7 @@ fieldset.field:focus{outline:none}
 /* Only the stage's name is red; the explanation after the dash stays navy. */
 /* The stage keyword's red, as its own token. It carried `--critical` before,
    which is the colour the site uses for an invalid field, a required marker
-   and the pain column of the comparison table — borrowed because the value
+   and the pain column of the comparison table â€” borrowed because the value
    matched, not because the meaning did. A marketing accent that reads as an
    error state is a token misuse waiting to be "fixed" by someone tuning error
    colours. Same value, so nothing looks different; separate name, so the two
@@ -1168,7 +1168,7 @@ fieldset.field:focus{outline:none}
 /* On a phone these two are the only way through the stepper, so they get the
    44px touch target rather than `btn--sm`'s 40px. Scoped to the stepper: the
    40px is right for `btn--sm` where it sits beside body text elsewhere.
-   THE 44px IS NOT SPACING AND IS NOT AVAILABLE TO A SPACING PASS — it is the
+   THE 44px IS NOT SPACING AND IS NOT AVAILABLE TO A SPACING PASS â€” it is the
    touch floor, and the three margins beside it are what a phone gives back.
    Tighter than the base by a few pixels each: a phone reads the card, the
    bar, the arrows and the hint as one stack in a single glance, where a
@@ -1352,7 +1352,7 @@ fieldset.field:focus{outline:none}
    430px both +21px, 320px +24px).
 
    That was fixed twice with min-height media queries, and both times the
-   figures came from measuring the copy of the day — three lines to 384px, two
+   figures came from measuring the copy of the day â€” three lines to 384px, two
    to 722px, one above. The pricing rebuild changed the copy and added a fourth
    band, and a 320-900px sweep found the reservation a line short again in two
    new windows (390px and 768px, +21px each): what the sentences now need is
@@ -1365,8 +1365,8 @@ fieldset.field:focus{outline:none}
    re-measure the next time a word changes. It takes two bespoke breakpoints
    out of this stylesheet with it.
 
-   `visibility:hidden` rather than `display:none` — the hidden twins still have
-   to take up their space to do their job — and it keeps them out of the
+   `visibility:hidden` rather than `display:none` â€” the hidden twins still have
+   to take up their space to do their job â€” and it keeps them out of the
    accessibility tree, so a screen reader is read one sentence, not five.
 
    `tabular-nums` because the STORE COUNT changes the wrap too, not only the
@@ -1382,7 +1382,7 @@ fieldset.field:focus{outline:none}
 /* What the reader actually pays, under each plan's per-store rate. */
 /* THE PORTFOLIO TOTAL IS THE HEADLINE FIGURE. Bold and larger than the
    per-store rate above it, on the display face, with the qualifier around it
-   left at small-print size — the number is what a reader is looking for and
+   left at small-print size â€” the number is what a reader is looking for and
    the sentence is what makes it unambiguous. `align-items:baseline` keeps the
    two sizes sitting on one line rather than on their own box centres. */
 .pkg__total{display:flex;flex-wrap:wrap;align-items:baseline;gap:0;margin:2px 0 14px;font-size:.84rem;color:var(--slate);line-height:1.35}
@@ -1407,13 +1407,13 @@ fieldset.field:focus{outline:none}
    choice a reader makes; compliance administration is a component of Complete
    that is also sold on its own. It was a compact third card below the two,
    which still asked the reader to weigh three things when only two of them
-   are the decision — so what is left is one sentence telling somebody who
+   are the decision â€” so what is left is one sentence telling somebody who
    already has repairs handled that the option exists, plus a row in the rate
    card that prices it at every band.
 
    THE NINETEEN-ROW COMPARISON MATRIX THAT LIVED HERE IS GONE. It existed
    because THREE stacked `.pkg` cards measured 2294px at 390 and 2510px at
-   320 — more than the whole desktop section — so below 768px the section
+   320 â€” more than the whole desktop section â€” so below 768px the section
    swapped them for a scrollable table. Two cards do not run that long, so the
    table is deleted rather than kept for a problem it no longer has. It took
    `(min-width:601px)` with it, which was the one width in this stylesheet
@@ -1422,7 +1422,7 @@ fieldset.field:focus{outline:none}
 
 /* --------------------------------------------------- the full rate card
    THE PAGE'S EXISTING DISCLOSURE, not a new one. `<details>`/`<summary>` is
-   what the FAQ uses — no state, no JavaScript, no second pattern to learn —
+   what the FAQ uses â€” no state, no JavaScript, no second pattern to learn â€”
    and the marker is suppressed the same way there.
 
    IT SCROLLS RATHER THAN OVERFLOWING. Five columns of figures do not fit a
@@ -1458,8 +1458,8 @@ fieldset.field:focus{outline:none}
    right for three cards of similar length and wrong for these two: Essential
    lists six features and Complete lists three roll-up lines, so the card
    carrying "Most popular" ended 100px shorter than the one beside it and read
-   as the lesser of the two. Stretching is a no-op in one column — each grid
-   row is sized by its only item — so it needs no breakpoint of its own. */
+   as the lesser of the two. Stretching is a no-op in one column â€” each grid
+   row is sized by its only item â€” so it needs no breakpoint of its own. */
 .pkgs--two{align-items:stretch}
 .pkgs--two>.pkg{display:flex;flex-direction:column}
 @media(min-width:640px){.pkgs--two{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -1516,14 +1516,14 @@ fieldset.field:focus{outline:none}
 
 /* --------------------------------------------------------------- sectors */
 /* ------------------------------------------------- who we help (section 3)
-   Five icon cards. `.sectors` — the photo-tile grid these replace — is gone
+   Five icon cards. `.sectors` â€” the photo-tile grid these replace â€” is gone
    with its section, and its last surviving phone rule went with the sixth card;
    `.tile` below stays, because the trade thumbnails in section 4 are the same
    component. */
 /* FIVE CARDS, AND NEVER A ROW WITH A HOLE IN IT.
    `repeat(auto-fit,minmax(232px,1fr))` picks whatever column count the width
    affords, which is only ever right by luck: with five cards it gave 5 at 1440,
-   then 4+1 at 1280 — one card alone beside three empty slots — and 3+2 at 1024
+   then 4+1 at 1280 â€” one card alone beside three empty slots â€” and 3+2 at 1024
    and 2+2+1 at 768, each leaving the last row short against a flush-left edge.
    Five is a prime, so no honest column count divides it; the fix is to choose
    the count per band and centre whatever is left over, so a short last row
@@ -1553,13 +1553,13 @@ fieldset.field:focus{outline:none}
   .whocard,.whocard:nth-child(4),.whocard:nth-child(5){grid-column:auto}
 }
 /* The card now leads with its approved photograph, so the padding moves off the
-   card and onto the body — a 22px inset would leave a white gutter around a
+   card and onto the body â€” a 22px inset would leave a white gutter around a
    picture that is meant to meet the card's edges. */
 .whocard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);
   display:grid;gap:0;align-content:start;overflow:hidden}
 .whocard__photo{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover}
 /* THE ICON SITS BESIDE THE TITLE, NOT ABOVE IT.
-   The icon had a row of its own — a 40px tile, then 9px, then the label —
+   The icon had a row of its own â€” a 40px tile, then 9px, then the label â€”
    which cost every card 49px of height to say nothing the label did not
    already say. It is one row now: `[icon] Title`, description underneath.
 
@@ -1575,11 +1575,11 @@ fieldset.field:focus{outline:none}
    by exactly half the difference between the tile and one line of itself:
    the tile's centre and the FIRST line's centre then coincide at
    `--ic-tile/2` from the top of the row, whatever the title does afterwards.
-   `1.14em` is the line box — `h1..h4`'s line-height times the h3's own size —
+   `1.14em` is the line box â€” `h1..h4`'s line-height times the h3's own size â€”
    so the sum re-derives itself if either ever changes, and `calc()` clamps a
    negative result to zero if a reader's text size ever outgrows the tile.
 
-   The tile is 34px rather than `--ic-card`'s 40/36 — the slight shrink the
+   The tile is 34px rather than `--ic-card`'s 40/36 â€” the slight shrink the
    brief allows. Beside 16px text a 40px tile is the loudest thing in the
    card, and 34 is the size the trust strip's icon already uses. */
 .whocard__body{padding:calc(var(--gap-pad) - 2px) var(--gap-pad) var(--gap-pad);display:grid;
@@ -1596,7 +1596,7 @@ fieldset.field:focus{outline:none}
 /* ------------------------------------------------ what we offer (section 4)
    THE FIVE SERVICES ARE A REGISTER, NOT FIVE CARDS. `.offergrid` was an
    auto-fit card grid, which with five items laid out four across and left the
-   fifth alone on a second row — a whole row of the page spent on one card —
+   fifth alone on a second row â€” a whole row of the page spent on one card â€”
    while the four short cards were padded out to the height of the one long
    body. Every word is unchanged; only the container is. One bordered panel,
    one ruled row per service, the term on the left and what it covers on the
@@ -1610,7 +1610,7 @@ fieldset.field:focus{outline:none}
   border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
 .svclist__row{display:grid;gap:6px;align-items:start;padding:var(--gap-card) var(--gap-pad)}
 .svclist__row + .svclist__row{border-top:1px solid var(--border-soft)}
-/* The two-column register. Below this the row stacks — but the icon stays on
+/* The two-column register. Below this the row stacks â€” but the icon stays on
    the title's line either way, which is where most of the phone height went:
    the card stacked a 36px chip above the title and paid a gap for it, five
    times over. */
@@ -1618,7 +1618,7 @@ fieldset.field:focus{outline:none}
   .svclist__row{grid-template-columns:16rem minmax(0,1fr);gap:var(--gap-pad);align-items:center}
 }
 /* The panel is full width so its edges line up with the trade strip under it,
-   which means the wide screens need the term column to take the extra room —
+   which means the wide screens need the term column to take the extra room â€”
    otherwise a one-line body runs the best part of a metre. */
 @media(min-width:1120px){
   .svclist__row{grid-template-columns:21rem minmax(0,1fr)}
@@ -1669,15 +1669,15 @@ fieldset.field:focus{outline:none}
 /* FOUR ACROSS ONLY WHERE FOUR ACROSS FITS.
    `repeat(auto-fit,minmax(160px,1fr))` was sized for a claim whose title had
    the whole column: a 160px floor packed four items in from about 760px up,
-   and three from 640 — which put one claim alone on a second row — and it was
+   and three from 640 â€” which put one claim alone on a second row â€” and it was
    already at the limit at 768, where the document measured exactly 768px wide
    with nothing to spare. Moving the icon onto the title's line takes 44px out
    of every column, and 44px is more than that limit had.
 
    Measured, with the strip's own display face: the widest word in the four
-   titles is "Documented" — 172.4px at the ceiling the clamp below now sets. A
+   titles is "Documented" â€” 172.4px at the ceiling the clamp below now sets. A
    claim needs that plus its 17px rule gutter plus the 34+10px tile, so four
-   columns need 4×233.4 + 3×18 = 988px of grid. There is 944px at 1024 and
+   columns need 4Ã—233.4 + 3Ã—18 = 988px of grid. There is 944px at 1024 and
    1040px at 1120. Below that floor the title does not wrap, it escapes: at
    1024 "Documented" ran 25px through "Data protection"'s divider, which is
    the collision this replaces.
@@ -1685,10 +1685,10 @@ fieldset.field:focus{outline:none}
    So: two columns from 421px, four from 1120px, which is an agreed breakpoint
    the file already uses and the first at which the grid is wide enough. Below
    421 the single column already ruled here stands. The `auto-fit` packing is
-   gone because it cannot express "four or two, never three" — with four items
-   a three-track row is one orphan, which is what 640–740px used to get. */
+   gone because it cannot express "four or two, never three" â€” with four items
+   a three-track row is one orphan, which is what 640â€“740px used to get. */
 /* THREE CHIPS, NOT FOUR. The "Data protection / ICO registered" chip was
-   removed because the registration is not on the ICO's public register — a
+   removed because the registration is not on the ICO's public register â€” a
    compliance claim a compliance business must be able to evidence. Four
    columns with three items left a gap on the right at the wide breakpoint,
    so the wide layout follows the count. Two columns below it is unchanged,
@@ -1696,7 +1696,7 @@ fieldset.field:focus{outline:none}
 .claims{display:grid;gap:18px;grid-template-columns:repeat(2,minmax(0,1fr))}
 @media(min-width:1120px){.claims{grid-template-columns:repeat(3,minmax(0,1fr))}}
 /* The rule separates a claim from the one BESIDE it, so the claim that opens a
-   row never carries one — and with two columns that is every odd item, not
+   row never carries one â€” and with two columns that is every odd item, not
    just the first. `:first-child` alone left the second row starting 17px in
    behind a divider with nothing on its other side. At three across the rows
    change, so the count below re-points the rule. */
@@ -1714,7 +1714,7 @@ fieldset.field:focus{outline:none}
    <dl> may hold only <dt> and <dd>; a sibling <span> made the list invalid and
    cost a serious axe violation. So the row is built inside the <dt> instead:
    `auto 1fr`, tile then title, and the <dd> follows underneath as it always
-   did. The dt used to stack them — that is the vertical gap this removes.
+   did. The dt used to stack them â€” that is the vertical gap this removes.
 
    FIRST-LINE ALIGNMENT. "Documented evidence" and "Insurance & competence
    checked" wrap at several widths, and the dt carries a display face that
@@ -1722,19 +1722,19 @@ fieldset.field:focus{outline:none}
    Both items are `start`-aligned and the title takes half the difference
    between the 34px tile and one line of itself as padding: tile centre and
    first-line centre then meet at 17px from the top of the row at every width.
-   `line-height:1.14` is the value `h1..h4` already carry — at 1.6 a single
+   `line-height:1.14` is the value `h1..h4` already carry â€” at 1.6 a single
    line was 47px against a 34px tile, which is what made the offset flip sign
    between desktop and phone; at 1.14 the line box is never taller than the
    tile, so the correction is always downward and never negative.
 
-   The clamp's ceiling comes down from 1.85rem to 1.7rem — 2.4px at the
+   The clamp's ceiling comes down from 1.85rem to 1.7rem â€” 2.4px at the
    widest, the only widths that ever reached it. That is what buys the
    four-column band above its measured floor with 13px in hand rather than
    two, so nothing depends on a word being 187px and not 188.
 
    `align-content:start` on the group: `.claim` is stretched by the `.claims`
    grid to the tallest item's height, and auto rows in a stretched grid absorb
-   the slack — which is why the gap between a claim's title and its subtext
+   the slack â€” which is why the gap between a claim's title and its subtext
    used to differ from its neighbour's by tens of pixels. */
 .claim--iconed{align-content:start}
 .claim dt{font-family:var(--font-display);font-size:clamp(1.3rem,1rem + 1.3vw,1.7rem);font-weight:800;color:#fff;
@@ -1742,7 +1742,7 @@ fieldset.field:focus{outline:none}
 .claim dt .claim__ic{grid-column:1;align-self:start;margin-bottom:0}
 /* `min-width:0` twice over: a grid item's automatic minimum is its min-content,
    so without it the <dt> would push its column wide on the longest word rather
-   than wrap inside it — which is exactly how the title escaped its divider.
+   than wrap inside it â€” which is exactly how the title escaped its divider.
    `overflow-wrap` is the last resort under it: the widths above are measured
    with room to spare, and this only fires if a reader's own text size takes a
    word past the column anyway. Better a broken word than a broken column. */
@@ -1757,7 +1757,7 @@ fieldset.field:focus{outline:none}
 
    ONE HOOK CHANGED. The old markup was a <button aria-expanded>; the new one
    is <summary> inside <details>, which carries its state as `[open]` on the
-   parent. The chevron rule is re-pointed accordingly — `.faq__q .ic` is
+   parent. The chevron rule is re-pointed accordingly â€” `.faq__q .ic` is
    unchanged, and `[aria-expanded=true]` became `[open] > .faq__q`. */
 .faq__list{margin-top:var(--gap-block);background:var(--paper);border:1px solid var(--border);border-radius:var(--r-lg);padding:0 var(--gap-pad)}
 .faq__item{border-bottom:1px solid var(--border)}
@@ -1781,13 +1781,13 @@ fieldset.field:focus{outline:none}
 /* --------------------------------------------- what this replaces (V3)
    Six cards: one column on a phone, two from 640, three from 1024. Stated as
    two min-width queries rather than `auto-fit`, and both of those widths were
-   already in this file — the V3 sections add no breakpoint to a stylesheet
+   already in this file â€” the V3 sections add no breakpoint to a stylesheet
    sitting two under the ceiling `stage-eleven-marketing` puts on it.
 
    WHY NOT `auto-fit`, which is what the rest of the page uses. Measured
    against the real track: `.wrap` is 1320px capped with `clamp(20px,4vw,40px)`
    of gutter, so a 1440px window gives 1240px of track, and
-   `minmax(240px,1fr)` fits FOUR columns in it. Six cards then lay out 4 + 2 —
+   `minmax(240px,1fr)` fits FOUR columns in it. Six cards then lay out 4 + 2 â€”
    the same lopsided shape that made "What we offer" a register instead of a
    grid. Raising the floor to 300px caps it at three, but a floor above the
    track OVERFLOWS rather than falling back to one column, and 300 is wider
@@ -1807,7 +1807,7 @@ fieldset.field:focus{outline:none}
 .replaces__note{margin-top:var(--gap-block)}
 
 /* ------------------------------------------- your contractors or ours (V3)
-   Two cards, side by side from 768 and stacked below it — an existing
+   Two cards, side by side from 768 and stacked below it â€” an existing
    breakpoint, and the one the pricing matrix already swaps on. 768 rather than
    640 because these two cards are the section's whole argument and they are
    meant to be READ AGAINST EACH OTHER: at 640 each column is 287px, which
@@ -1856,7 +1856,7 @@ fieldset.field:focus{outline:none}
 @media(min-width:980px){.finalcta__inner{grid-template-columns:1fr 1fr;gap:52px;align-items:start}}
 .stepform{background:#fff;border-radius:var(--r-lg);padding:clamp(20px,3vw,28px);color:var(--charcoal)}
 /* THE PANEL'S ROWS HAD NOTHING BETWEEN THEM. Every block child sat flush
-   against the next, so each label rested directly on the input above it —
+   against the next, so each label rested directly on the input above it â€”
    measured 0px between all five rows at 1440. Eight fields hid it, because
    the eye read the whole thing as one dense stack; five do not. The rows get
    the same 13px down that the two-up rows already use across, so the panel
@@ -1872,7 +1872,7 @@ fieldset.field:focus{outline:none}
 /* Name+Company and Email+Phone are pairs at every width, for the same reason
    `.qj__row` is: the markup already declares them as pairs, and the old
    `min-width:560px` gate meant no phone ever saw one. `minmax(0,1fr)` for the
-   same reason as there — a text input's min-content is wider than half a
+   same reason as there â€” a text input's min-content is wider than half a
    320px card, and `1fr` would let it push the page sideways. */
 .stepform__grid{display:grid;gap:13px}
 .stepform__grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1896,26 +1896,26 @@ fieldset.field:focus{outline:none}
 /* The footer's bottom padding is also the back-to-top button's lane. The button
    appears only over the legal block, and at the very bottom of the page it must
    still be over nothing: the 66px the button reaches up from the viewport's
-   bottom edge (46px tall at a 20px offset — the phone's 44 at 14 fits inside
+   bottom edge (46px tall at a 20px offset â€” the phone's 44 at 14 fits inside
    that), plus the clear run above it, so the copyright line is never behind it.
 
    THAT CLEAR RUN IS THE WHOLE WINDOW THE BUTTON HAS, AND 86px LEFT IT A FLASH.
    The button may only appear once its own top edge is below the top of the
    legal block, so the distance it stays available for is the legal block's
    height plus this padding minus the button's lane. Measured at 86px: 213px
-   at 430/390/375, 233 at 360, 253 at 320 — on a page 16,300–17,100px tall,
+   at 430/390/375, 233 at 360, 253 at 320 â€” on a page 16,300â€“17,100px tall,
    1.3% of it. A control you had to catch rather than one you could use.
 
    The window is bought one-for-one: every extra pixel of lane is a pixel of
    empty navy at the end of the page. 280px was tried and is too much. At
-   320x568 it is 49% of the viewport — the copyright sits at the top of the
-   screen and the rest is a blank field with one circle floating in it — and
+   320x568 it is 49% of the viewport â€” the copyright sits at the top of the
+   screen and the rest is a blank field with one circle floating in it â€” and
    at 1440 it is worse, because it is a 280px band running the full width
    under a line of text that ends at 320px. Reviewed against a screenshot,
    that reads as a page that failed to finish rather than as the end of one.
 
-   So the lane is split. A phone gets 200px, which keeps most of the reach —
-   the window still roughly doubles — for 35% of a 568px viewport rather than
+   So the lane is split. A phone gets 200px, which keeps most of the reach â€”
+   the window still roughly doubles â€” for 35% of a 568px viewport rather than
    half. Wider screens get 140px, comfortably clear of the button's 66px
    reach: the desktop reader has a mouse, a shorter page and no cookie banner
    under their thumb, so the window matters less there and the dead band
@@ -1924,7 +1924,7 @@ fieldset.field:focus{outline:none}
 
    `--cookie-lane` again, and it is what keeps the button reachable on a first
    visit. Lifting the button over the cookie banner also raises the point at
-   which it is allowed to appear, which on its own left a 20px window at 375px —
+   which it is allowed to appear, which on its own left a 20px window at 375px â€”
    the reader had to be within one scroll step of the very bottom. Growing the
    lane by the same measured height cancels that exactly: the window works out
    to the legal block plus 222px whether the banner is up or not, and the sweep
@@ -1945,7 +1945,7 @@ fieldset.field:focus{outline:none}
 .ftr ul{gap:6px}
 .ftr a:hover{color:var(--amber)}
 /* The contact column carries two headings. The second sat directly on the
-   line above it at every width — a heading needs air over it more than the
+   line above it at every width â€” a heading needs air over it more than the
    page needs the 18px back. */
 .ftr__h3--legal{margin-top:18px}
 .ftr__legal{margin-top:clamp(24px,5vw,40px);padding-top:20px;border-top:1px solid rgba(255,255,255,.12);font-size:.75rem;color:#83979F;display:grid;gap:11px}
@@ -1953,7 +1953,7 @@ fieldset.field:focus{outline:none}
 .ftr__legal p{margin:0}
 
 /* Page furniture, not a toast: above the sticky header, BELOW the drawer
-   (300) and the + Add sheet (400). At --z-toast it sat over both — on a first
+   (300) and the + Add sheet (400). At --z-toast it sat over both â€” on a first
    visit the sheet's Cancel row and the foot of the drawer were under the
    cookie bar, and a tap there hit "Reject non-essential" instead. */
 .cookie{position:fixed;inset:auto 0 0;z-index:calc(var(--z-sticky) + 50);background:var(--navy-ink);color:#D6E3E7;box-shadow:0 -6px 24px rgba(0,0,0,.28)}
@@ -1974,8 +1974,8 @@ fieldset.field:focus{outline:none}
   .mappin,.mappin.is-drop{transition:none;animation:none}
 }
 
-/* ===================================================================
-   MOBILE HARDENING — verified at 360px, 390px, 414px and 768px
+/* ==========================================================================
+   MOBILE HARDENING â€” verified at 360px, 390px, 414px and 768px
    ========================================================================== */
 @media (max-width: 900px){
   /* stop the two floating buttons colliding with content or each other */
@@ -1986,8 +1986,8 @@ fieldset.field:focus{outline:none}
 @media (max-width: 620px){
   /* THE PAGE IS LONG ON A PHONE BECAUSE OF SPACING, NOT CONTENT.
      Measured on the deployed page: 17426px at 390 and 18010px at 320 against
-     12193px at 1440, and the sections that more than doubled — #sectors 2598,
-     #services 2238, #pricing 2294 — did it by keeping desktop's 30px block
+     12193px at 1440, and the sections that more than doubled â€” #sectors 2598,
+     #services 2238, #pricing 2294 â€” did it by keeping desktop's 30px block
      steps, 14px card gaps and 22px card padding while every card went
      full-width and one-per-row. Nothing here removes anything: the same
      headings, copy, features, prices and CTAs render, at a step size that
@@ -2009,12 +2009,12 @@ fieldset.field:focus{outline:none}
      one rhythm in both directions instead of 12 across and 10 down. It also
      hands each half-width control a pixel back, which at 320 is the difference
      between a postcode field and a postcode field that fits "E14 5AA". Only
-     the COLUMN gap moves — the row gap is `.qj__form`'s and is untouched. */
+     the COLUMN gap moves â€” the row gap is `.qj__form`'s and is untouched. */
   .qj__row{column-gap:10px}
   /* A LABEL AND ITS CONTROL ARE ONE THING, and on a phone they should read
      that way. 6px desktop, 5px here, now 4px: enough that the label still
      detaches from the input it names, tight enough that a nine-field form
-     stops looking like nine separate objects. Only the gap moves — the
+     stops looking like nine separate objects. Only the gap moves â€” the
      control keeps its 46px min-height and its 16px type, so no tap target
      and no field height changes with it. Desktop is untouched: this is
      inside the 620px block, and 1440 still measures 6px. */
@@ -2023,7 +2023,7 @@ fieldset.field:focus{outline:none}
   .stepform > * + *{margin-top:11px}
   .stepform__bar{margin-bottom:14px}
   .stepform__nav{margin-top:14px}
-  /* C5 — the store-count control loses its slack, not its targets: the
+  /* C5 â€” the store-count control loses its slack, not its targets: the
      slider's own 26px box and the 44px floor on labels and buttons are
      untouched. */
   .pricing__calc-top{gap:10px}
@@ -2042,15 +2042,15 @@ fieldset.field:focus{outline:none}
   .wf__ctl .btn{flex:1 1 auto}
   .stepform__nav{flex-wrap:wrap}
   .stepform__nav .btn{flex:1 1 auto;margin-left:0!important}
-  /* THE FOOTER WAS 1345px ON A PHONE — 8% of the page — because every link
+  /* THE FOOTER WAS 1345px ON A PHONE â€” 8% of the page â€” because every link
      is a 44px touch target and all twenty of them were in one column. Two
      columns keeps every target at 44px and halves the rows. Nothing is
      dropped: the same five groups, the same links, in the same order.
      `minmax(130px,1fr)` rather than `1fr 1fr` so the contact lines, which are
      an icon plus a phone number or an address, keep a whole row to
      themselves when they cannot fit a half one. */
-  /* Less room above — the phone footer does not need the desktop's opening
-     gap — but the SAME room below. That bottom value is not padding, it is
+  /* Less room above â€” the phone footer does not need the desktop's opening
+     gap â€” but the SAME room below. That bottom value is not padding, it is
      the back-to-top button's lane: `16px` here quietly cancelled the base
      rule and left the button clearing the copyright line only by accident,
      on the height the three legal paragraphs happen to wrap to. */
@@ -2065,7 +2065,7 @@ fieldset.field:focus{outline:none}
   .cookie__act .btn{flex:1 1 auto}
   /* chips get their own line rather than squeezing */
   .chipgroup label{font-size:.8rem;padding:9px 13px}
-  /* FOUR TABS, ONE ROW — Overview, Jobs, Compliance, Spend.
+  /* FOUR TABS, ONE ROW â€” Overview, Jobs, Compliance, Spend.
      They wrapped 2+2 on every phone: measured at 620px and below the four
      pills came to 443.6px against a 288px container at 320, so `flex-wrap`
      put half of them on a second line and the strip read as two half-rows
@@ -2073,7 +2073,7 @@ fieldset.field:focus{outline:none}
 
      What buys the room, in the order it was spent:
       - the decorative icon goes. It is `aria-hidden` ornament, and at 20px
-        plus a 9px gap it was 116px of the 443 — more than the whole gap and
+        plus a 9px gap it was 116px of the 443 â€” more than the whole gap and
         border budget put together. Nothing is lost from the label.
       - the horizontal padding drops from 14px to 8px at the narrowest width
         and grows back with the viewport, so 430 does not wear 320's spacing.
@@ -2081,12 +2081,12 @@ fieldset.field:focus{outline:none}
         a bold pill label, not squinting.
      Measured after: 282.4px inside 288 at 320, and it only gets roomier from
      there. The 46px min-height is untouched, so the touch target is the same
-     size it always was — only its width moved.
+     size it always was â€” only its width moved.
 
      `nowrap` is the instruction and `overflow-x:auto` is the safety net: if a
      reader's own text size or a future label ever outgrows the row, the strip
      scrolls sideways inside itself instead of pushing the page wide. Overflow
-     also clips, and the page's focus ring is 3px at a 2px offset — hence the
+     also clips, and the page's focus ring is 3px at a 2px offset â€” hence the
      5px of block padding, taken back out of the margins so nothing moves. */
   /* The inline padding is the focus ring's, not the layout's. `overflow-x`
      clips on both axes, and the first pill's left edge sits flush with the
@@ -2126,8 +2126,8 @@ img,svg,table{max-width:100%}
 @media (prefers-reduced-motion: reduce){.ph__img{transition:none}}
 
 
-/* ===================================================================
-   MOBILE USABILITY — verified on a simulated iPhone in Chrome
+/* ==========================================================================
+   MOBILE USABILITY â€” verified on a simulated iPhone in Chrome
    ========================================================================== */
 
 /* iOS Safari zooms the whole page when a focused field is under 16px, forcing
@@ -2149,7 +2149,7 @@ img,svg,table{max-width:100%}
 .hotspot{position:absolute;margin:0;padding:0;border:0;background:transparent;
   -webkit-appearance:none;appearance:none;border-radius:9px;cursor:pointer;
   transition:background var(--t-base) var(--ease),box-shadow var(--t-base) var(--ease)}
-/* the pin itself — always faintly visible so the feature is discoverable */
+/* the pin itself â€” always faintly visible so the feature is discoverable */
 .hotspot::after{content:"";position:absolute;right:5px;top:5px;width:13px;height:13px;
   border-radius:50%;background:var(--teal);opacity:.78;
   box-shadow:0 0 0 3px rgba(13,161,169,.26);
@@ -2195,7 +2195,7 @@ img,svg,table{max-width:100%}
   .hotspot--low.is-on .hotspot__tip,.hotspot--left.is-on .hotspot__tip,.hotspot--right.is-on .hotspot__tip{
     transform:translateY(0)}
   .hotspot__tip strong{font-size:.94rem}
-  /* hover tips never fire on touch — only the tapped state should open */
+  /* hover tips never fire on touch â€” only the tapped state should open */
   .hotspot:hover .hotspot__tip{opacity:0;visibility:hidden}
   .hotspot.is-on .hotspot__tip{opacity:1;visibility:visible}
 }
@@ -2249,7 +2249,7 @@ img,svg,table{max-width:100%}
 
 @media print{.hdr,.cookie,.totop,.utility,.slotbtn{display:none}}
 
-/* ── .ph__img is a real <img> here, not a background div ──────────────────
+/* â”€â”€ .ph__img is a real <img> here, not a background div â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    The only change to the ported design: photographs are <img> elements so
    they carry alt text and can serve AVIF/WebP. `object-fit:cover` reproduces
    the original's `background-size:cover` framing exactly. */
@@ -2260,7 +2260,7 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
    Text only until the photograph is supplied: one column, the copy at a
    readable measure. `.founder--photo` is added by the component once the
    file exists and brings the photo-left / text-right layout with it. There is
-   no placeholder box — see the note in founder.tsx. */
+   no placeholder box â€” see the note in founder.tsx. */
 .founder{display:grid;gap:12px}
 .founder--photo{grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:32px;align-items:center}
 .founder__media{position:relative}
@@ -2287,7 +2287,7 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
 .contractor-form .fieldset{border:0;padding:0;margin:0;display:grid;gap:8px;min-width:0}
 .contractor-form legend{padding:0;font-size:.83rem;font-weight:600;color:var(--navy)}
 /* The fieldset takes focus when it is the first error, so it needs a focus ring
-   of its own — it has no control of its own to carry one. */
+   of its own â€” it has no control of its own to carry one. */
 .contractor-form .fieldset:focus-visible{outline:2px solid var(--steel);outline-offset:4px;border-radius:var(--r-sm)}
 
 .checkgroup{display:flex;flex-wrap:wrap;gap:8px}
@@ -2309,17 +2309,17 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ------------------------------------------------ approved v3 photographs
    These are real <img> elements, not the background-image `.ph__img` the old
-   PhotoSlot painted — so they need the fit spelling out. Without it the
+   PhotoSlot painted â€” so they need the fit spelling out. Without it the
    default `object-fit: fill` stretches every picture to whatever box it lands
    in: the workflow frame is 21/9 and its photographs are 16/9, and step 1 is
    1240x531 where the rest are 1672x941, so all seven were being squashed and
    step 1 worst of all.
 
-   `cover` crops rather than distorts, which is the trade the brief asks for —
+   `cover` crops rather than distorts, which is the trade the brief asks for â€”
    sensible crop, no stretching, and no blurred side-fill.
 
    The workflow photograph's height is the fluid band set with the rest of the
-   `.wf` rules, NOT `height:100%` — the picture element has no height of its
+   `.wf` rules, NOT `height:100%` â€” the picture element has no height of its
    own to be a percentage of. `aspect-ratio:auto` is spelled out because this
    rule is the later of the two and the intrinsic ratio must not creep back in
    and override the band. Because the frame is far wider than 16:9 at desktop
@@ -2388,7 +2388,7 @@ img.ph__img { width: 100%; height: 100%; object-fit: cover; }
 .m-breadcrumbs ol { display: flex; flex-wrap: wrap; gap: 4px 10px; list-style: none; padding: 0; margin: 0; }
 .m-breadcrumbs li { display: flex; align-items: center; gap: 10px; min-width: 0; overflow-wrap: anywhere; }
 .m-breadcrumbs a { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-.m-breadcrumbs a:hover { color: var(--teal); }
+.m-breadcrumbs a:hover { color: var(--teal-text); }
 .m-breadcrumbs a:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 2px; }
 .m-breadcrumbs [aria-current="page"] { font-weight: 600; }
 .m-breadcrumbs__separator { color: var(--muted); }
