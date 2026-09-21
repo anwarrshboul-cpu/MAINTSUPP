@@ -205,11 +205,16 @@ test("the generator claims the visit before it creates the job, and advances con
   const create = generator.indexOf("await createSubmission(");
   assert.ok(claim > 0 && create > claim, "claim first: the unique index decides who creates");
   assert.match(generator, /\.onConflictDoNothing\(\)\s*\.returning\(\{ id: plannedOccurrences\.id \}\)/);
+  /* The guard is on the TEXT column this feature owns, not on `next_due_at`,
+     which is timestamptz in Production and would compare exactly only while
+     every stored value is millisecond-precise. */
   assert.match(
     generator,
-    /eq\(plannedMaintenance\.nextDueAt, schedule\.nextDueAt\)/,
+    /return or\(isNull\(plannedMaintenance\.lastGeneratedDueAt\), ne\(plannedMaintenance\.lastGeneratedDueAt, dueDate\)\);/,
     "two runs cannot step the calendar twice",
   );
+  assert.equal((generator.match(/notYetRecorded\(dueDate\)/g) ?? []).length, 2, "both advances are guarded");
+  assert.doesNotMatch(generator, /eq\(plannedMaintenance\.nextDueAt,/, "never an exact match on a timestamptz");
   assert.match(generator, /await db\.delete\(plannedOccurrences\)\.where\(eq\(plannedOccurrences\.id, claimId\)\)/, "a failed creation releases its claim");
   assert.match(generator, /source: "Planned maintenance"/);
   assert.match(generator, /scheduledDate: dueDate,/, "the visit's day is the job's day");

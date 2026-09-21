@@ -11,8 +11,8 @@
  *   2. CREATE the job through `createSubmission` — the one door every other
  *      job comes through, so the id, placement, canonical priority, status chip
  *      and the `request.created` activity row are the product's, not a copy.
- *   3. ADVANCE the schedule, conditionally on `next_due_at` still being the
- *      visit just generated, so two runs can never step the calendar twice.
+ *   3. ADVANCE the schedule, conditionally on this visit not being recorded
+ *      yet, so two runs can never step the calendar twice.
  *
  * If step 2 throws, the claim is deleted and the reason is kept on the
  * schedule (`last_generation_error`): the next run tries again, and the screen
@@ -27,7 +27,7 @@
  * their site restriction.
  */
 
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import {
   contractors,
   jobTypeConfig,
@@ -86,6 +86,22 @@ async function plannedJobTypeId(db: SubmissionDatabase, organisationId: string):
   /* A workspace that retired its Planned type gets Unclassified, which is what
      every other door writes when no type is named — never a retired id. */
   return row?.id ?? null;
+}
+
+/**
+ * The advance's guard: only a run that has not ALREADY recorded this visit
+ * moves the calendar, so two runs cannot step it twice.
+ *
+ * On `last_generated_due_at` — a TEXT column this feature owns and writes as
+ * `YYYY-MM-DD` — rather than on `next_due_at`. Production's `next_due_at` is
+ * `timestamptz` (Staging's is text), and the shim hands it back as a
+ * millisecond ISO string: an equality test against that is exact only while
+ * every stored value is millisecond-precise. One that is not would never
+ * match, and the schedule would stop advancing without a word. A column whose
+ * every value this code wrote cannot drift like that.
+ */
+function notYetRecorded(dueDate: string) {
+  return or(isNull(plannedMaintenance.lastGeneratedDueAt), ne(plannedMaintenance.lastGeneratedDueAt, dueDate));
 }
 
 function shortError(error: unknown): string {
@@ -207,7 +223,7 @@ export async function generatePlannedOccurrences(
             and(
               eq(plannedMaintenance.id, schedule.id),
               eq(plannedMaintenance.organisationId, organisationId),
-              eq(plannedMaintenance.nextDueAt, schedule.nextDueAt),
+              notYetRecorded(dueDate),
             ),
           );
         report.outcomes.push({ ...base, result: "skipped", reason: "already-generated", dueDate, requestId, nextDueAt });
@@ -301,7 +317,7 @@ export async function generatePlannedOccurrences(
           and(
             eq(plannedMaintenance.id, schedule.id),
             eq(plannedMaintenance.organisationId, organisationId),
-            eq(plannedMaintenance.nextDueAt, schedule.nextDueAt),
+            notYetRecorded(dueDate),
           ),
         );
 
