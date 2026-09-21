@@ -36,6 +36,12 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { getDb } from "../../db";
 import { maintenanceRequests, sites } from "../../db/schema";
 import {
+  isCostedSql,
+  poundsFromPenceSum,
+  sumCostPenceSql,
+  sumCostPenceWhereSql,
+} from "./cost-sql";
+import {
   AGEING_BANDS,
   NOT_RECORDED_LABEL,
   PRIORITY_BANDS,
@@ -1228,22 +1234,28 @@ export async function loadCost(
   window: PeriodWindow,
 ): Promise<CostResult> {
   const where = jobScopeCondition(orgId, filters, window);
-  const costed = sql`(${maintenanceRequests.cost} is not null and ${maintenanceRequests.cost} > 0)`;
+  /* `isCostedSql` from `app/lib/cost-sql.ts` rather than a local copy: it reads both
+     columns, so a workspace part-way through the backfill is judged the same way here
+     as everywhere else. A second definition of the rule is how one screen comes to
+     count a job as costed while another does not. */
+  const costed = isCostedSql;
 
   const [totals, bySite, byContractor, siteRows] = await Promise.all([
     db
       .select({
-        total: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        totalPence: sumCostPenceSql,
         costedJobs: sql<number>`sum(case when ${costed} then 1 else 0 end)`,
-        attributed: sql<number>`coalesce(sum(case when (${maintenanceRequests.contractorId} is not null or trim(coalesce(${maintenanceRequests.contractor}, '')) <> '') then ${maintenanceRequests.cost} else 0 end), 0)`,
-        linked: sql<number>`coalesce(sum(case when ${maintenanceRequests.contractorId} is not null then ${maintenanceRequests.cost} else 0 end), 0)`,
+        attributedPence: sumCostPenceWhereSql(
+          sql`(${maintenanceRequests.contractorId} is not null or trim(coalesce(${maintenanceRequests.contractor}, '')) <> '')`,
+        ),
+        linkedPence: sumCostPenceWhereSql(sql`${maintenanceRequests.contractorId} is not null`),
       })
       .from(maintenanceRequests)
       .where(where),
     db
       .select({
         siteId: maintenanceRequests.siteId,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spendPence: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(and(where, costed))
@@ -1252,7 +1264,7 @@ export async function loadCost(
       .select({
         contractorId: maintenanceRequests.contractorId,
         contractor: maintenanceRequests.contractor,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        spendPence: sumCostPenceSql,
         jobs: count(),
       })
       .from(maintenanceRequests)
@@ -1272,10 +1284,12 @@ export async function loadCost(
   const proRate = window.days / 365;
 
   const siteSpend: SiteSpendRow[] = [];
-  let unattributed = 0;
+  /* PENCE. Divided once, where it is returned. */
+  let unattributedPence = 0;
   for (const row of bySite) {
     const raw = (row.siteId ?? "").trim();
-    const spend = Number(row.spend ?? 0);
+    const spendPence = Number(row.spendPence ?? 0);
+    const spend = poundsFromPenceSum(spendPence);
     /*
      * Audit answer for "all spend sits on one site": it does not, and where a
      * cost cannot be placed it is shown as UNATTRIBUTED rather than assigned.
@@ -1285,7 +1299,7 @@ export async function loadCost(
      * how a figure comes to look like it belongs to somebody.
      */
     if (!raw || !budgetById.has(raw)) {
-      unattributed += spend;
+      unattributedPence += spendPence;
       continue;
     }
     const id = raw;
@@ -1302,12 +1316,12 @@ export async function loadCost(
       utilisation: proRated && proRated > 0 ? Math.round((spend / proRated) * 100) : null,
     });
   }
-  if (unattributed > 0) {
+  if (unattributedPence > 0) {
     siteSpend.push({
       siteId: UNASSIGNED_SITE_ID,
       siteName: `${UNASSIGNED_SITE_LABEL} (unattributed)`,
       unassigned: true,
-      spend: unattributed,
+      spend: poundsFromPenceSum(unattributedPence),
       annualBudget: null,
       proRatedBudget: null,
       utilisation: null,
@@ -1318,6 +1332,7 @@ export async function loadCost(
   );
 
   const contractorTotals = new Map<string, ContractorSpendRow>();
+  const contractorPence = new Map<string, number>();
   for (const row of byContractor) {
     const id = row.contractorId ?? null;
     const name = (row.contractor ?? "").trim();
@@ -1330,22 +1345,29 @@ export async function loadCost(
       jobs: 0,
       linked: Boolean(id),
     };
-    current.spend += Number(row.spend ?? 0);
+    /* Accumulated in PENCE beside the row, then written back as pounds once the loop
+       has finished -- `ContractorSpendRow.spend` is part of the returned contract and
+       is pounds, but adding pounds per row would round and then add floats. */
+    contractorPence.set(key, (contractorPence.get(key) ?? 0) + Number(row.spendPence ?? 0));
     current.jobs += Number(row.jobs ?? 0);
     if (name && (!current.name || current.name === id)) current.name = name;
     contractorTotals.set(key, current);
   }
+  /* One division per contractor, on an exact integer. */
+  for (const [key, row] of contractorTotals) {
+    row.spend = poundsFromPenceSum(contractorPence.get(key) ?? 0);
+  }
 
   return {
-    totalSpend: Number(totals[0]?.total ?? 0),
+    totalSpend: poundsFromPenceSum(Number(totals[0]?.totalPence ?? 0)),
     costedJobs: Number(totals[0]?.costedJobs ?? 0),
     sites: siteSpend,
-    unattributedSiteSpend: unattributed,
+    unattributedSiteSpend: poundsFromPenceSum(unattributedPence),
     sitesWithoutBudget: siteRows.filter((row) => row.annualBudgetPence == null).length,
     periodDays: window.days,
     contractors: [...contractorTotals.values()].sort((left, right) => right.spend - left.spend),
-    contractorAttributed: Number(totals[0]?.attributed ?? 0),
-    contractorLinked: Number(totals[0]?.linked ?? 0),
+    contractorAttributed: poundsFromPenceSum(Number(totals[0]?.attributedPence ?? 0)),
+    contractorLinked: poundsFromPenceSum(Number(totals[0]?.linkedPence ?? 0)),
   };
 }
 

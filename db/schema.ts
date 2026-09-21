@@ -784,6 +784,27 @@ export const maintenanceRequests = sqliteTable(
     isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
     seedBatchId: text("seed_batch_id"),
     cost: real("cost"),
+    /*
+     * THE SAME MONEY, AS INTEGER PENCE — §72.
+     *
+     * `cost` is a float and it is the only float money column in this schema that
+     * holds data; money lives in `*_pence INTEGER` in 44 columns across 23 tables, so
+     * this column follows the convention rather than inventing one.
+     *
+     * NULLABLE AND BESIDE `cost`, NOT REPLACING IT. The decimal is the source value
+     * and is read in a dozen places, so keeping both means provenance survives and a
+     * workspace part-way through the backfill still reads correctly — which is not
+     * hypothetical: Staging has 155 rows with `cost` and 92 with `cost_pence`.
+     *
+     * NULL means "not backfilled", and it is deliberately the SAME absence as "no cost
+     * recorded", because `app/lib/cost-sql.ts` coalesces to the decimal either way.
+     * What must never be lost is the distinction between £0.00 and no cost at all, and
+     * that lives in `cost` exactly as it always has.
+     *
+     * A plain `integer()`, NOT `{ mode: "boolean" }` and not a bigint: see that file
+     * for why `cast(… as integer)` is the spelling both engines agree on.
+     */
+    costPence: integer("cost_pence"),
     approvedBy: text("approved_by"),
     /*
      * Who signed the job off, as an account rather than as a spelling — the

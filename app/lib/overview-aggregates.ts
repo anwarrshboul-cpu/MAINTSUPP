@@ -68,6 +68,7 @@ import {
   slaTargets,
   bankHolidays,
 } from "../../db/schema";
+import { isCostedSql, rowCostPenceSql } from "./cost-sql";
 import { closedJobSql, dateText } from "./dashboard-aggregates";
 import {
   blankColumn,
@@ -222,7 +223,11 @@ const RECOGNISED_PRIORITIES = [
 const urgentSql = sql`lower(trim(${maintenanceRequests.priority})) in ${URGENT_SPELLINGS}`;
 
 /** A cost that is a recorded trade spend. Zero and negative are data quality, not money. */
-const costedSql = sql`(${maintenanceRequests.cost} is not null and ${maintenanceRequests.cost} > 0)`;
+/* The shared definition, not a local one: this file's own header argues that two
+   readers of two columns is how a card comes to disagree with a report, and a second
+   copy of the RULE is the same fault one level up. `cost-sql.ts` also reads
+   `cost_pence`, which this expression could not when it was written. */
+const costedSql = isCostedSql;
 
 /**
  * `cost` IS THE AUTHORITY, AND IT IS POUNDS.
@@ -245,7 +250,7 @@ const costedSql = sql`(${maintenanceRequests.cost} is not null and ${maintenance
  * makes §9.18 — "spend by site totals equal the headline exactly" — true by
  * construction rather than by a rounding adjustment.
  */
-const costPenceSql = sql`cast(round(${maintenanceRequests.cost} * 100) as integer)`;
+const costPenceSql = rowCostPenceSql;
 const spendPenceSql = sql<number>`coalesce(sum(case when ${costedSql} then ${costPenceSql} else 0 end), 0)`;
 
 /** The column the cohort is cut along — §1.1's Measure by. */

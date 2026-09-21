@@ -30,6 +30,7 @@ import {
   contractors,
   maintenanceRequests,
 } from "../../db/schema";
+import { poundsFromPenceSum, sumCostPenceSql } from "./cost-sql";
 import { jobsBoardCondition } from "./dashboard-filters";
 import { selectInChunks } from "./sql-batching";
 
@@ -102,7 +103,8 @@ export async function unlinkedContractorNames(
       .select({
         name: maintenanceRequests.contractor,
         jobs: sql<number>`count(*)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        /* PENCE. `sum(cost)` accumulated floats; see `app/lib/cost-sql.ts`. */
+        spendPence: sumCostPenceSql,
         linked: sql<number>`sum(case when ${maintenanceRequests.contractorId} is not null then 1 else 0 end)`,
       })
       .from(maintenanceRequests)
@@ -128,7 +130,7 @@ export async function unlinkedContractorNames(
       .where(eq(contractorNameAliases.organisationId, orgId)),
     db
       .select({
-        total: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        totalPence: sumCostPenceSql,
       })
       .from(maintenanceRequests)
       .where(
@@ -152,7 +154,7 @@ export async function unlinkedContractorNames(
   const aliased = new Set(aliasRows.map((row) => row.normalised));
 
   const names: UnlinkedName[] = [];
-  let unlinkedSpend = 0;
+  let unlinkedSpencePence = 0;
   for (const row of jobRows) {
     const name = (row.name ?? "").trim();
     if (!name) continue;
@@ -178,8 +180,17 @@ export async function unlinkedContractorNames(
     // Exactly one register row of this name — already attributed by the name
     // rule, nothing to link.
     if (candidates.length === 1) continue;
-    const spend = Number(row.spend ?? 0);
-    unlinkedSpend += spend;
+    /*
+     * ACCUMULATED IN PENCE, divided once at the end.
+     *
+     * Adding the per-name pounds figures instead would put the float accumulation
+     * back exactly where the SQL change removed it -- and this total is the one the
+     * screen compares against `totalSpend`, so the two have to be computed the same
+     * way or they disagree by a penny for no visible reason.
+     */
+    const spendPence = Number(row.spendPence ?? 0);
+    unlinkedSpencePence += spendPence;
+    const spend = poundsFromPenceSum(spendPence);
     names.push({
       name,
       key,
@@ -193,8 +204,8 @@ export async function unlinkedContractorNames(
   names.sort((left, right) => right.spend - left.spend || right.jobs - left.jobs);
   return {
     names,
-    totalSpend: Number(totals[0]?.total ?? 0),
-    unlinkedSpend,
+    totalSpend: poundsFromPenceSum(Number(totals[0]?.totalPence ?? 0)),
+    unlinkedSpend: poundsFromPenceSum(unlinkedSpencePence),
   };
 }
 
