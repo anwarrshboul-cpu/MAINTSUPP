@@ -450,7 +450,11 @@ test("W05-09/W06-10 both ids are checked against this tenant BEFORE any write", 
   // row exists, not that the caller may see it.
   const post = route.slice(route.indexOf("export async function POST("));
   const contractorCheck = post.indexOf("contractorRefusal(db, orgId, contractorId)");
-  const siteCheck = post.indexOf("siteRefusal(db, orgId, siteId)");
+  /* RE-POINTED (Phase 9): the site check now also carries the membership's
+     site restriction as a fourth argument, so a restricted member cannot link
+     a contractor to a store outside their reach. Same check, same place. */
+  const siteCheck = post.indexOf("siteRefusal(db, orgId, siteId, memberSiteSet(scope.siteScope))");
+  assert.match(route, /if \(!withinMemberScope\(allowed, id\)\) \{\s*return Response\.json\(\{ error: "Site not found\." \}, \{ status: 404 \}\);/, "a store outside the member's reach is a 404, like a missing one");
   const insert = post.indexOf(".insert(contractorSites)");
   assert.ok(contractorCheck > 0 && siteCheck > 0 && insert > 0, "all three were found");
   assert.ok(contractorCheck < insert, "the contractor is checked before the insert");
@@ -459,7 +463,12 @@ test("W05-09/W06-10 both ids are checked against this tenant BEFORE any write", 
 
 test("W05-09/W06-10 writing a link needs sites.edit; reading it needs only membership", async () => {
   const route = codeOnly(await read("app/api/contractor-sites/route.ts"));
-  assert.match(route, /scopedDb\(request\)/, "the read is open to any member");
+  /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+     read also asks for `board.view` — the capability every role holds by default,
+     so withdrawing it in the roles matrix finally closes the route. The tenancy
+     half of the contract is unchanged: the helper still resolves the org from
+     the session, never from the request. */
+  assert.match(route, /scopedDbWithCapability\(request, "board\.view"\)/, "the read is open to any member who can view the board");
   assert.equal(
     (route.match(/scopedDbWithCapability\(request, "sites\.edit"\)/g) ?? []).length,
     2,

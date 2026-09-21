@@ -740,8 +740,8 @@ export async function GET(request: Request) {
        * twelve `compliance_documents` rows and wrote an `activity_log` entry.
        * The repair was correct in itself — idempotent, matched on requirement
        * kind, verified preserving a real estate byte for byte — but this
-       * handler resolves `scopedDb` with NO capability, because reading a site
-       * needs none. So the caller who caused those writes could be a `client`,
+       * handler's only capability is `board.view`, which every role holds by
+       * default. So the caller who caused those writes could be a `client`,
        * whose entire permission set is `board.view` and `data.export`, and the
        * audit row named them as the author of a change they never asked for.
        *

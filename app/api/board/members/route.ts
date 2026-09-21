@@ -18,7 +18,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { clientCompanyMembers, invitations, memberships, users } from "../../../../db/schema";
-import { can, resolvePermissions } from "../../../lib/permissions";
+import { can, requireCapability, resolvePermissions } from "../../../lib/permissions";
 import { invitationEmailEnabled } from "../../../lib/notifications";
 import { assignableRoles, MEMBERSHIP_ROLES } from "../../../lib/roles";
 import { roleInOrganisation } from "../../../lib/tenant-access";
@@ -79,6 +79,21 @@ export async function GET(request: Request) {
     const rows = [...ownerRows, ...memberRows.filter((row) => !ownerIds.has(row.id))];
 
     const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    /*
+     * `board.view` AT THE DOOR (Phase 9). This is the board's roster — the
+     * Assigned-To picker, the header's avatar stack, the board's Invite dialog
+     * and the automation builder's person list, and nothing else calls it. It
+     * was the one board read `6b21a76` missed: withdrawing `board.view` in the
+     * roles matrix closed the board and left its roster answering 200.
+     *
+     * Every role holds `board.view` by default and no ceiling forbids it, so
+     * this changes nothing until a Super Admin withdraws it. The long form
+     * rather than `scopedDbWithCapability`, because the subject is resolved
+     * here anyway for `users.view` below, and the picker's pin asks for
+     * `await scopedDb(request)`.
+     */
+    const viewRefusal = requireCapability(subject, "board.view");
+    if (viewRefusal) return viewRefusal;
     const canViewPeople = can(subject, "users.view");
 
     /*

@@ -28,7 +28,8 @@ type TeamMember = {
   id: string;
   userId: string;
   teamRole: string;
-  email: string;
+  /** `null` when the caller may not read colleagues' addresses. */
+  email: string | null;
   fullName: string | null;
   active: boolean;
   since: string | null;
@@ -81,8 +82,8 @@ const SWATCHES = [
   "#81949F",
 ];
 
-function personLabel(person: { fullName: string | null; email: string }) {
-  return person.fullName?.trim() || person.email;
+function personLabel(person: { fullName: string | null; email: string | null }) {
+  return person.fullName?.trim() || person.email || "Unnamed member";
 }
 
 /**
@@ -91,7 +92,7 @@ function personLabel(person: { fullName: string | null; email: string }) {
  * Punctuation is stripped before the split, because the seeded names carry
  * parenthesised suffixes — "Admin (testing)" would otherwise read as "A(".
  */
-function initials(person: { fullName: string | null; email: string }) {
+function initials(person: { fullName: string | null; email: string | null }) {
   const parts = personLabel(person)
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
@@ -469,7 +470,9 @@ export function TeamsManager({ onNotify }: { onNotify?: (message: string) => voi
                                 <span className="teams__lead">Lead</span>
                               )}
                             </span>
-                            <span className="teams__member-email">{member.email}</span>
+                            {member.email && (
+                              <span className="teams__member-email">{member.email}</span>
+                            )}
                             {canManage && (
                               <span className="teams__member-actions">
                                 <button

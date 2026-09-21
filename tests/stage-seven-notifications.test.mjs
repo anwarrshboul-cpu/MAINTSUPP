@@ -164,12 +164,20 @@ test("failed notifications can be replayed", async () => {
 });
 
 test("notification routes are organisation-scoped and degrade gracefully", async () => {
-  for (const route of [
-    "app/api/notifications/compliance/route.ts",
-    "app/api/notifications/replay/route.ts",
+  /*
+   * RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)` in both routes.
+   * Since 6b21a76 each resolves its tenant through `scopedDbWithCapability`:
+   * the compliance scan's read asks for `board.view`, and the replay route's
+   * GET now asks for `settings.edit`, matching its own POST — reading every
+   * address the workspace has notified was never a member's read. The tenancy
+   * half is unchanged: the org still comes from the session.
+   */
+  for (const [route, capability] of [
+    ["app/api/notifications/compliance/route.ts", /scopedDbWithCapability\(request, "board\.view"\)/],
+    ["app/api/notifications/replay/route.ts", /scopedDbWithCapability\(request, "settings\.edit"\)/],
   ]) {
     const source = await read(route);
-    assert.match(source, /scopedDb\(request\)/);
+    assert.match(source, capability);
     assert.match(source, /status: 503/);
     assert.doesNotMatch(source, /"sunnamusk-uk"/);
   }

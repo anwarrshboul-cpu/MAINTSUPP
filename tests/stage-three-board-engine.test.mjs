@@ -97,7 +97,12 @@ test("a group holding items cannot be silently deleted", async () => {
 test("board engine routes are organisation-scoped and degrade gracefully", async () => {
   for (const route of ["app/api/board/columns/route.ts", "app/api/board/groups/route.ts"]) {
     const source = await read(route);
-    assert.match(source, /scopedDb\(request\)/, `${route} must resolve a scoped database`);
+    /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+       read also asks for `board.view` — the capability every role holds by default,
+       so withdrawing it in the roles matrix finally closes the route. The tenancy
+       half of the contract is unchanged: the helper still resolves the org from
+       the session, never from the request. */
+    assert.match(source, /scopedDbWithCapability\(request, "board\.view"\)/, `${route} must resolve a scoped database, and its read must ask for board.view`);
     assert.match(source, /status: 503/, `${route} must degrade rather than throw`);
     const methods = ["GET", "POST", "PATCH", "DELETE"];
     for (const method of methods) {

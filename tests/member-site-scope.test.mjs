@@ -55,7 +55,16 @@ test("a restricted member sees their sites and nothing else — not even a row w
 test("GET /api/sites confines the list, one site, the aggregate, the groups and the tile", async () => {
   const route = await read("app/api/sites/route.ts");
   const handler = route.slice(route.indexOf("export async function GET"), route.indexOf("export async function POST"));
-  assert.match(handler, /const \{ actor, db, orgId, siteScope \} = await scopedDb\(request\);/);
+  /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+     read also asks for `board.view` — the capability every role holds by default,
+     so withdrawing it in the roles matrix finally closes the route. The tenancy
+     half of the contract is unchanged: the helper still resolves the org from
+     the session, never from the request.
+     `actor` went with it: this handler only reads, so nothing wanted the name. */
+  assert.match(
+    handler,
+    /const guard = await scopedDbWithCapability\(request, "board\.view"\);\s*if \(guard\.denied\) return guard\.denied;\s*const \{ db, orgId, siteScope \} = guard\.scope;/,
+  );
   assert.match(handler, /const allowed = memberSiteSet\(siteScope\);/);
   assert.match(handler, /aggregated\s*\.filter\(\(row\) => withinMemberScope\(allowed, row\.id\)\)/, "the aggregate");
   assert.match(
@@ -84,7 +93,15 @@ test("the Sites export, the groups read and the register's two reads are confine
 
   const groups = await read("app/api/sites/groups/route.ts");
   const groupsGet = groups.slice(groups.indexOf("export async function GET"), groups.indexOf("export async function POST"));
-  assert.match(groupsGet, /const \{ actor, db, orgId, siteScope \} = await scopedDb\(request\);/);
+  /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+     read also asks for `board.view` — the capability every role holds by default,
+     so withdrawing it in the roles matrix finally closes the route. The tenancy
+     half of the contract is unchanged: the helper still resolves the org from
+     the session, never from the request. */
+  assert.match(
+    groupsGet,
+    /const guard = await scopedDbWithCapability\(request, "board\.view"\);\s*if \(guard\.denied\) return guard\.denied;\s*const \{ actor, db, orgId, siteScope \} = guard\.scope;/,
+  );
   assert.match(groupsGet, /siteIds: group\.siteIds\.filter\(\(siteId\) => withinMemberScope\(allowed, siteId\)\)/);
 
   /*

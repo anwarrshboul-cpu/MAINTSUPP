@@ -97,7 +97,12 @@ test("only one view can be the default", async () => {
 
 test("the views route is organisation-scoped and degrades gracefully", async () => {
   const source = await read("app/api/board/views/route.ts");
-  assert.match(source, /scopedDb\(request\)/);
+  /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+     read also asks for `board.view` — the capability every role holds by default,
+     so withdrawing it in the roles matrix finally closes the route. The tenancy
+     half of the contract is unchanged: the helper still resolves the org from
+     the session, never from the request. */
+  assert.match(source, /scopedDbWithCapability\(request, "board\.view"\)/);
   assert.match(source, /status: 503/);
   assert.doesNotMatch(source, /"sunnamusk-uk"/);
   for (const method of ["GET", "POST", "PATCH", "DELETE"]) {
