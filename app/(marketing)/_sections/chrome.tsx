@@ -624,7 +624,7 @@ export function SiteFooter() {
             entity is named, so it is reproduced exactly — including the
             registered office, which was missing. */}
         <p>
-          Maintsupp is a trading name of Maintauk Ltd. Registered in England &amp; Wales,
+          MAINTSUPP LTD. Registered in England &amp; Wales,
           company no. 17262302. Registered office: C/O MJR Accounting &amp; Tax Services
           Limited, 37th Floor, One Canada Square, London, E14 5AA.
         </p>

@@ -1,4 +1,6 @@
+import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
+import { ORGANIZATION_ID, WEBSITE_ID } from "../_components/structured-data";
 import { faq } from "../_sections/content";
 
 export const metadata: Metadata = {
@@ -29,6 +31,7 @@ export default function FaqsPage() {
   return (
     <main className="m-section">
       <div className="m-shell m-shell--narrow">
+          <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "FAQs", path: "/faqs" }]} />
         <p className="m-eyebrow">Straight answers</p>
         <h1>Frequently asked questions</h1>
         <div className="m-faq m-faq--static">
@@ -46,6 +49,11 @@ export default function FaqsPage() {
           __html: JSON.stringify({
             "@context": "https://schema.org",
             "@type": "FAQPage",
+            "@id": "https://maintsupp.com/faqs#faq",
+            url: "https://maintsupp.com/faqs",
+            inLanguage: "en-GB",
+            publisher: { "@id": ORGANIZATION_ID },
+            isPartOf: { "@id": WEBSITE_ID },
             mainEntity: faq.map((entry) => ({
               "@type": "Question",
               name: entry.q,

@@ -1,3 +1,4 @@
+import { Breadcrumbs } from "../_components/breadcrumbs";
 import Link from "next/link";
 import type { Metadata } from "next";
 
@@ -37,6 +38,7 @@ export default function PrivacyPage() {
   return (
     <main className="m-section">
       <div className="m-shell m-shell--narrow m-prose">
+          <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Privacy notice", path: "/privacy" }]} />
         <h1>Privacy notice</h1>
         <p className="m-note">
           <strong>Draft for review.</strong> Retention periods marked
@@ -45,7 +47,7 @@ export default function PrivacyPage() {
 
         <h2>Who we are</h2>
         <p>
-          Maintsupp is a trading name of Maintauk Ltd, registered in England and
+          MAINTSUPP LTD, registered in England and
           Wales, company number 17262302. We are the data controller for the
           personal data described here. Contact us at{" "}
           <a href="mailto:info@maintsupp.com">info@maintsupp.com</a> or +44 7852

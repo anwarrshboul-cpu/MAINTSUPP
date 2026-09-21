@@ -143,7 +143,7 @@ const CLAIMS = [
    */
   {
     title: "Maintsupp",
-    body: "A trading name of Maintauk Ltd",
+    body: "MAINTSUPP LTD",
     icon: (
       <>
         <path d="M3 21V8l9-5 9 5v13" />
