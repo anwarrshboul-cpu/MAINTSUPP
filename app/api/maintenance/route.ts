@@ -24,6 +24,12 @@ import {
   sites,
   workspaceSettings,
 } from "../../../db/schema";
+import {
+  listJobStatusHistory,
+  recordJobStatusChanges,
+  STATUS_HISTORY_SINCE,
+  statusChangesBetween,
+} from "../../lib/job-status-history";
 import { DEFAULT_BOARD_KEY } from "../../lib/board-registry";
 /*
  * THE SUBMISSION ITSELF NO LONGER LIVES HERE.
@@ -291,6 +297,18 @@ export async function GET(request: Request) {
       return Response.json({
         request: exposeRequest(row),
         activities: merged.slice(0, 100),
+        /* §23 — the job's stage and status transitions, newest first, and the
+           day the record begins so a short list is not read as the whole story. */
+        statusHistory: (await listJobStatusHistory(db, orgId, row.id)).map((entry) => ({
+          id: entry.id,
+          field: entry.field,
+          from: entry.fromValue,
+          to: entry.toValue,
+          actorEmail: entry.actorEmail,
+          source: entry.source,
+          createdAt: entry.createdAt,
+        })),
+        statusHistorySince: STATUS_HISTORY_SINCE,
       });
     }
 
@@ -1037,6 +1055,17 @@ export async function PATCH(request: Request) {
           : "request.stage_changed",
       actorEmail: actor.email,
       detail: JSON.stringify(note ? { note } : fields ? { fields } : { stage }),
+    });
+    /*
+     * §23 — the transition, from the row as it was to the row as it is. This
+     * also records a stage change sent WITH a note, which the activity row
+     * above files only as the note (pinned by owner-part-five).
+     */
+    await recordJobStatusChanges(db, {
+      organisationId: orgId,
+      actorEmail: actor.email,
+      source: "job.edit",
+      changes: statusChangesBetween(id, before, updated),
     });
 
     // Every board column that moved is one event; a rule reads them by the

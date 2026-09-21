@@ -221,6 +221,7 @@ import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
 import { GlobalSearch } from "./global-search";
+import { StatusHistory, type StatusHistoryEntry } from "./status-history";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -972,12 +973,19 @@ async function fetchRequestActivities(requestId: string) {
   );
   const payload = (await response.json()) as {
     activities?: RequestActivityEntry[];
+    statusHistory?: StatusHistoryEntry[];
+    statusHistorySince?: string;
     error?: string;
   };
   if (!response.ok) {
     throw new Error(payload.error || "The update history could not be loaded.");
   }
-  return payload.activities ?? [];
+  return {
+    activities: payload.activities ?? [],
+    /* §23 — read in the same request, so the two cannot disagree about when. */
+    statusHistory: payload.statusHistory ?? [],
+    statusHistorySince: payload.statusHistorySince ?? null,
+  };
 }
 
 function priorityClass(priority: Priority) {
@@ -8123,6 +8131,8 @@ function RequestDrawer({
   const [activeTab, setActiveTab] =
     useState<RequestDrawerTab>(initialTab);
   const [activities, setActivities] = useState<RequestActivityEntry[]>([]);
+  const [statusHistory, setStatusHistory] = useState<StatusHistoryEntry[]>([]);
+  const [statusHistorySince, setStatusHistorySince] = useState<string | null>(null);
   const [activitiesLoading, setActivitiesLoading] = useState(true);
   const [activitiesError, setActivitiesError] = useState<string | null>(null);
   const [mobileEditor, setMobileEditor] =
@@ -8256,7 +8266,10 @@ function RequestDrawer({
     setActivitiesLoading(true);
     setActivitiesError(null);
     try {
-      setActivities(await fetchRequestActivities(request.id));
+      const loaded = await fetchRequestActivities(request.id);
+      setActivities(loaded.activities);
+      setStatusHistory(loaded.statusHistory);
+      setStatusHistorySince(loaded.statusHistorySince);
     } catch (caught) {
       setActivitiesError(
         caught instanceof Error
@@ -8345,7 +8358,11 @@ function RequestDrawer({
     async function loadInitialActivities() {
       try {
         const history = await fetchRequestActivities(request.id);
-        if (active) setActivities(history);
+        if (active) {
+          setActivities(history.activities);
+          setStatusHistory(history.statusHistory);
+          setStatusHistorySince(history.statusHistorySince);
+        }
       } catch (caught) {
         if (!active) return;
         setActivitiesError(
@@ -8851,6 +8868,11 @@ function RequestDrawer({
               activeTab === "activity" ? "" : " is-tab-hidden"
             }`}
           >
+            {/* §23 — shown once its own data has arrived (`since` is set by the
+                same load), so it never borrows the activity feed's state. */}
+            {statusHistorySince !== null && (
+              <StatusHistory entries={statusHistory} since={statusHistorySince} />
+            )}
             <div className="drawer-section__title">
               <span className="drawer-label">Activity history</span>
               <span>{activities.length} events</span>
