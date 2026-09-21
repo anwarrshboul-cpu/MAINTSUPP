@@ -348,11 +348,13 @@ export function AccountShortcutsPanel() {
         </AccountCard>
       ))}
 
-      <AccountCard tone="notice" title="No global command palette">
+      <AccountCard tone="notice" title="Search the whole workspace">
         <p className="account-note">
-          monday has single-key shortcuts that work anywhere on a board. Nothing in
-          this application binds a bare letter key, so there is no palette and no
-          quick-add key to document.
+          Ctrl+K (Cmd+K on a Mac), or / when you are not typing in a field, opens
+          the search in the top bar. It finds jobs, sites, contractors and
+          documents — and invoices, quotes and people where your role can see
+          them — in this workspace only. There are no single-key board shortcuts
+          of the kind monday has, and no quick-add key.
         </p>
       </AccountCard>
     </>

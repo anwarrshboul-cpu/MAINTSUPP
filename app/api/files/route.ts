@@ -7,7 +7,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  like,
   lte,
   or,
   sql,
@@ -26,6 +25,7 @@ import {
 import { boardKeyForRequest } from "../../lib/board-registry";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { requireCapability, resolvePermissions } from "../../lib/permissions";
+import { containsText } from "../../lib/search-text";
 import { auditActor, recordAudit } from "../../lib/audit";
 import {
   kindForColumnKey,
@@ -241,6 +241,8 @@ async function listFiles(request: Request) {
   const expiryFrom = text(search.get("expiryFrom"), 10);
   const expiryTo = text(search.get("expiryTo"), 10);
   const query = text(search.get("q"), 120);
+  /* One character is still a search here — the register filters as you type. */
+  const queryNeedle = query ? `%${query.toLowerCase().replace(/[%_]/g, "")}%` : null;
   /*
    * `archived` is tri-state, and the default is the load-bearing part.
    *
@@ -491,11 +493,17 @@ async function listFiles(request: Request) {
      * document had, so a search that ignored it would fail on every row
      * uploaded before W07-02 existed.
      */
-    query
+    /*
+     * CASE-INSENSITIVE ON BOTH DATABASES (§36). This was `like(column,
+     * "%query%")`, which SQLite matches regardless of case and Postgres does
+     * not — so in Production "invoice" missed "Invoice.pdf" in the register
+     * the global search now also reads. See `app/lib/search-text.ts`.
+     */
+    queryNeedle
       ? or(
-          like(attachments.title, `%${query}%`),
-          like(attachments.originalName, `%${query}%`),
-          like(attachments.documentType, `%${query}%`),
+          containsText(attachments.title, queryNeedle),
+          containsText(attachments.originalName, queryNeedle),
+          containsText(attachments.documentType, queryNeedle),
         )
       : undefined,
     lineageFilter,
