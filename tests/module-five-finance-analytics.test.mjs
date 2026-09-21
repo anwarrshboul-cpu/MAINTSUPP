@@ -476,11 +476,20 @@ test("no payment credential is stored, returned or accepted", async () => {
 
   /* The capability still guards EDITING a payment source, which is the part of
      §16 that survives: `billing.manage`, which the built-in defaults grant to
-     `super_admin` alone. */
-  assert.match(route, /can\(\{ role: scope\.actor\.role, capabilities: \{\} \}, "billing\.manage"\)/);
+     `super_admin` alone.
+
+     RE-POINTED (Phase 9 #6). This pinned `can({ role, capabilities: {} }, …)`
+     — the default with the workspace's overrides discarded, so a Super Admin
+     who granted `billing.manage` to Administrators in the matrix saw it set and
+     changed nothing. The contract is the same capability, answered from the
+     workspace's own matrix; `ROLE_CEILINGS` still keeps it from Owner and
+     Manager whatever a row says (asserted in client-companies). */
+  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role\);\s*return can\(subject, "billing\.manage"\);/);
+  assert.doesNotMatch(code(route), /capabilities: \{\} \}, "billing\.manage"/, "the overrides are no longer thrown away");
   /* A refusal, not a silent skip: a form that appears to save and does not is
-     worse than one that says no. */
-  assert.match(route, /status: 403/);
+     worse than one that says no. RE-POINTED from a literal `status: 403` to the
+     product's one 403 shape, which carries the capability's name. */
+  assert.match(route, /return capabilityDenied\("billing\.manage", scope\.actor\.role\);/);
   /* And what a payment source DOES carry is a reference, not a number. */
   assert.match(schema, /accountingReference: text\("accounting_reference"\)/);
 });

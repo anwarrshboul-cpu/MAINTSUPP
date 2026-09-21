@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
-import { getDb } from "../../../../../db";
+import { getD1, getDb } from "../../../../../db";
 import {
   formConfigurations,
   maintenanceBoardCells,
@@ -13,7 +13,14 @@ import {
   loadFormByToken,
   unavailableMessage,
 } from "../../../../lib/form-config";
-import { getSession } from "../../../../lib/auth-session";
+import {
+  getSession,
+  publicRetryAfter,
+  recordPublicAttempt,
+  requestIp,
+  tooManyAttempts,
+} from "../../../../lib/auth-session";
+import { FORM_LOOKUP_MISSES, FORM_SUBMISSIONS } from "../../../../lib/form-throttle";
 import { dispatchAutomationEvents, itemCreatedEvent } from "../../../../lib/automations";
 /*
  * THE WORK ORDER ITSELF IS BUILT SOMEWHERE ELSE NOW.
@@ -85,9 +92,8 @@ function failure(message: string, status = 400) {
 /**
  * A ceiling on the JSON body, because this endpoint is UNAUTHENTICATED.
  *
- * There is no per-IP rate limit in front of it and this does not pretend to be
- * one — see the note on the POST handler for what is and is not defended here.
- * What this does buy is that a single request cannot make the worker parse an
+ * It is not the rate limit — `FORM_SUBMISSIONS` is, per form and address, and
+ * `FORM_LOOKUP_MISSES` stops token guessing (Phase 9 #4). What this does buy is that a single request cannot make the worker parse an
  * arbitrarily large document before any of the four availability gates have
  * run: every answer is a bounded string and the form has at most a few dozen
  * questions, so a body past this is not a submission, it is a payload.
@@ -114,9 +120,28 @@ export async function POST(request: Request, context: { params: Promise<{ token:
     await ensureDatabase();
     const { token } = await context.params;
     const db = await getDb();
+    const d1 = await getD1();
+    const ip = requestIp(request);
 
+    /*
+     * THE THROTTLES COME FIRST (Phase 9 #4). Before this, the endpoint that
+     * turns an anonymous POST into a job on a client's board had no counter at
+     * all. A token that resolves to nothing counts against the address across
+     * every form; a real form counts every submission that reaches it, per form
+     * and address, whether or not the gates below accept it — a script that
+     * keeps failing validation is still a script.
+     */
+    const missWait = await publicRetryAfter(d1, FORM_LOOKUP_MISSES, ip);
+    if (missWait > 0) return tooManyAttempts(missWait);
     const record = await loadFormByToken(db, token);
-    if (!record) return Response.json({ error: "This form could not be found." }, { status: 404 });
+    if (!record) {
+      await recordPublicAttempt(d1, FORM_LOOKUP_MISSES, ip);
+      return Response.json({ error: "This form could not be found." }, { status: 404 });
+    }
+    const submitter = `${record.id}|${ip}`;
+    const submitWait = await publicRetryAfter(d1, FORM_SUBMISSIONS, submitter);
+    if (submitWait > 0) return tooManyAttempts(submitWait);
+    await recordPublicAttempt(d1, FORM_SUBMISSIONS, submitter);
 
     /* ---- The gates, before a single row is written ---------------------- */
     const availability = formAvailability(record);

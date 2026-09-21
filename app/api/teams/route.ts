@@ -206,11 +206,33 @@ export async function GET(request: Request) {
      * and `ROLE_CEILINGS` would take it away from a manager permanently.
      */
     const mayManage = can(subject, MANAGE);
+    /*
+     * COLLEAGUES' ADDRESSES FOLLOW THE SAME RULE AS `board/members` (Phase 9).
+     *
+     * `people` was withheld and every team's `members[].email` was not, so a
+     * client who could not see the directory could still read an address for
+     * every person on every team — the same list, one join away. The rota
+     * stays legible: names, roles and team membership are the point of the
+     * screen. An address needs `users.view`, or `teams.manage` (whose holder
+     * is sent the whole directory in `people` anyway), or to be the caller's
+     * own. Narrowed in the payload, not at the door: `users.view` is
+     * unholdable by a manager, so a gate would be a lockout nobody could undo.
+     */
+    const mayReadAddresses = mayManage || can(subject, "users.view");
+    const me = scope.session?.user.id ?? null;
+    const legible = mayReadAddresses
+      ? list
+      : list.map((team) => ({
+          ...team,
+          members: team.members.map((member) =>
+            member.userId === me ? member : { ...member, email: null },
+          ),
+        }));
     return Response.json({
       organisation: { id: scope.organisation.id, name: scope.organisation.name },
       // The screen hides its controls from this; the routes below enforce it.
       canManage: mayManage,
-      teams: list,
+      teams: legible,
       people: mayManage ? people : [],
     });
   } catch (error) {

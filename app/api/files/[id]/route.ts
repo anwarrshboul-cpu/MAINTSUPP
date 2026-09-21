@@ -3,6 +3,7 @@ import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
   attachments,
+  contractorSites,
   maintenanceRequests,
   units,
 } from "../../../../db/schema";
@@ -14,6 +15,7 @@ import {
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
 import { auditActor, changeDetail, recordAudit } from "../../../lib/audit";
+import { requireCapability, resolvePermissions } from "../../../lib/permissions";
 import { reconcileAttachmentCounts } from "../../../lib/attachment-counts";
 import { chunkIds } from "../../../lib/sql-batching";
 import {
@@ -322,6 +324,31 @@ export async function GET(
     return Response.json({ error: "File not found." }, { status: 404 });
   }
 
+  /*
+   * `board.view` ON THE SESSION PATH (Phase 9) — the bytes ask what the
+   * listing asks.
+   *
+   * `GET /api/files` has required `board.view` since `6b21a76`; this route,
+   * which serves the bytes those rows point at, required nothing beyond
+   * tenancy. So a member whose `board.view` a Super Admin had withdrawn met
+   * 403 on the document index and 200 on every document in it, given an id —
+   * and an id is exactly what a thumbnail URL, an old link or a copied
+   * address carries. When the index and the bytes disagree, the weaker one
+   * decides.
+   *
+   * Asked BEFORE the row lookup, so the refusal says nothing about whether the
+   * id exists. The contractor job link is untouched: a token holder has no
+   * session and no role, and the token already confines them to one job's
+   * evidence above. Every role holds `board.view` by default and no ceiling
+   * forbids it, so nothing changes until a Super Admin withdraws it. The long
+   * form, because `scope` is resolved here with `allowAnonymous` for the link.
+   */
+  if (!linkScope) {
+    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const refusal = requireCapability(subject, "board.view");
+    if (refusal) return refusal;
+  }
+
   const readableOrgId = linkScope ? linkScope.organisationId : orgId;
   const [record] = await db
     .select()
@@ -355,8 +382,8 @@ export async function GET(
    * and after photographs of a job at a fourth. See `outsideSiteScope`.
    *
    * A document naming none of the three — a contractor's insurance certificate
-   * — really is not about a site, and a restriction on sites still has nothing
-   * to say about it.
+   * — is reachable only through a contractor genuinely linked to one of the
+   * member's sites: the owner's decision Q5, 2026-09-21. See `outsideSiteScope`.
    *
    * Same 404 as a missing file, deliberately: a refusal that said "forbidden"
    * would confirm the document exists.
@@ -567,27 +594,53 @@ async function archiveInstead(denied: Response) {
  * listing in `../route.ts` justified the omission the same way: a document
  * naming neither a site nor an asset — "a contractor's insurance certificate, a
  * job's evidence" — "is not about a site, and a restriction on sites has
- * nothing to say about it".
+ * nothing to say about it". Half of that was wrong, and `6b21a76` resolved the
+ * job. **The other half was wrong too**, and that is the owner's decision Q5
+ * (2026-09-21, option B):
  *
- * Half of that is right and half of it is not. A contractor's insurance
- * certificate genuinely is not about a site. **A job's evidence is**:
- * `maintenance_requests.site_id` exists (`db/schema.ts:683`), so the before and
- * after photographs of a job at a fourth store are a site's documents reached
- * one hop sideways. A member confined to three stores could read them, which is
- * precisely what the site restriction exists to prevent.
+ *   A contractor document is allowed only when that contractor is genuinely
+ *   linked to at least one site the member may access. Organisation
+ *   membership alone is not sufficient. Absent or ambiguous linkage denies.
  *
- * So the job is resolved too. `site_id` on a job is nullable, and a job with no
- * site still falls through to allowed — a restriction on sites really does have
- * nothing to say about a job that names none.
+ * So the rule is now the same one `withinMemberScope` states for every other
+ * row — "nothing proves a site-less row is one of theirs" — applied to
+ * documents:
+ *
+ *   1. EVERY anchor the document carries must resolve inside the scope. The
+ *      first anchor present used to decide alone, so a document filed against
+ *      a permitted site AND a job at a forbidden one was hidden from the
+ *      listing (which ANDs its filters) and downloadable here. The bytes and
+ *      the catalogue disagreed, and the weaker one decides.
+ *   2. An asset or a job that does not resolve is not proof of permission.
+ *   3. A job that names no site proves nothing about the member's stores —
+ *      it used to be allowed on the grounds that "a restriction on sites has
+ *      nothing to say about it". Under Q5 that is absent linkage, and denies.
+ *   4. A document with none of the three is reachable only through its
+ *      contractor, and only when `contractor_sites` — the table the product
+ *      treats as the deliberate, current statement of who serves where — links
+ *      that contractor to a site in the scope. Job history is not a link.
+ *
+ * `null` scope (an unrestricted member, an owner, a platform admin) never
+ * reaches this function; the call sites test `siteScope && siteScope.length`.
  */
 async function outsideSiteScope(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
   siteScope: string[],
-  record: { siteId: string | null; unitId: string | null; requestId: string | null },
+  record: {
+    siteId: string | null;
+    unitId: string | null;
+    requestId: string | null;
+    contractorId: string | null;
+  },
 ): Promise<boolean> {
-  if (record.siteId) return !siteScope.includes(record.siteId);
+  let anchored = false;
+  if (record.siteId) {
+    anchored = true;
+    if (!siteScope.includes(record.siteId)) return true;
+  }
   if (record.unitId) {
+    anchored = true;
     const [asset] = await db
       .select({ siteId: units.siteId })
       .from(units)
@@ -595,9 +648,10 @@ async function outsideSiteScope(
       .limit(1);
     /* An asset that does not resolve is not proof of permission. */
     if (!asset) return true;
-    return !siteScope.includes(asset.siteId);
+    if (!siteScope.includes(asset.siteId)) return true;
   }
   if (record.requestId) {
+    anchored = true;
     const [job] = await db
       .select({ siteId: maintenanceRequests.siteId })
       .from(maintenanceRequests)
@@ -611,11 +665,49 @@ async function outsideSiteScope(
     /* A job that does not resolve is not proof of permission — the same rule
        the asset branch applies, for the same reason. */
     if (!job) return true;
-    /* A job with no site is genuinely not about one. */
-    if (!job.siteId) return false;
-    return !siteScope.includes(job.siteId);
+    /* Q5: a job with no site is absent linkage, not an exemption. */
+    if (!job.siteId) return true;
+    if (!siteScope.includes(job.siteId)) return true;
   }
-  return false;
+  if (anchored) return false;
+
+  /* Q5: a contractor's document, reachable only through a real link. */
+  if (!record.contractorId) return true;
+  const [link] = await db
+    .select({ id: contractorSites.id })
+    .from(contractorSites)
+    .where(
+      and(
+        eq(contractorSites.organisationId, orgId),
+        eq(contractorSites.contractorId, record.contractorId),
+        inArray(contractorSites.siteId, siteScope),
+      ),
+    )
+    .limit(1);
+  return !link;
+}
+
+/**
+ * The same restriction on the WRITE doors (Phase 9).
+ *
+ * PATCH, PUT and DELETE checked the organisation and a capability, and never
+ * the site restriction: a member confined to three stores who held
+ * `board.edit` could re-file or archive any document in the workspace by id,
+ * and one holding `data.delete` could destroy it. A document the member may
+ * not read is not one they may change, and the answer is the one a missing
+ * document gets.
+ */
+async function writeOutsideSiteScope(
+  scope: { db: Awaited<ReturnType<typeof scopedDb>>["db"]; orgId: string; siteScope: string[] | null },
+  record: {
+    siteId: string | null;
+    unitId: string | null;
+    requestId: string | null;
+    contractorId: string | null;
+  },
+): Promise<boolean> {
+  if (!scope.siteScope || !scope.siteScope.length) return false;
+  return outsideSiteScope(scope.db, scope.orgId, scope.siteScope, record);
 }
 
 export async function DELETE(
@@ -641,11 +733,13 @@ export async function DELETE(
   }
   if (guard.denied) return archiveInstead(guard.denied);
   const { actor, db, orgId } = guard.scope;
-  const [record] = await db
+  const [located] = await db
     .select()
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
     .limit(1);
+  const record =
+    located && !(await writeOutsideSiteScope(guard.scope, located)) ? located : undefined;
   /*
    * CROSS-TENANT IS ANSWERED HERE, BEFORE ANYTHING IS DESTROYED.
    *
@@ -957,7 +1051,7 @@ export async function PATCH(
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
     .limit(1);
-  if (!record) {
+  if (!record || (await writeOutsideSiteScope(guard.scope, record))) {
     return Response.json({ error: "File not found." }, { status: 404 });
   }
 
@@ -1163,11 +1257,17 @@ export async function PUT(
   const { db, orgId } = guard.scope;
 
   const [record] = await db
-    .select({ objectKey: attachments.objectKey })
+    .select({
+      objectKey: attachments.objectKey,
+      siteId: attachments.siteId,
+      unitId: attachments.unitId,
+      requestId: attachments.requestId,
+      contractorId: attachments.contractorId,
+    })
     .from(attachments)
     .where(and(eq(attachments.id, id), eq(attachments.organisationId, orgId)))
     .limit(1);
-  if (!record) {
+  if (!record || (await writeOutsideSiteScope(guard.scope, record))) {
     return Response.json({ error: "File not found." }, { status: 404 });
   }
 

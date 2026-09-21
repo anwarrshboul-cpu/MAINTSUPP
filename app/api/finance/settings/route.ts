@@ -36,7 +36,7 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { auditActor, recordAudit } from "../../../lib/audit";
-import { can } from "../../../lib/permissions";
+import { can, capabilityDenied, resolvePermissions } from "../../../lib/permissions";
 import {
   financeBadRequest,
   financeUnavailable,
@@ -104,23 +104,36 @@ async function payload(scope: ScopedDatabase, unmasked: boolean) {
 }
 
 /**
- * Whether this actor may see and write real bank details.
+ * Whether this actor may add and change the workspace's payment sources.
  *
- * `capabilities: {}` because the per-role overrides are a workspace's own
- * `role_capabilities` rows and this route holds none: `can` then answers from
- * the built-in default, which grants `billing.manage` to `super_admin` alone.
- * That is the intended reading — §16 puts bank details behind the narrowest
- * door the product has.
+ * THE WORKSPACE'S OWN MATRIX, not the built-in default alone.
+ *
+ * This used to ask `can({ role, capabilities: {} }, "billing.manage")` — the
+ * default with every override thrown away, on the reasoning that "this route
+ * holds none". It holds them as much as any route does: they are this
+ * workspace's `role_capabilities` rows, and `resolvePermissions` is one query
+ * away. Ignoring them made the roles matrix lie in the one direction nobody
+ * notices: a Super Admin who ticked `billing.manage` for Administrators saw the
+ * cell set and every Administrator still met a refusal. A switch that reports
+ * itself as set and changes nothing is the defect `board.view` had on
+ * twenty-two read routes.
+ *
+ * The default is unchanged and still the narrowest door the product has:
+ * `super_admin` alone. `can()` checks `ROLE_CEILINGS` before any override, so
+ * an Owner or a Manager can never be granted it, whatever a row says — the
+ * override can only widen the door for a role the matrix is allowed to widen,
+ * and only when a Super Admin chose to.
  */
-function mayManageBanking(scope: ScopedDatabase): boolean {
-  return can({ role: scope.actor.role, capabilities: {} }, "billing.manage");
+async function mayManageBanking(scope: ScopedDatabase): Promise<boolean> {
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  return can(subject, "billing.manage");
 }
 
 export async function GET(request: Request) {
   try {
     const guard = await guardFinance(request, "ledger.read");
     if (guard.denied) return guard.denied;
-    return Response.json(await payload(guard.scope, mayManageBanking(guard.scope)));
+    return Response.json(await payload(guard.scope, await mayManageBanking(guard.scope)));
   } catch (error) {
     return financeUnavailable(error, "Finance settings could not be read.");
   }
@@ -137,16 +150,18 @@ export async function PUT(request: Request) {
     if (!body) return financeBadRequest("Send a JSON body.");
 
     const account = body.paymentSource as Record<string, unknown> | undefined;
-    if (account && !mayManageBanking(scope)) {
+    if (account && !(await mayManageBanking(scope))) {
       /*
        * 403 rather than a silent skip. A form that appears to save a sort code
        * and does not is worse than one that refuses: the reader walks away
        * believing the payment run will debit an account it will not.
+       *
+       * The product's one 403 shape, which names the capability. This said
+       * "Only a workspace owner may change bank details" — wrong twice: an
+       * Owner is the one role `ROLE_CEILINGS` guarantees can NEVER hold
+       * `billing.manage`, and the row holds no bank detail since W06-09.
        */
-      return Response.json(
-        { error: "Only a workspace owner may change bank details." },
-        { status: 403 },
-      );
+      return capabilityDenied("billing.manage", scope.actor.role);
     }
 
     if (account) {
@@ -247,7 +262,7 @@ export async function PUT(request: Request) {
       }
     }
 
-    return Response.json(await payload(scope, mayManageBanking(scope)));
+    return Response.json(await payload(scope, await mayManageBanking(scope)));
   } catch (error) {
     return financeUnavailable(error, "Finance settings could not be saved.");
   }

@@ -571,9 +571,25 @@ export function shareUrl(request: Request, token: string) {
   return publicUrl(request, `/f/${token}`);
 }
 
-/** The twelve-character alias behind the "Shorten URL" switch. */
+/**
+ * The sixteen-character alias behind the "Shorten URL" switch.
+ *
+ * Eight bytes, not six (Phase 9 #5). The shortened link is ON by default, so
+ * the short token is the credential actually handed out, and at 48 bits it was
+ * the weakest thing standing between a guesser and a client's form. 64 bits
+ * keeps the link short and puts enumeration out of reach, alongside the
+ * per-address guess throttle (`FORM_LOOKUP_MISSES`). Existing twelve-character
+ * links keep working: `loadFormByToken` still accepts 10 to 64 hex characters.
+ *
+ * STORED AS A LOCATOR, NOT HASHED — deliberately. The builder shows the share
+ * link every time it opens (`GET /api/board/form`, `board.edit` only), the
+ * "Shorten URL" switch flips between two live links, and a form seeded at boot
+ * has a link nobody has seen yet. Hashing at rest would turn all three into a
+ * show-once flow with a rotate button the product does not have. A share link
+ * is published by design; the defences that fit it are entropy and a throttle.
+ */
 export function generateShortToken() {
-  const bytes = new Uint8Array(6);
+  const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);
   return Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))

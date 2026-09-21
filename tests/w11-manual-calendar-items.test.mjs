@@ -177,7 +177,16 @@ test("W11 writing is gated on a capability, and it is not the purge one", async 
     3,
     "POST, PATCH and DELETE each ask",
   );
-  assert.match(codeOnly(route), /const \{ db, orgId \} = await scopedDb\(request\);/, "and GET is scoped too");
+  /* RE-POINTED (Phase 9): this pinned a bare `scopedDb(request)`. Since 6b21a76 the
+     read also asks for `board.view` — the capability every role holds by default,
+     so withdrawing it in the roles matrix finally closes the route. The tenancy
+     half of the contract is unchanged: the helper still resolves the org from
+     the session, never from the request. */
+  assert.match(
+    codeOnly(route),
+    /const viewGuard = await scopedDbWithCapability\(request, "board\.view"\);\s*if \(viewGuard\.denied\) return viewGuard\.denied;\s*const \{ db, orgId \} = viewGuard\.scope;/,
+    "and GET is scoped too",
+  );
 
   /*
    * NOT `data.delete`. That capability is the PERMANENT purge and is withheld

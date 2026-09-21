@@ -195,11 +195,41 @@ export function expiredSessionCookie(request: Request) {
   return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`;
 }
 
-/** The client IP, as far as the edge is willing to tell us. */
+/**
+ * The client IP, as far as the edge is willing to tell us — and ONLY the edge.
+ *
+ * `cf-connecting-ip` is a Cloudflare header. Behind Cloudflare the edge sets it
+ * and a client cannot; everywhere else it is just a header, and whoever sends
+ * the request chooses its value. The portal is served by Vercel directly (no
+ * Cloudflare in front of `maintsupp.com`, checked 2026-09-21), and this read
+ * it FIRST — so a Preview sign-in carrying `cf-connecting-ip: 203.0.113.77`
+ * had that address recorded against its session (reproduced, Phase 9). Three
+ * consequences, all quiet: the per-IP sign-in throttle could be sidestepped by
+ * inventing a new address per attempt (the per-address counter still capped
+ * it, which is why that counter exists), every audit row's `ip_address` was
+ * the caller's choice, and the session list told a person their own session
+ * came from wherever an attacker said.
+ *
+ * On Vercel the edge OVERWRITES `x-real-ip` and `x-forwarded-for` with the
+ * connecting address, which is what makes those two trustworthy there and
+ * nothing else. `VERCEL` is set by the platform at build and at runtime; the
+ * `x-vercel-id` header, which the edge adds to every request, covers a bundle
+ * built somewhere the variable was absent. Local development runs on the
+ * Workers runtime, where `cf-connecting-ip` is the runtime's own, so the old
+ * order stays for it.
+ */
 export function requestIp(request: Request) {
+  const headers = request.headers;
+  if (process.env.VERCEL || headers.has("x-vercel-id")) {
+    return (
+      headers.get("x-real-ip")?.trim() ||
+      headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      "unknown"
+    );
+  }
   return (
-    request.headers.get("cf-connecting-ip") ??
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    headers.get("cf-connecting-ip") ??
+    headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown"
   );
 }
@@ -434,6 +464,85 @@ export async function recordSignInFailure(
       .run()
       .catch(() => {});
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Throttles for the other public doors                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A throttle for an unauthenticated door that is not sign-in.
+ *
+ * The public form link accepts anonymous submissions, answers anonymous
+ * lookups and checks an anonymous password — and had no counter on any of
+ * them (Phase 9 #4; the submit route's own comment admitted it). This is the
+ * sign-in machinery pointed at them, not a second limiter: the same table, the
+ * same one-statement upsert, the same window restart, the same failure mode
+ * (a throttle write that fails never takes the door down).
+ *
+ * `name` keeps the key spaces apart. A sign-in key is `<email>|<ip>` or
+ * `account|<email>`; these are `throttle:<name>|<subject>`. Every window here
+ * must stay at or under `ACCOUNT_WINDOW_MS`, the longest the sweep honours.
+ */
+export type PublicThrottle = {
+  name: string;
+  windowMs: number;
+  max: number;
+  lockoutMs: number;
+};
+
+function throttleKey(throttle: PublicThrottle, subject: string) {
+  return `throttle:${throttle.name}|${subject}`;
+}
+
+/** Seconds the caller must wait before this door answers them, or 0. */
+export async function publicRetryAfter(
+  d1: D1DatabaseLike,
+  throttle: PublicThrottle,
+  subject: string,
+): Promise<number> {
+  return blockedSeconds(d1, throttleKey(throttle, subject));
+}
+
+/** Count one attempt against this door. */
+export async function recordPublicAttempt(
+  d1: D1DatabaseLike,
+  throttle: PublicThrottle,
+  subject: string,
+) {
+  const now = Date.now();
+  await bumpFailureCounter(
+    d1,
+    throttleKey(throttle, subject),
+    now,
+    Math.min(throttle.windowMs, ACCOUNT_WINDOW_MS),
+    throttle.max,
+    throttle.lockoutMs,
+  );
+  if (Math.random() < PRUNE_CHANCE) {
+    await d1
+      .prepare(
+        `DELETE FROM sign_in_failures
+         WHERE blocked_until < ?1 AND ?1 - first_at > ?2`,
+      )
+      .bind(now, ACCOUNT_WINDOW_MS)
+      .run()
+      .catch(() => {});
+  }
+}
+
+/** The 429 every throttled public door answers, in the sign-in route's shape. */
+export function tooManyAttempts(retryAfter: number) {
+  const minutes = Math.max(1, Math.ceil(retryAfter / 60));
+  const response = Response.json(
+    {
+      error: `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      retryAfter,
+    },
+    { status: 429 },
+  );
+  response.headers.set("Retry-After", String(retryAfter));
+  return response;
 }
 
 /**

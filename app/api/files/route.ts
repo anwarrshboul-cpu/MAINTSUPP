@@ -17,6 +17,7 @@ import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
   attachments,
+  contractorSites,
   maintenanceBoardColumns,
   maintenanceRequests,
   sites,
@@ -312,7 +313,11 @@ async function listFiles(request: Request) {
    * job happened there. Without the third filter a member confined to three
    * stores could list the before and after photographs of a job at a fourth.
    *
-   * A document naming none of the three is still deliberately untouched.
+   * A document naming none of the three is no longer untouched. The owner's
+   * decision Q5 (2026-09-21, option B): a contractor's document is listed
+   * only when that contractor is genuinely linked (`contractor_sites`) to a
+   * site the member may access, and a job that names no site proves nothing.
+   * Absent or ambiguous linkage denies. See `unanchoredScopeFilter` below.
    *
    * `/api/files/[id]` applies the identical rule to the bytes — see
    * `outsideSiteScope` there. The two must agree: a listing filter alone would
@@ -345,11 +350,10 @@ async function listFiles(request: Request) {
         ),
       )
     : undefined;
-  /* The job anchor, resolved through `maintenance_requests.site_id`. A job that
-     names no site is admitted by the `isNull` arm on the subquery's own terms:
-     it is selected because its site is null OR permitted, so a jobless document
-     and a job with no site both pass, and only a job at a store outside the
-     membership is excluded. */
+  /* The job anchor, resolved through `maintenance_requests.site_id`. A jobless
+     document passes the `isNull` arm; a job is admitted only when its site is
+     one the member may access. A job that names NO site used to be admitted
+     too; under Q5 that is absent linkage and it is not. */
   const requestScopeFilter = permittedSites
     ? or(
         isNull(attachments.requestId),
@@ -361,10 +365,30 @@ async function listFiles(request: Request) {
             .where(
               and(
                 eq(maintenanceRequests.organisationId, orgId),
-                or(
-                  isNull(maintenanceRequests.siteId),
-                  inArray(maintenanceRequests.siteId, siteScope ?? []),
-                ),
+                inArray(maintenanceRequests.siteId, siteScope ?? []),
+              ),
+            ),
+        ),
+      )
+    : undefined;
+  /* Q5 — a document with no site, asset or job anchor is a contractor's, and
+     is listed only through a real `contractor_sites` link to a permitted site.
+     A row with no contractor either matches no arm: `inArray` on NULL is not
+     true, so it is excluded, which is what "absent linkage denies" means. */
+  const unanchoredScopeFilter = permittedSites
+    ? or(
+        isNotNull(attachments.siteId),
+        isNotNull(attachments.unitId),
+        isNotNull(attachments.requestId),
+        inArray(
+          attachments.contractorId,
+          db
+            .select({ id: contractorSites.contractorId })
+            .from(contractorSites)
+            .where(
+              and(
+                eq(contractorSites.organisationId, orgId),
+                inArray(contractorSites.siteId, siteScope ?? []),
               ),
             ),
         ),
@@ -436,6 +460,7 @@ async function listFiles(request: Request) {
     siteScopeFilter,
     unitScopeFilter,
     requestScopeFilter,
+    unanchoredScopeFilter,
     requestId ? eq(attachments.requestId, requestId) : undefined,
     kind ? eq(attachments.kind, kind) : undefined,
     columnFilter,

@@ -58,6 +58,7 @@ import {
 import { auditActor, recordAudit } from "../../lib/audit";
 import { can, resolvePermissions } from "../../lib/permissions";
 import { databaseSafeFailure } from "../../lib/database-failure";
+import { memberSiteSet, withinMemberScope, type MemberSiteSet } from "../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -124,12 +125,24 @@ function readSide(
  * hides which table is being asked. `anchorReferencesRefusal` in
  * `app/api/files/documents.ts` makes the same choice for the same reason.
  */
+/*
+ * THE MEMBERSHIP'S SITE RESTRICTION (Phase 9). A member confined to three
+ * stores asking for a fourth's contractors meets the same 404 as a site that
+ * does not exist — "forbidden" would confirm it does. This used to check the
+ * organisation only, so a restricted member could read which contractors
+ * serve every store, and — holding `sites.edit` — link one to a store outside
+ * their reach. `null` is an unrestricted member and changes nothing.
+ */
 async function siteRefusal(
   db: ScopedDatabase["db"],
   orgId: string,
   id: string,
+  allowed: MemberSiteSet,
 ): Promise<Response | null> {
   if (!id) return Response.json({ error: "Name the site." }, { status: 400 });
+  if (!withinMemberScope(allowed, id)) {
+    return Response.json({ error: "Site not found." }, { status: 404 });
+  }
   const [row] = await db
     .select({ id: sites.id })
     .from(sites)
@@ -258,11 +271,12 @@ export async function GET(request: Request) {
     if (viewGuard.denied) return viewGuard.denied;
     const scope = viewGuard.scope;
     const { db, orgId } = scope;
+    const allowed = memberSiteSet(scope.siteScope);
     const query = text(url.searchParams.get("q"), MAX_QUERY);
 
     const refusal =
       named.side === "site"
-        ? await siteRefusal(db, orgId, named.id)
+        ? await siteRefusal(db, orgId, named.id, allowed)
         : await contractorRefusal(db, orgId, named.id);
     if (refusal) return refusal;
 
@@ -361,12 +375,17 @@ export async function GET(request: Request) {
       });
     }
 
-    const rows = linkedIds.length
-      ? await db
-          .select()
-          .from(sites)
-          .where(and(eq(sites.organisationId, orgId), inArray(sites.id, linkedIds)))
-      : [];
+    /* A contractor's sites, inside the caller's reach only: the links to a
+       store the member cannot open are not theirs to see, and neither is that
+       store as a candidate to link. */
+    const rows = (
+      linkedIds.length
+        ? await db
+            .select()
+            .from(sites)
+            .where(and(eq(sites.organisationId, orgId), inArray(sites.id, linkedIds)))
+        : []
+    ).filter((row) => withinMemberScope(allowed, row.id));
     const byId = new Map(rows.map((row) => [row.id, row]));
     const links = linkRows
       .map((link) => {
@@ -395,11 +414,9 @@ export async function GET(request: Request) {
         ? or(like(sites.name, `%${query}%`), like(sites.code, `%${query}%`))
         : undefined,
     );
-    const pool = await db
-      .select()
-      .from(sites)
-      .where(candidateWhere)
-      .orderBy(asc(sites.name));
+    const pool = (
+      await db.select().from(sites).where(candidateWhere).orderBy(asc(sites.name))
+    ).filter((row) => withinMemberScope(allowed, row.id));
     const linkedSet = new Set(linkedIds);
     const unlinked = pool.filter((row) => !linkedSet.has(row.id));
 
@@ -457,7 +474,7 @@ export async function POST(request: Request) {
      */
     const badContractor = await contractorRefusal(db, orgId, contractorId);
     if (badContractor) return badContractor;
-    const badSite = await siteRefusal(db, orgId, siteId);
+    const badSite = await siteRefusal(db, orgId, siteId, memberSiteSet(scope.siteScope));
     if (badSite) return badSite;
 
     const [existing] = await db
@@ -610,7 +627,9 @@ export async function DELETE(request: Request) {
         ),
       )
       .limit(1);
-    if (!existing) {
+    /* A link to a store outside the member's reach is not theirs to remove,
+       and the answer is the one a missing link gets. */
+    if (!existing || !withinMemberScope(memberSiteSet(scope.siteScope), existing.siteId)) {
       return Response.json({ error: "That link does not exist." }, { status: 404 });
     }
 

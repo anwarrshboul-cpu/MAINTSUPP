@@ -254,7 +254,7 @@ export const CAPABILITY_CATALOGUE = [
      * accounts, typed into a form by an owner.
      */
     description:
-      "See and change the workspace's bank details, and its plan tier. Without it the finance settings screen masks every account number to its last four digits and refuses a change.",
+      "Add and change the workspace's payment sources — a label, an account name and an accounting reference, never a bank credential. Without it the finance settings screen shows them read-only and refuses a change.",
   },
 ] as const satisfies readonly CapabilityDefinition[];
 

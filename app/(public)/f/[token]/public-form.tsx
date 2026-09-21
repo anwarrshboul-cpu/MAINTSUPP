@@ -238,7 +238,12 @@ export default function PublicForm({ token }: { token: string }) {
       body: JSON.stringify({ password }),
     });
     if (!response.ok) {
-      setUnlockError("That password is not right.");
+      /* A throttled caller is told to wait, not that the password is wrong —
+         the right password would be refused too until the wait ends. */
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      setUnlockError(
+        response.status === 429 && result.error ? result.error : "That password is not right.",
+      );
       return;
     }
     setPassword("");

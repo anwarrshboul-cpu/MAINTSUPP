@@ -67,10 +67,23 @@ test("the site restriction resolves the job anchor, not only site and asset", as
     "a job that does not resolve is not proof of permission — the same rule the " +
       "asset branch already applies",
   );
+  /*
+   * RE-POINTED (Phase 9, the owner's decision Q5 of 2026-09-21). This asserted
+   * `if (!job.siteId) return false;` — "a job with no site is genuinely not
+   * about one and must still be allowed". Q5 rules the other way: for a
+   * site-restricted member, absent or ambiguous linkage DENIES, and a job that
+   * names no site proves nothing about the member's stores. The contract moved
+   * from "allowed" to "denied", deliberately, and the decision is the reason.
+   */
   assert.match(
     byId,
+    /\/\* Q5: a job with no site is absent linkage, not an exemption\. \*\/\s*if \(!job\.siteId\) return true;/,
+    "a job with no site is absent linkage under Q5 and must be denied",
+  );
+  assert.doesNotMatch(
+    byId.replace(/\/\*[\s\S]*?\*\//g, ""),
     /if \(!job\.siteId\) return false;/,
-    "a job with no site is genuinely not about one and must still be allowed",
+    "the exemption must be gone from the code",
   );
 
   assert.ok(
