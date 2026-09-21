@@ -320,9 +320,15 @@ test("the chip names the type as it is called now, not as the link spells it", (
 
 test("the route reads the job's type and the organisation's types, and names them in the export", async () => {
   const route = await read("app/api/reports/metrics/route.ts");
-  assert.match(route, /jobTypeId: maintenanceRequests\.jobTypeId,/, "the type reaches the builder");
-  assert.match(route, /listJobTypes\(db, orgId\)/, "with the organisation's own types, retired ones included");
-  assert.match(route, /buildReportsDashboard\(\{\s*jobs,\s*siteNames,\s*jobTypes,/);
+  /* RE-POINTED (§32): the loading moved, unchanged, into `app/lib/reports-metrics.ts`
+     so the scheduled report email reads the SAME figures as the page — the
+     scheduler has no request to call the route with. The contract below is
+     asserted where it now lives; the route keeps the guard and the CSV. */
+  const loader = await read("app/lib/reports-metrics.ts");
+  assert.match(loader, /jobTypeId: maintenanceRequests\.jobTypeId,/, "the type reaches the builder");
+  assert.match(loader, /listJobTypes\(db, orgId\)/, "with the organisation's own types, retired ones included");
+  assert.match(loader, /buildReportsDashboard\(\{\s*jobs,\s*siteNames,\s*jobTypes,/);
+  assert.match(route, /await loadReportsSnapshot\(/, "and the route reads through it");
   assert.match(route, /"Job type"/, "and the export keeps its column");
   assert.match(route, /const typeLabels = new Map\(jobTypes\.map\(\(type\) => \[type\.id, type\.label\]\)\);/);
   assert.match(route, /if \(!id\) return UNCLASSIFIED_LABEL;/);

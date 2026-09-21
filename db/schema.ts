@@ -906,6 +906,69 @@ export const jobStatusHistory = sqliteTable(
   ],
 );
 
+/**
+ * A REPORT EMAILED ON A SCHEDULE — §32.
+ *
+ * What is sent is the Reports dashboard's own figures (`loadReportsSnapshot`),
+ * computed PER RECIPIENT under that recipient's own capability and site
+ * restriction, so nobody is emailed a figure they could not open in the portal.
+ * Recipients are members of the workspace, by user id — never a typed address.
+ *
+ * Delivery goes through `sendNotification`, and the outcome recorded is the one
+ * it returned. With email not configured (no provider key, or sink/log mode)
+ * the run still happens and is recorded as NOT DELIVERED, with the reason —
+ * never as "sent".
+ */
+export const reportSchedules = sqliteTable(
+  "report_schedules",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    /** `last_7_days` | `last_30_days` | `month_to_date` | `last_month`. */
+    period: text("period").notNull(),
+    /** `daily` | `weekly` | `monthly`. */
+    cadence: text("cadence").notNull(),
+    /** Weekly: 1 (Monday) to 7 (Sunday). */
+    weekday: integer("weekday"),
+    /** Monthly: 1 to 28, so every month has the day. */
+    monthDay: integer("month_day"),
+    /** JSON array of user ids — members of this workspace. */
+    recipients: text("recipients").notNull().default("[]"),
+    /** `active` | `paused`. TEXT, not a boolean — see `planned_maintenance.generation_state`. */
+    state: text("state").notNull().default("active"),
+    nextRunOn: text("next_run_on"),
+    createdByUserId: text("created_by_user_id"),
+    createdByEmail: text("created_by_email"),
+    lastRunOn: text("last_run_on"),
+    /** `sent` | `not-delivered` | `partial` | `failed` | `refused`. */
+    lastOutcome: text("last_outcome"),
+    lastDetail: text("last_detail"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("report_schedules_organisation_idx").on(table.organisationId)],
+);
+
+/**
+ * ONE ROW PER RUN OF A SCHEDULE — the claim that stops a report going twice.
+ * UNIQUE `(schedule_id, occurrence)`; `occurrence` is the run day, or
+ * `manual:<instant>` for a "Send now".
+ */
+export const reportDispatches = sqliteTable(
+  "report_dispatches",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    scheduleId: text("schedule_id").notNull().references(() => reportSchedules.id),
+    occurrence: text("occurrence").notNull(),
+    status: text("status").notNull().default("claimed"),
+    detail: text("detail"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("report_dispatches_once_idx").on(table.scheduleId, table.occurrence)],
+);
+
 export const plannedMaintenance = sqliteTable(
   "planned_maintenance",
   {

@@ -79,6 +79,8 @@ const PUBLIC_ROUTES = new Set([
    * session and it calls `anonymousRefusal` first.
    */
   "app/api/cron/planned-maintenance/route.ts",
+  /* The daily runner (§32) — the two above, called in order; same footing. */
+  "app/api/cron/daily/route.ts",
   /*
    * The emailed Acknowledge / Snooze / Mark-renewed links. On the same footing
    * as the contractor job link above: the single-use token IS the

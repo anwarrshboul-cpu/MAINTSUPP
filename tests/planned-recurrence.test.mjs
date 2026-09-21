@@ -226,8 +226,16 @@ test("the two doors onto the generator: the cron fails closed, the button is sit
   const cron = code(await read("app/api/cron/planned-maintenance/route.ts"));
   assert.match(cron, /authoriseCron\(request, "planned-maintenance", await resolveCronSecret\(\)\)/);
   assert.match(cron, /export async function GET\(request: Request\) \{\s*return POST\(request\);/);
+  /* RE-POINTED (§32): the daily schedule now runs `/api/cron/daily`, which
+     calls the same generator and then the scheduled reports — one declared job
+     for the daily work, because a deploy declaring more crons than the plan
+     allows fails outright. `/api/cron/planned-maintenance` still answers for a
+     manual run, with the same authentication. */
   const build = await read("vercel/build-output.mjs");
-  assert.match(build, /\{ path: "\/api\/cron\/planned-maintenance", schedule: "\d+ \d+ \* \* \*" \}/, "declared, daily");
+  assert.match(build, /\{ path: "\/api\/cron\/daily", schedule: "\d+ \d+ \* \* \*" \}/, "declared, daily");
+  const daily = code(await read("app/api/cron/daily/route.ts"));
+  assert.match(daily, /authoriseCron\(request, "daily", await resolveCronSecret\(\)\)/);
+  assert.match(daily, /await generatePlannedOccurrences\(db\)/, "the daily run generates planned visits");
 
   const button = code(await read("app/api/planned-maintenance/generate/route.ts"));
   assert.match(button, /scopedDbWithCapability\(request, "sites\.edit"\)/);

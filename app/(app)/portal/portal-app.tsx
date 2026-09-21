@@ -221,6 +221,7 @@ import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
 import { GlobalSearch } from "./global-search";
+import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
@@ -6504,6 +6505,9 @@ function ReportsView({
           openSectionWithQuery(onNavigate, "stores", `site=${encodeURIComponent(siteId)}`)
         }
       />
+      {/* §32 — the same figures, emailed on a schedule. Draws nothing for a
+          reader without `data.export`. */}
+      <ReportSchedules />
       <section className="analytics-page-heading">
         <div>
           <span>Decision-ready reporting</span>

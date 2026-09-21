@@ -333,7 +333,12 @@ await fsp.writeFile(
        */
       crons: [
         { path: "/api/cron/retention", schedule: "20 3 * * *" },
-        { path: "/api/cron/planned-maintenance", schedule: "40 5 * * *" },
+        /* The one daily job runner: §25 planned maintenance, then §32 scheduled
+           reports — see app/api/cron/daily. One entry rather than one per
+           feature, because a deploy declaring more crons than the plan allows
+           fails outright. `/api/cron/planned-maintenance` still answers for a
+           manual run. */
+        { path: "/api/cron/daily", schedule: "40 5 * * *" },
       ],
     },
     null,

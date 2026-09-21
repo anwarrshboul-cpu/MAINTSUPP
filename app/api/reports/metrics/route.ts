@@ -28,39 +28,17 @@
  * restriction applied through `resolveDashboardPortfolio`.
  */
 
-import { eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { maintenanceRequests, sites } from "../../../../db/schema";
 import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
 import { refuseBadRange } from "../../../lib/range-params";
-import {
-  dashboardJobScope,
-  loadSpendByMonth,
-  resolveDashboardPortfolio,
-} from "../../../lib/overview-metrics";
-import {
-  NO_SITE_KEY,
-  buildReportsDashboard,
-  resolveReportsRange,
-  shiftDays,
-  shiftMonth,
-  type ReportsJob,
-} from "../../../lib/reports-dash";
-import {
-  analyseRepeats,
-  drillSiteIds,
-  spendLineOf,
-} from "../../../lib/job-metrics";
-import { listJobTypes } from "../../../lib/job-types";
+import { NO_SITE_KEY, shiftDays, type ReportsJob } from "../../../lib/reports-dash";
+import { analyseRepeats, spendLineOf } from "../../../lib/job-metrics";
 import { OTHER_JOB_TYPES_LABEL, UNCLASSIFIED_LABEL } from "../../../lib/job-type-contract";
-import type { RpSitesRange, RpTrendRange } from "../../../lib/reports-dash-contract";
 import { csvCell, csvDownload, poundsText } from "../../../lib/finance/exports";
+import { loadReportsSnapshot } from "../../../lib/reports-metrics";
 
 export const dynamic = "force-dynamic";
-
-const TREND_RANGES: readonly RpTrendRange[] = ["3m", "6m", "12m", "ytd"];
-const SITES_RANGES: readonly RpSitesRange[] = ["page", "month", "3m", "ytd"];
 
 export async function GET(request: Request) {
   try {
@@ -76,87 +54,23 @@ export async function GET(request: Request) {
     const badRange = refuseBadRange(url);
     if (badRange) return badRange;
 
-    const now = new Date();
-
-    const range = resolveReportsRange(
+    /* The figures come from the one loader the scheduled report email also
+       reads — §32's "same source data as the widgets", held by construction.
+       See `app/lib/reports-metrics.ts`. */
+    const { metrics, jobs, siteNames, jobTypes, range } = await loadReportsSnapshot(
+      db,
+      orgId,
+      siteScope,
       {
         from: url.searchParams.get("from"),
         to: url.searchParams.get("to"),
         reportPeriod: url.searchParams.get("reportPeriod"),
+        trendRange: url.searchParams.get("trendRange"),
+        sitesRange: url.searchParams.get("sitesRange"),
+        portfolio: url.searchParams.get("portfolio"),
       },
-      now,
+      new Date(),
     );
-    const trendWanted = url.searchParams.get("trendRange") as RpTrendRange | null;
-    const trendRange: RpTrendRange = trendWanted && TREND_RANGES.includes(trendWanted) ? trendWanted : "6m";
-    const sitesWanted = url.searchParams.get("sitesRange") as RpSitesRange | null;
-    const sitesRange: RpSitesRange = sitesWanted && SITES_RANGES.includes(sitesWanted) ? sitesWanted : "page";
-
-    const portfolio = await resolveDashboardPortfolio(
-      db,
-      orgId,
-      url.searchParams.get("portfolio"),
-      siteScope,
-    );
-    const scope = dashboardJobScope(orgId, portfolio);
-
-    /* The trend's months and the equal window before them, for its delta. */
-    const anchor = range.to.slice(0, 7);
-    const trendMonths =
-      trendRange === "3m" ? 3 : trendRange === "12m" ? 12 : trendRange === "ytd" ? Number(anchor.slice(5, 7)) : 6;
-    const firstMonth = shiftMonth(anchor, -(2 * trendMonths - 1));
-
-    const [jobRows, siteRows, monthlySpend, jobTypes] = await Promise.all([
-      db
-        .select({
-          id: maintenanceRequests.id,
-          siteId: maintenanceRequests.siteId,
-          category: maintenanceRequests.category,
-          tier: maintenanceRequests.tier,
-          jobTypeId: maintenanceRequests.jobTypeId,
-          cost: maintenanceRequests.cost,
-          completedAt: maintenanceRequests.completedAt,
-          requestedAt: maintenanceRequests.requestedAt,
-          contractor: maintenanceRequests.contractor,
-          reference: maintenanceRequests.reference,
-          title: maintenanceRequests.title,
-        })
-        .from(maintenanceRequests)
-        .where(scope),
-      db
-        .select({ id: sites.id, name: sites.name })
-        .from(sites)
-        .where(eq(sites.organisationId, orgId)),
-      loadSpendByMonth(db, scope, `${firstMonth}-01`, shiftDays(range.to, 1)),
-      listJobTypes(db, orgId),
-    ]);
-
-    const jobs = jobRows as unknown as ReportsJob[];
-    const siteList = siteRows as Array<{ id: string; name: string }>;
-    const siteNames = new Map(siteList.map((site) => [site.id, site.name]));
-    const allowed = portfolio.siteIds ? new Set(portfolio.siteIds) : null;
-    /* Every site in scope, closed ones included: the ceiling "sites with
-       repeats" is reconciled against (see `siteCount` in reports-dash). */
-    const siteCount = siteList.filter((site) => !allowed || allowed.has(site.id)).length;
-
-    const metrics = buildReportsDashboard({
-      jobs,
-      siteNames,
-      jobTypes,
-      monthlySpend,
-      now,
-      range,
-      trendRange,
-      sitesRange,
-      portfolio: portfolio.chosen
-        ? { ...portfolio.chosen, siteIds: drillSiteIds(portfolio.siteIds) }
-        : { id: "all", name: "All portfolios", siteIds: drillSiteIds(portfolio.siteIds) },
-      portfolios: portfolio.portfolios,
-      siteCount,
-    });
-
-    if (metrics.reconciliation.length > 0) {
-      console.error("[reports-metrics] reconciliation failed", metrics.reconciliation);
-    }
 
     if (url.searchParams.get("format") !== "csv") return Response.json(metrics);
 
