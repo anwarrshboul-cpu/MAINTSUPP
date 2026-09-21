@@ -868,6 +868,44 @@ export const maintenanceRequests = sqliteTable(
   ],
 );
 
+/**
+ * A JOB'S STAGE AND STATUS, AS THEY ACTUALLY CHANGED — §23.
+ *
+ * One row per transition of one field, written by `recordJobStatusChanges` in
+ * `app/lib/job-status-history.ts` at every door that moves a job: the drawer
+ * and the board's PATCH, a drag between groups, a bulk edit, an automation, a
+ * group deleted with its jobs re-parented, an option value retired, a re-import
+ * — and the job's creation, whose `from_value` is NULL.
+ *
+ * TRUSTWORTHY GOING FORWARD, and only forward: the owner's decision is that
+ * history may be reconstructed only from evidence that was actually recorded,
+ * never inferred, and the estate holds no recorded from->to pairs (checked
+ * 2026-09-22: `item_activity` status rows with both values = 0,
+ * `automation_runs` = 0). So nothing is backfilled; the drawer says where the
+ * record begins, and older changes remain in the activity log as they were
+ * written then.
+ */
+export const jobStatusHistory = sqliteTable(
+  "job_status_history",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    requestId: text("request_id").notNull(),
+    /** `stage` or `status`. */
+    field: text("field").notNull(),
+    /** NULL when the job was created in this state. */
+    fromValue: text("from_value"),
+    toValue: text("to_value"),
+    actorEmail: text("actor_email"),
+    /** Which door moved it: `job.edit`, `board.move`, `automation`, `import`, … */
+    source: text("source").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("job_status_history_request_idx").on(table.organisationId, table.requestId, table.createdAt),
+  ],
+);
+
 export const plannedMaintenance = sqliteTable(
   "planned_maintenance",
   {

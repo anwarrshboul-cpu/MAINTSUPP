@@ -8,6 +8,7 @@ import {
   maintenanceGroups,
   maintenanceRequests,
 } from "../../../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "../../../lib/job-status-history";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { isBoardNotFound, nextReference, resolveBoard } from "../../../lib/board-registry";
 import { dateDecorationValue } from "../../../lib/board-cell-values";
@@ -924,6 +925,13 @@ export async function PATCH(request: Request) {
     for (const row of afterRows) {
       await recordActivity(db, orgId, board.key, row.id, who, action);
     }
+    /* §23 — a bulk status change is one transition per job it reached. */
+    await recordJobStatusChanges(db, {
+      organisationId: orgId,
+      actorEmail: actor.email,
+      source: "board.bulk",
+      changes: afterRows.flatMap((row) => statusChangesBetween(row.id, beforeRows.get(row.id), row)),
+    });
 
     await dispatchAutomationEvents(
       automationContext(guard.scope, request),

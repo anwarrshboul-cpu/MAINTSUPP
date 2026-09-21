@@ -10,6 +10,7 @@ import {
   sites,
   units,
 } from "../../../db/schema";
+import { recordJobStatusChanges } from "../../lib/job-status-history";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidateOptionCache, listOptionSets, listOptionValues } from "../../lib/options-repository";
 import { csvResponse, parseCsvObjects, toCsv } from "../../lib/csv";
@@ -100,10 +101,19 @@ async function reassign(
 ) {
   const stamp = new Date().toISOString();
   switch (key) {
-    case "maintenance_status":
-      await db.update(maintenanceRequests).set({ status: to, updatedAt: stamp })
-        .where(and(eq(maintenanceRequests.organisationId, orgId), eq(maintenanceRequests.status, from)));
+    case "maintenance_status": {
+      const moved = await db.update(maintenanceRequests).set({ status: to, updatedAt: stamp })
+        .where(and(eq(maintenanceRequests.organisationId, orgId), eq(maintenanceRequests.status, from)))
+        .returning({ id: maintenanceRequests.id });
+      /* §23 — a retired status moves every job that held it. */
+      await recordJobStatusChanges(db, {
+        organisationId: orgId,
+        actorEmail: null,
+        source: "options.reassign",
+        changes: moved.map((row) => ({ requestId: row.id, field: "status" as const, from, to })),
+      });
       return;
+    }
     case "priority":
       await db.update(maintenanceRequests).set({ priority: to, updatedAt: stamp })
         .where(and(eq(maintenanceRequests.organisationId, orgId), eq(maintenanceRequests.priority, from)));

@@ -134,7 +134,7 @@ export const FINGERPRINTED_SOURCES: readonly string[] = [
  * the only thing standing between a changed migration and a database that
  * thinks it is already up to date.
  */
-export const SCHEMA_FINGERPRINT = "1837a1c8";
+export const SCHEMA_FINGERPRINT = "e2e7f8f2";
 
 /** The one row the state lives in. A single-row table, keyed by a constant. */
 export const SCHEMA_STATE_KEY = "migrations";

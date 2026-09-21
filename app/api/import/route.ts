@@ -8,6 +8,7 @@ import {
   maintenanceRequests,
   siteAliases,
 } from "../../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "../../lib/job-status-history";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { listSites, normaliseSiteName, recordAnomaly } from "../../lib/sites-repository";
 import { unassignedSiteId } from "../../lib/site-reference";
@@ -551,6 +552,12 @@ async function commit(
        * A row matched by title that has never carried an identity also gets
        * one, so the next run matches on the id instead.
        */
+      /* §23 — what the row held before the source overwrote it. */
+      const [importBefore] = await db
+        .select({ stage: maintenanceRequests.stage, status: maintenanceRequests.status })
+        .from(maintenanceRequests)
+        .where(eq(maintenanceRequests.id, requestId))
+        .limit(1);
       await db
         .update(maintenanceRequests)
         .set({
@@ -566,6 +573,15 @@ async function commit(
           updatedAt: sql`CURRENT_TIMESTAMP`,
         })
         .where(eq(maintenanceRequests.id, requestId));
+      await recordJobStatusChanges(db, {
+        organisationId: orgId,
+        actorEmail: null,
+        source: "import",
+        changes: statusChangesBetween(requestId, importBefore, {
+          stage: "stage" in fields ? fields.stage : importBefore?.stage,
+          status: "status" in fields ? fields.status : importBefore?.status,
+        }),
+      });
       if (externalId) itemByExternalId.set(externalId, requestId);
       updated += 1;
     }

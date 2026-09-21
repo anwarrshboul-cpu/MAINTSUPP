@@ -367,6 +367,10 @@ async function applyMigrations(d1: D1DatabaseLike) {
      no-ops on a table that does not exist yet. See `ensurePlannedRecurrence`. */
   await ensurePlannedRecurrence(d1);
 
+  /* §23 — a job's stage and status transitions. One guarded table and its
+     index; no backfill — see `ensureJobStatusHistory`. */
+  await ensureJobStatusHistory(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6182,6 +6186,36 @@ async function ensurePlannedRecurrence(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS maintenance_requests_planned_idx ON maintenance_requests(planned_maintenance_id)",
+    ),
+  ]);
+}
+
+/**
+ * §23 — WHERE A JOB HAS BEEN, STAGE BY STAGE.
+ *
+ * One new table and one index. NO BACKFILL, and that is the owner's decision
+ * rather than an omission: history may be rebuilt only from evidence that was
+ * actually recorded, and none with both a "from" and a "to" exists (see the
+ * note on `jobStatusHistory` in db/schema.ts). The table starts empty and fills
+ * from the first transition after this ships.
+ */
+async function ensureJobStatusHistory(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS job_status_history (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         request_id TEXT NOT NULL,
+         field TEXT NOT NULL,
+         from_value TEXT,
+         to_value TEXT,
+         actor_email TEXT,
+         source TEXT NOT NULL,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS job_status_history_request_idx ON job_status_history(organisation_id, request_id, created_at)",
     ),
   ]);
 }

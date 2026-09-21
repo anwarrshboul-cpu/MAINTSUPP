@@ -58,6 +58,7 @@ import {
   siteAliases,
   sites,
 } from "../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "./job-status-history";
 import {
   highestJobReference,
   jobReferenceWindowInconclusive,
@@ -914,6 +915,13 @@ export async function createSubmission(
       location,
       ...(input.activityDetail ?? {}),
     }),
+  });
+  /* §23 — the state every door raises a job in is the first line of its history. */
+  await recordJobStatusChanges(db, {
+    organisationId: input.organisationId,
+    actorEmail: input.actor?.email ?? null,
+    source: `created:${input.source}`,
+    changes: statusChangesBetween(allocated.request.id, null, allocated.request),
   });
 
   return {

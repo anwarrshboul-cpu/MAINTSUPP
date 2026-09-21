@@ -26,6 +26,7 @@ import {
   maintenanceGroups,
   maintenanceRequests,
 } from "../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "./job-status-history";
 import type { RequestStage } from "./types";
 import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
@@ -343,6 +344,13 @@ export async function createBoardItem(
     actorEmail: actor.email,
     detail: JSON.stringify({ groupId: group.id }),
   });
+  /* §23 — the state it was created in is the first line of its history. */
+  await recordJobStatusChanges(db, {
+    organisationId: orgId,
+    actorEmail: actor.email,
+    source: "board.create",
+    changes: statusChangesBetween(id, null, created),
+  });
   return { request: created, item, group };
 }
 
@@ -371,6 +379,8 @@ export async function moveItemsToGroup(
   group: GroupRow,
   requestIds: string[],
   archive = false,
+  /** §23 — which door moved it, for the job's history. */
+  source = archive ? "board.archive" : "board.move",
 ): Promise<MoveOutcome> {
   let position = await nextPosition(db, orgId, group.id);
   const items: ItemRow[] = [];
@@ -422,7 +432,7 @@ export async function moveItemsToGroup(
     if (group.stageKey) {
       const stage = group.stageKey as RequestStage;
       const [before] = await db
-        .select({ status: maintenanceRequests.status })
+        .select({ status: maintenanceRequests.status, stage: maintenanceRequests.stage })
         .from(maintenanceRequests)
         .where(
           and(
@@ -451,6 +461,12 @@ export async function moveItemsToGroup(
         if (before && before.status !== updated.status) {
           statusChanges.push({ requestId, from: before.status, to: updated.status });
         }
+        await recordJobStatusChanges(db, {
+          organisationId: orgId,
+          actorEmail: actor.email,
+          source,
+          changes: statusChangesBetween(requestId, before, updated),
+        });
       }
     }
     await db.insert(activityLog).values({
@@ -608,6 +624,13 @@ export async function duplicateBoardItems(
         updatedAt: now,
       })
       .returning();
+    /* §23 — a duplicate starts its own history in its source's state. */
+    await recordJobStatusChanges(db, {
+      organisationId: orgId,
+      actorEmail: actor.email,
+      source: "board.duplicate",
+      changes: statusChangesBetween(id, null, created),
+    });
     const [item] = await db
       .insert(maintenanceGroupItems)
       .values({

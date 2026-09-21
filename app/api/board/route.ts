@@ -52,6 +52,7 @@ import {
   optionValues,
   sites,
 } from "../../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "../../lib/job-status-history";
 import { invalidateOptionCache } from "../../lib/options-repository";
 import {
   CONTRACTOR_COMMENTS_KEY,
@@ -2753,6 +2754,11 @@ export async function PATCH(request: Request) {
         if (item) movedItems.push(item);
         if (target.stageKey) {
           const stage = target.stageKey as RequestStage;
+          const [jobBefore] = await db
+            .select({ stage: maintenanceRequests.stage, status: maintenanceRequests.status })
+            .from(maintenanceRequests)
+            .where(and(eq(maintenanceRequests.id, sourceItem.requestId), eq(maintenanceRequests.organisationId, orgId)))
+            .limit(1);
           const [updated] = await db
             .update(maintenanceRequests)
             .set({
@@ -2765,6 +2771,13 @@ export async function PATCH(request: Request) {
             .where(and(eq(maintenanceRequests.id, sourceItem.requestId), eq(maintenanceRequests.organisationId, orgId)))
             .returning();
           if (updated) updatedRequests.push(updated);
+          /* §23 — a job moved because its group was deleted still moved. */
+          await recordJobStatusChanges(db, {
+            organisationId: orgId,
+            actorEmail: actor.email,
+            source: "board.group_deleted",
+            changes: statusChangesBetween(sourceItem.requestId, jobBefore, updated),
+          });
         }
       }
       /*
@@ -3252,6 +3265,13 @@ export async function PATCH(request: Request) {
           })
           .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
           .returning();
+        /* §23 */
+        await recordJobStatusChanges(db, {
+          organisationId: orgId,
+          actorEmail: actor.email,
+          source: "board.move",
+          changes: statusChangesBetween(requestId, requestBefore, updatedRequest),
+        });
       }
 
       await db.insert(activityLog).values({

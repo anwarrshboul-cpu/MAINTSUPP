@@ -24,6 +24,7 @@ import {
   maintenanceRequests,
   users,
 } from "../../../db/schema";
+import { recordJobStatusChanges, statusChangesBetween } from "../job-status-history";
 import {
   createBoardGroup,
   createBoardItem,
@@ -154,6 +155,13 @@ async function setSystemField(
     )
     .returning();
   if (!updated) throw new Error("The item no longer exists.");
+  /* §23 — a rule that changes status is a door like any other. */
+  await recordJobStatusChanges(ctx.db, {
+    organisationId: ctx.orgId,
+    actorEmail: ctx.actor?.email ?? null,
+    source: "automation",
+    changes: statusChangesBetween(item.id, item, updated),
+  });
   /*
    * An unresolvable contractor name is recorded, not hidden. The write stands —
    * the text is the value a rule asked for and the register still shows it —
@@ -354,7 +362,7 @@ export async function executeAction(
       if (placement?.groupId === group.id) {
         return { summary: `already in ${group.name}`, noop: true };
       }
-      return moveResult(boardId, item, await moveItemsToGroup(ctx.db, ctx.orgId, boardId, ctx.actor, group, [item.id]));
+      return moveResult(boardId, item, await moveItemsToGroup(ctx.db, ctx.orgId, boardId, ctx.actor, group, [item.id], false, "automation"));
     }
     case "archive_item": {
       const group = await findOrCreateArchivedGroup(ctx.db, ctx.orgId, boardId);
@@ -363,7 +371,7 @@ export async function executeAction(
       return moveResult(
         boardId,
         item,
-        await moveItemsToGroup(ctx.db, ctx.orgId, boardId, ctx.actor, group, [item.id], true),
+        await moveItemsToGroup(ctx.db, ctx.orgId, boardId, ctx.actor, group, [item.id], true, "automation"),
       );
     }
     case "create_subitem": {
