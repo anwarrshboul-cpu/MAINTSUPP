@@ -292,8 +292,14 @@ test("the claims rules survive the move from source text into rows", async () =>
 
   /* The one permitted mention, and it must survive being wrapped across lines the
      way the source test allows it to be. */
-  assert.equal(claimViolation("Maintauk Ltd is not currently VAT registered."), null);
-  assert.equal(claimViolation("Maintauk Ltd is not currently\n  VAT registered."), null);
+  /* The company's approved legal name since #63 (same company number 17262302). */
+  assert.equal(claimViolation("MAINTSUPP LTD is not currently VAT registered."), null);
+  assert.equal(claimViolation("MAINTSUPP LTD is not currently\n  VAT registered."), null);
+  assert.doesNotMatch(
+    CONTENT_RULES.map((rule) => rule.reason).join(" "),
+    /Maintauk/,
+    "every refusal names the company by its current legal name",
+  );
 
   /* A price. `_sections/rates.ts` is the single source for every figure on the
      site and checks its own invariant at module load; a number typed into a page

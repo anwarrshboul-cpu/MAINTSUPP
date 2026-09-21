@@ -36,7 +36,7 @@
  *      calling it on the server would return the SERVER's zone, which is the
  *      one thing this module exists to avoid, so it cannot be reached from a
  *      path the server also runs.
- *   3. EUROPE/LONDON. The business operates in the UK — Maintauk Ltd, UK
+ *   3. EUROPE/LONDON. The business operates in the UK — MAINTSUPP LTD, UK
  *      retail portfolios, service hours quoted in UK time — so when nothing is
  *      known about the reader, UK local time is the likeliest to be right and
  *      the least surprising to be wrong in.
@@ -49,7 +49,7 @@
 /**
  * Where the greeting lands when nothing else is known.
  *
- * The UK, because that is where the business is: Maintauk Ltd is registered in
+ * The UK, because that is where the business is: MAINTSUPP LTD is registered in
  * England and Wales, the portfolios are UK retail, and the published service
  * hours are UK local. A reader we know nothing about is far more likely to be
  * in that timezone than in the one the server happens to run in.

@@ -164,7 +164,7 @@ export const CMS_OMISSIONS: readonly string[] = [
  *     MAINTSUPP does not employ engineers, so "our engineers" is a statement a
  *     client could hold it to. That is the owner's own rule about the owner's own
  *     liability, and a database is not a reason to stop applying it;
- *   - the VAT sentence is a factual one. Maintauk Ltd is not currently VAT
+ *   - the VAT sentence is a factual one. MAINTSUPP LTD is not currently VAT
  *     registered, so a price qualified "+ VAT" would be wrong rather than merely
  *     unwise;
  *   - the price is a SINGLE-SOURCE rule. `rates.ts` is the only file on the site
@@ -183,14 +183,14 @@ export const CONTENT_RULES: ReadonlyArray<{ pattern: RegExp; reason: string }> =
   { pattern: /guaranteed same-day fix/i, reason: 'the brief forbids "guaranteed same-day fix"' },
   { pattern: /100% first-time fix/i, reason: 'the brief forbids "100% first-time fix"' },
   { pattern: /\bwe certify\b/i, reason: 'the brief forbids "we certify"' },
-  /* The VAT qualifiers. Maintauk Ltd is not currently VAT registered, so every
+  /* The VAT qualifiers. MAINTSUPP LTD is not currently VAT registered, so every
      one of these would be factually wrong and not merely unwise. */
-  { pattern: /\+\s*VAT/i, reason: "Maintauk Ltd is not currently VAT registered, so no price may be qualified with VAT" },
-  { pattern: /ex\.?\s*VAT/i, reason: "Maintauk Ltd is not currently VAT registered" },
-  { pattern: /exclud\w*\s+VAT/i, reason: "Maintauk Ltd is not currently VAT registered" },
-  { pattern: /plus\s+VAT/i, reason: "Maintauk Ltd is not currently VAT registered" },
-  { pattern: /VAT\s+extra/i, reason: "Maintauk Ltd is not currently VAT registered" },
-  { pattern: /subject\s+to\s+VAT/i, reason: "Maintauk Ltd is not currently VAT registered" },
+  { pattern: /\+\s*VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered, so no price may be qualified with VAT" },
+  { pattern: /ex\.?\s*VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
+  { pattern: /exclud\w*\s+VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
+  { pattern: /plus\s+VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
+  { pattern: /VAT\s+extra/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
+  { pattern: /subject\s+to\s+VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
   /* A price. `rates.ts` is the site's single source for every number and checks
      its own invariant at module load; a figure typed here could not be checked
      against it, and nothing would notice when the two disagreed. */
@@ -218,7 +218,7 @@ export function claimViolation(value: string): string | null {
      paragraph that also contains the permitted sentence. */
   for (const sentence of flat.match(/[^.]*\bVAT\b[^.]*\.?/gi) ?? []) {
     if (!/not currently VAT registered/i.test(sentence)) {
-      return "VAT may only be mentioned to say that Maintauk Ltd is not currently VAT registered";
+      return "VAT may only be mentioned to say that MAINTSUPP LTD is not currently VAT registered";
     }
   }
   return null;

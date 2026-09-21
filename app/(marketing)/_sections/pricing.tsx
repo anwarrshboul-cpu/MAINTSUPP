@@ -60,7 +60,7 @@ import {
  *
  * NO PRICE CARRIES "+ VAT", AND THAT IS STILL THE RULE. What the footnotes now
  * say instead is the positive form — the price shown is the price payable, and
- * Maintauk Ltd is not VAT registered — which is a statement of fact about the
+ * MAINTSUPP LTD is not VAT registered — which is a statement of fact about the
  * company rather than a qualifier on a number.
  *
  * THE SAVING IS COMPUTED, NOT TYPED. Essential + Compliance − Complete at
