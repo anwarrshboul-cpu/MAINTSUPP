@@ -291,6 +291,14 @@ export type WorkspacePlannedItem = {
   lastCompletedAt: string | null;
   status: string;
   reminderDays: number;
+  /** §25 — `active` creates each visit's job ahead of time; `paused` does not. */
+  generationState: "active" | "paused";
+  leadDays: number;
+  intervalDays: number | null;
+  lastGeneratedDueAt: string | null;
+  lastGeneratedRequestId: string | null;
+  /** Why the last auto-create attempt failed, until one succeeds. */
+  lastGenerationError: string | null;
 };
 
 export type WorkspaceMember = {

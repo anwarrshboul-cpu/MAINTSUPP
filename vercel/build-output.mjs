@@ -323,7 +323,18 @@ await fsp.writeFile(
       * insert — but it is two things to keep in step and one of them will
       * be forgotten.
       */
-      crons: [{ path: "/api/cron/retention", schedule: "20 3 * * *" }],
+      /*
+       * §25 — PLANNED MAINTENANCE, 05:40 UTC daily. Lead times are whole days,
+       * so a daily run is exact rather than a compromise, and it is what the
+       * Hobby plan allows. Same two facts as the retention sweep above: it runs
+       * on PRODUCTION deployments only, and it needs `CRON_SECRET` (the route
+       * refuses without it). Off the retention sweep's minute so the two never
+       * start together.
+       */
+      crons: [
+        { path: "/api/cron/retention", schedule: "20 3 * * *" },
+        { path: "/api/cron/planned-maintenance", schedule: "40 5 * * *" },
+      ],
     },
     null,
     2,

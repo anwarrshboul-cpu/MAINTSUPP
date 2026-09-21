@@ -35,6 +35,7 @@ import type {
   WorkspaceEntity,
   WorkspaceSnapshot,
 } from "../../lib/workspace-data";
+import { PLANNED_FREQUENCIES, STOPPED_STATUSES } from "../../lib/planned-recurrence";
 
 type ManagerTab = Exclude<WorkspaceEntity, "settings"> | "activity" | "import";
 /**
@@ -99,15 +100,21 @@ type FieldDefinition = {
  * another tab, and a search box reading "Search undefined…" because
  * `tabs.find(...)` had nothing to find.
  */
-const tabs: Array<{ key: ManagerTab; label: string; icon: IconName }> = [
-  { key: "site", label: "Sites", icon: "building" },
-  { key: "unit", label: "Units", icon: "grid" },
-  { key: "compliance", label: "Compliance", icon: "shield" },
-  { key: "contractor", label: "Contractors", icon: "users" },
-  { key: "planned", label: "Planned", icon: "calendar" },
-  { key: "member", label: "Team", icon: "users" },
-  { key: "activity", label: "Activity", icon: "activity" },
-  { key: "import", label: "Import", icon: "upload" },
+/*
+ * `singular` names one record for the editor's "New …" heading. That heading
+ * used to take the tab's label and drop its last letter, which worked for the
+ * three plurals and produced "New Planne", "New Complianc" and "New Tea" for
+ * the other three (seen in the browser while verifying §25).
+ */
+const tabs: Array<{ key: ManagerTab; label: string; singular: string; icon: IconName }> = [
+  { key: "site", label: "Sites", singular: "site", icon: "building" },
+  { key: "unit", label: "Units", singular: "unit", icon: "grid" },
+  { key: "compliance", label: "Compliance", singular: "compliance record", icon: "shield" },
+  { key: "contractor", label: "Contractors", singular: "contractor", icon: "users" },
+  { key: "planned", label: "Planned", singular: "planned task", icon: "calendar" },
+  { key: "member", label: "Team", singular: "team member", icon: "users" },
+  { key: "activity", label: "Activity", singular: "record", icon: "activity" },
+  { key: "import", label: "Import", singular: "import", icon: "upload" },
 ];
 
 const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorData> = {
@@ -128,7 +135,9 @@ const emptyDefaults: Record<Exclude<ManagerTab, "activity" | "import">, EditorDa
    * somebody who had never assessed them.
    */
   contractor: { name: "", contactName: "", email: "", phone: "", whatsappNumber: "", address: "", postcode: "", serviceCategories: "", coverageAreas: "UK", certifications: "", certificationEntries: [], insuranceExpiry: "", insurerName: "", policyNumber: "", insuranceNotes: "", dayRate: "", hourlyRate: "", callOutCost: "", otherCost: "", otherCostLabel: "", paymentTerms: "", financeReference: "", availability: "Available", rating: "", active: true, notes: "" },
-  planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30" },
+  /* §25 — a new schedule starts PAUSED: auto-creating jobs is an explicit
+     opt-in per schedule (the owner's decision Q4). */
+  planned: { siteId: "", unitId: "", contractorId: "", title: "", category: "Planned maintenance", frequency: "Annual", intervalDays: "", nextDueAt: "", lastCompletedAt: "", status: "Scheduled", reminderDays: "30", generationState: "paused", leadDays: "14" },
   member: { name: "", email: "", role: "Client", active: true },
 };
 
@@ -481,11 +490,31 @@ function fieldsFor(
     { key: "contractorId", label: "Contractor", type: "select", options: contractorOptions },
     { key: "title", label: "Planned task", required: true },
     { key: "category", label: "Category", required: true },
-    { key: "frequency", label: "Frequency", type: "select", options: ["One-off", "Weekly", "Monthly", "Quarterly", "Biannual", "Annual"].map((value) => ({ value, label: value })) },
+    /* The one list the generator can repeat on — `PLANNED_FREQUENCIES`, not
+       an inline copy that could offer a frequency it does not understand. */
+    { key: "frequency", label: "Frequency", type: "select", options: PLANNED_FREQUENCIES.map((value) => ({ value, label: value })) },
+    { key: "intervalDays", label: "Custom interval (days)", type: "number", hint: "Only for the Custom frequency: repeat every this many days." },
     { key: "nextDueAt", label: "Next due", type: "date", required: true },
     { key: "lastCompletedAt", label: "Last completed", type: "date" },
     { key: "status", label: "Status", type: "select", options: ["Scheduled", "Booked", "In progress", "Completed", "On hold", "Cancelled"].map((value) => ({ value, label: value })) },
     { key: "reminderDays", label: "Reminder days", type: "number" },
+    /*
+     * §25. `required`, so the select offers exactly the two states and never a
+     * blank. Paused is the default and the state every schedule that existed
+     * before this feature was left in.
+     */
+    {
+      key: "generationState",
+      label: "Auto-create jobs",
+      type: "select",
+      required: true,
+      options: [
+        { value: "paused", label: "Paused — no jobs are created" },
+        { value: "active", label: "Active — create each visit's job ahead of time" },
+      ],
+      hint: "When active, the next visit becomes a job on the board a set number of days before it is due, even if the previous one is still open. One visit at a time; never twice.",
+    },
+    { key: "leadDays", label: "Create the job this many days before", type: "number", hint: "0 to 365. The job appears on the board when this window opens." },
   ];
   return [
     { key: "name", label: "Full name", required: true },
@@ -682,7 +711,19 @@ function recordSubtitle(tab: ManagerTab, record: Record<string, unknown>) {
    * column as the one value that means "send them work".
    */
   if (tab === "contractor") return `${record.active ? "Active" : "Archived"} · Availability: ${record.availability || "Not set"} · ${record.assignedJobs ?? 0} jobs${contractorExpiryWarning(record)}`;
-  if (tab === "planned") return `${record.siteName ?? "Unknown site"} · ${dateValue(record.nextDueAt) || "No date"}`;
+  if (tab === "planned") {
+    /* §25 — say whether it creates its own jobs, and if the last attempt failed. */
+    const stopped = (STOPPED_STATUSES as readonly string[]).includes(String(record.status ?? ""));
+    const auto =
+      record.generationState === "active"
+        ? stopped
+          ? ` · Auto-create stopped while ${String(record.status).toLowerCase()}`
+          : record.lastGenerationError
+          ? ` · Auto-create failed: ${String(record.lastGenerationError).slice(0, 90)}`
+          : ` · Auto-creates jobs ${record.leadDays ?? 14} days ahead`
+        : "";
+    return `${record.siteName ?? "Unknown site"} · ${dateValue(record.nextDueAt) || "No date"}${auto}`;
+  }
   if (tab === "member") return `${record.role ?? "Client"} · ${record.active ? "Active" : "Paused"}`;
   return `${record.actorEmail ?? "Workspace"} · ${dateValue(record.createdAt)}`;
 }
@@ -844,6 +885,38 @@ export function WorkspaceDataManager({
 }) {
   const [tab, setTab] = useState<ManagerTab>(initialTab);
   const [query, setQuery] = useState("");
+  /* §25 — "Create due visits now". */
+  const [plannedRunBusy, setPlannedRunBusy] = useState(false);
+  const [plannedRunMessage, setPlannedRunMessage] = useState<string | null>(null);
+  async function runPlannedGeneration() {
+    setPlannedRunBusy(true);
+    setPlannedRunMessage(null);
+    try {
+      const response = await fetch("/api/planned-maintenance/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        created?: number;
+        failed?: number;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "Planned visits could not be created.");
+      const created = result.created ?? 0;
+      const failed = result.failed ?? 0;
+      setPlannedRunMessage(
+        created === 0 && failed === 0
+          ? "Nothing is due yet. Active schedules create their job when the lead window opens."
+          : `Created ${created} job${created === 1 ? "" : "s"} from due visits.${failed ? ` ${failed} could not be created; the schedule says why.` : ""}`,
+      );
+      if (created > 0 || failed > 0) onImported?.();
+    } catch (error) {
+      setPlannedRunMessage(error instanceof Error ? error.message : "Planned visits could not be created.");
+    } finally {
+      setPlannedRunBusy(false);
+    }
+  }
   const initialRecord = initialRecordId && initialTab !== "activity"
     ? recordsFor(initialTab, workspace).find((item) => item.id === initialRecordId)
     : null;
@@ -1358,8 +1431,17 @@ export function WorkspaceDataManager({
                 showing.
               */}
               <label><Icon name="search" size={17} /><input type="search" aria-label={`Search ${activeTabLabel}`} placeholder={`Search ${activeTabLabel.toLowerCase()}…`} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+              {tab === "planned" && (
+                /* §25 — the daily run, on demand, for this workspace. It
+                   creates only what the schedules say is due, so pressing it
+                   early does nothing and pressing it twice cannot duplicate. */
+                <button className="secondary-button" type="button" disabled={plannedRunBusy} onClick={runPlannedGeneration}>
+                  {plannedRunBusy ? "Checking…" : "Create due visits now"}
+                </button>
+              )}
               {!readOnlyTab && <button className="primary-button" type="button" onClick={startNew}><Icon name="plus" size={17} />New</button>}
             </div>
+
             {/*
               W2C — a list that could not load half of itself says so.
 
@@ -1385,6 +1467,14 @@ export function WorkspaceDataManager({
               </p>
             ) : null}
             <div className="workspace-record-list">
+              {/* §25 — inside the list, not beside it: the records panel is a
+                  two-row grid (toolbar, list) and a third child is laid over
+                  the first row of records. */}
+              {tab === "planned" && plannedRunMessage && (
+                <p role="status" style={{ margin: "0 0 8px", padding: "8px 10px", borderRadius: "8px", background: "var(--surface-hover)" }}>
+                  {plannedRunMessage}
+                </p>
+              )}
               {records.map((record) => {
                 /*
                   W2C — THE PROVENANCE LINE.
@@ -1508,7 +1598,7 @@ export function WorkspaceDataManager({
                 markup to keep an unwanted landmark out would be a restyle. The
                 `h3` inside keeps its own role either way.
               */}
-              <header role="presentation"><div><small>{editorId ? "Edit shared record" : "Create shared record"}</small><h3>{editorId ? "Update details" : `New ${tabs.find((item) => item.key === tab)?.label.slice(0, -1) || "record"}`}</h3></div><button className="icon-button" type="button" aria-label="Close editor" onClick={() => setForm(null)}><Icon name="close" size={17} /></button></header>
+              <header role="presentation"><div><small>{editorId ? "Edit shared record" : "Create shared record"}</small><h3>{editorId ? "Update details" : `New ${tabs.find((item) => item.key === tab)?.singular ?? "record"}`}</h3></div><button className="icon-button" type="button" aria-label="Close editor" onClick={() => setForm(null)}><Icon name="close" size={17} /></button></header>
               <div className="workspace-record-editor__fields">
                 {fields.map((field) => {
                   const value = form[field.key] ?? (field.type === "checkbox" ? false : "");

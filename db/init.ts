@@ -362,6 +362,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      rather than an unfinished one. */
   await ensureSitePages(d1);
 
+  /* §25 planned-maintenance recurrence. After the base schema that creates
+     `planned_maintenance` and `maintenance_requests` — `addColumns` silently
+     no-ops on a table that does not exist yet. See `ensurePlannedRecurrence`. */
+  await ensurePlannedRecurrence(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -4380,11 +4385,22 @@ async function ensureStageTwentyAccounts(d1: D1DatabaseLike) {
      * SQL statement and integer comparison there is exact.
      */
     d1.prepare(
+      /*
+       * `first_at` and `blocked_until` are MILLISECOND epochs — about 1.8e12 —
+       * so they are BIGINT. SQLite's INTEGER is 64-bit and never cared; on
+       * Postgres `INTEGER` is 32-bit and every write overflowed. Measured on
+       * Staging in Phase 9: this table had been built from this DDL, held zero
+       * rows, and every sign-in lockout and form throttle was silently off
+       * because the write's `.catch` swallowed "integer out of range".
+       * Production was built by the legacy migration with BIGINT and was never
+       * affected. `CREATE TABLE IF NOT EXISTS` changes nothing on a database
+       * that already has the table; this is for the next one built from here.
+       */
       `CREATE TABLE IF NOT EXISTS sign_in_failures (
          key TEXT PRIMARY KEY,
          count INTEGER NOT NULL DEFAULT 0,
-         first_at INTEGER NOT NULL DEFAULT 0,
-         blocked_until INTEGER NOT NULL DEFAULT 0
+         first_at BIGINT NOT NULL DEFAULT 0,
+         blocked_until BIGINT NOT NULL DEFAULT 0
        )`,
     ),
     // Swept by expiry, so the sweep must not scan the table to find its work.
@@ -6111,6 +6127,61 @@ async function ensurePortalModuleSettings(d1: D1DatabaseLike) {
        an append and two administrators cannot leave two rows disagreeing. */
     d1.prepare(
       "CREATE UNIQUE INDEX IF NOT EXISTS portal_module_settings_key_idx ON portal_module_settings(organisation_id, module_key)",
+    ),
+  ]);
+}
+
+/**
+ * §25 — PLANNED MAINTENANCE THAT CREATES ITS OWN JOBS. The owner's decision Q4.
+ *
+ * ADDITIVE ONLY: seven nullable-or-defaulted columns on `planned_maintenance`,
+ * two nullable ones on `maintenance_requests`, and one new table. Nothing is
+ * rewritten, nothing is backfilled.
+ *
+ * THE DEFAULT IS THE DECISION. `generation_state` defaults to `'paused'`, so
+ * every schedule that exists when this runs — Production has eight, all
+ * One-off — stays exactly as inert as it was. A schedule generates only after
+ * somebody switches it on.
+ *
+ * `planned_occurrences_once_idx` is the duplicate guard: a visit is claimed by
+ * inserting `(schedule_id, due_date)` before its job is created, so two runs
+ * racing for the same visit cannot both win.
+ */
+async function ensurePlannedRecurrence(d1: D1DatabaseLike) {
+  await addColumns(d1, "planned_maintenance", [
+    ["generation_state", "TEXT NOT NULL DEFAULT 'paused'"],
+    ["lead_days", "INTEGER NOT NULL DEFAULT 14"],
+    ["interval_days", "INTEGER"],
+    ["recurrence_anchor", "TEXT"],
+    ["last_generated_due_at", "TEXT"],
+    ["last_generated_request_id", "TEXT"],
+    ["last_generation_error", "TEXT"],
+  ]);
+  await addColumns(d1, "maintenance_requests", [
+    ["planned_maintenance_id", "TEXT"],
+    ["planned_due_date", "TEXT"],
+  ]);
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS planned_occurrences (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         schedule_id TEXT NOT NULL REFERENCES planned_maintenance(id),
+         due_date TEXT NOT NULL,
+         request_id TEXT,
+         status TEXT NOT NULL DEFAULT 'claimed',
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS planned_occurrences_once_idx ON planned_occurrences(schedule_id, due_date)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS planned_occurrences_organisation_idx ON planned_occurrences(organisation_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS maintenance_requests_planned_idx ON maintenance_requests(planned_maintenance_id)",
     ),
   ]);
 }
