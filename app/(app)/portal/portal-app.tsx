@@ -220,6 +220,7 @@ import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
+import { GlobalSearch } from "./global-search";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -3278,6 +3279,31 @@ export default function PortalApp({
               </strong>
             </div>
           )}
+
+          {/*
+            §36 — the workspace's global search. The server decides what each
+            reader may find; a job opens its drawer here, the way the Invoice
+            Tracker's job links do — from the loaded list when it is there, and
+            otherwise from the job's own read, so a job on a page not yet loaded
+            still opens rather than bouncing the reader to the board.
+          */}
+          <GlobalSearch
+            compact={narrowTopbar}
+            onOpenJob={(id) => {
+              const match = requests.find((request) => request.id === id);
+              if (match) {
+                openRequest(match);
+                return;
+              }
+              void fetch(`/api/maintenance?id=${encodeURIComponent(id)}`, { headers: { Accept: "application/json" } })
+                .then(async (response) => {
+                  const body = (await response.json().catch(() => ({}))) as { request?: MaintenanceRequest; error?: string };
+                  if (!response.ok || !body.request) throw new Error(body.error || "That job could not be opened.");
+                  openRequest(body.request);
+                })
+                .catch((error: unknown) => setToast(error instanceof Error ? error.message : "That job could not be opened."));
+            }}
+          />
 
           <div className="topbar-actions">
             <ThemeToggle />
