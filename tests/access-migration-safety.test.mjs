@@ -270,20 +270,53 @@ test("the migration promotes only active, password-holding legacy Super Admins",
   assert.match(init, /if \(process\.env\.NODE_ENV !== "production"\) \{/, "and only outside production");
 });
 
-test("MAINTSUPP's demonstration company is internal; every other company is a customer", { skip: !source }, async () => {
-  const demo = read(
-    "SELECT c.kind AS kind FROM client_companies c JOIN organisations o ON o.client_company_id = c.id WHERE o.id = ?",
-    DEMO_WORKSPACE,
-  )[0];
-  assert.equal(demo?.kind, "internal");
+test("MAINTSUPP's own companies are internal; every customer's is not", { skip: !source }, async () => {
+  /*
+   * RE-POINTED: there are now TWO internal companies, by owner decision.
+   *
+   * This asserted "only the demonstration workspace's company is internal" and
+   * `internal.size === 1`, which was right while `MAINTSUPP Demo` was the only one.
+   * The website-leads intake workspace is a deliberate second: a public enquiry has
+   * no account, and filing it under `PRIMARY_ORGANISATION_ID` put MAINTSUPP's own
+   * sales pipeline inside a client company's tenant. `kind = 'internal'` is the
+   * mechanism that keeps a workspace out of every customer's reach, so the intake
+   * workspace uses it too. See `db/website-leads-workspace.ts`.
+   *
+   * Not weakened. The property that matters -- no CUSTOMER company is internal -- is
+   * now asserted by NAME rather than as a side effect of a count, and the internal
+   * set is enumerated exactly, so a third must be added deliberately. A count could
+   * never say WHICH two, which is the part worth knowing.
+   */
+  const PLATFORM_WORKSPACES = [DEMO_WORKSPACE, "org_maintsupp_website_leads"];
+
+  for (const workspace of PLATFORM_WORKSPACES) {
+    const row = read(
+      "SELECT c.kind AS kind FROM client_companies c JOIN organisations o ON o.client_company_id = c.id WHERE o.id = ?",
+      workspace,
+    )[0];
+    assert.equal(row?.kind, "internal", `${workspace} must belong to an internal company`);
+  }
+
+  /* Every OTHER workspace's company must be a customer's. This is the assertion the
+     old one was really making, and it now survives a second platform workspace. */
   const others = read(
-    `SELECT DISTINCT c.kind AS kind FROM client_companies c JOIN organisations o ON o.client_company_id = c.id
-      WHERE o.id <> ?`,
-    DEMO_WORKSPACE,
-  ).map((row) => row.kind);
-  assert.ok(!others.includes("internal"), "only the demonstration workspace's company is internal");
+    `SELECT DISTINCT o.id AS id, c.kind AS kind
+       FROM client_companies c JOIN organisations o ON o.client_company_id = c.id`,
+  ).filter((row) => !PLATFORM_WORKSPACES.includes(row.id));
+  const wronglyInternal = others.filter((row) => row.kind === "internal").map((row) => row.id);
+  assert.deepEqual(
+    wronglyInternal,
+    [],
+    "a customer's company must never be internal — that would hide it from its own people",
+  );
+
+  /* And the set is exactly those two, by id. */
   const internal = await modules.authority.loadInternalCompanyIds(modules.db);
-  assert.equal(internal.size, 1);
+  assert.deepEqual(
+    [...internal].sort(),
+    PLATFORM_WORKSPACES.map((id) => `company-${id}`).sort(),
+    "exactly the two platform-owned companies are internal",
+  );
 
   // An Owner row on the internal company is ignored by the authority loader.
   const company = read("SELECT client_company_id AS id FROM organisations WHERE id = ?", DEMO_WORKSPACE)[0].id;
