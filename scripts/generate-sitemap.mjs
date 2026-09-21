@@ -45,15 +45,16 @@ const ORIGIN = "https://maintsupp.com";
  * The homepage is assembled from `_sections/`, so a rewrite of the hero lives
  * there and nowhere near `page.tsx`; crediting only `page.tsx` would report
  * the homepage as untouched through exactly the changes that matter most.
- * The legal pages own their whole selves and list only themselves.
+ * Shared structured data and breadcrumbs are included too: changing the public
+ * identity or navigation changes the rendered page even when page.tsx is untouched.
  */
 const ROUTES = [
-  { path: "/",            changefreq: "weekly",  priority: "1.0", sources: ["app/(marketing)/page.tsx", "app/(marketing)/_sections"] },
-  { path: "/contractors", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/contractors/page.tsx"] },
-  { path: "/faqs",        changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/faqs/page.tsx"] },
-  { path: "/privacy",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/privacy/page.tsx"] },
-  { path: "/terms",       changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/terms/page.tsx"] },
-  { path: "/cookies",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/cookies/page.tsx"] },
+  { path: "/",            changefreq: "weekly",  priority: "1.0", sources: ["app/(marketing)/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components/structured-data.ts"] },
+  { path: "/contractors", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/contractors/page.tsx", "app/(marketing)/_components"] },
+  { path: "/faqs",        changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/faqs/page.tsx", "app/(marketing)/_components"] },
+  { path: "/privacy",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/privacy/page.tsx", "app/(marketing)/_components"] },
+  { path: "/terms",       changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/terms/page.tsx", "app/(marketing)/_components"] },
+  { path: "/cookies",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/cookies/page.tsx", "app/(marketing)/_components"] },
 ];
 
 /**

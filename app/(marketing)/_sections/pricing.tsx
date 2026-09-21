@@ -497,7 +497,7 @@ export function Pricing() {
               but the statement that the number shown is the number payable.
             */}
             <li>
-              Prices shown are the total payable. Maintauk Ltd is not currently VAT
+              Prices shown are the total payable. MAINTSUPP LTD is not currently VAT
               registered.
             </li>
             <li>Final quote confirmed at your free portfolio review.</li>

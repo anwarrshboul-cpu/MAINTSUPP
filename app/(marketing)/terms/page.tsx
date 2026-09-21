@@ -1,3 +1,4 @@
+import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function TermsPage() {
   return (
     <main className="m-section">
       <div className="m-shell m-shell--narrow m-prose">
+          <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Terms of use", path: "/terms" }]} />
         <h1>Terms of use</h1>
         <p className="m-note">
           <strong>Draft for review.</strong> These cover use of the website and
@@ -37,7 +39,7 @@ export default function TermsPage() {
 
         <h2>Who we are</h2>
         <p>
-          Maintsupp is a trading name of Maintauk Ltd, registered in England and
+          MAINTSUPP LTD, registered in England and
           Wales, company number 17262302.
         </p>
 

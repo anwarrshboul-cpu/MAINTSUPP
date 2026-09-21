@@ -545,8 +545,12 @@ test("the marketing CSS keeps its accessibility floors", async () => {
 
 test("the FAQ structured data has exactly one home, and it is /faqs", async () => {
   const page = await read("app/(marketing)/page.tsx");
-  assert.match(page, /"@type": "Organization"/);
-  assert.match(page, /17262302/, "the company number belongs in the Organization data");
+  // Identity now lives in a shared module so FAQ publisher references and
+  // the homepage cannot disagree. Keep the original identity contract there.
+  const identity = await read("app/(marketing)/_components/structured-data.ts");
+  assert.match(identity, /"@type": "Organization"/);
+  assert.match(identity, /17262302/, "the company number belongs in the Organization data");
+  assert.match(page, /"@graph": \[organization, website\]/);
 
   /*
    * SAME ASSERTION, RE-POINTED REASON — this was "structured data survived the

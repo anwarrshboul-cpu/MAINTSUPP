@@ -1,3 +1,4 @@
+import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
 import { ContractorApply } from "./apply-form";
 
@@ -27,6 +28,7 @@ export default function ContractorsPage() {
     <main id="top">
       <section className="section">
         <div className="wrap wrap--narrow">
+          <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Contractor network", path: "/contractors" }]} />
           <p className="eyebrow">Contractor network</p>
           <h1 className="h1">Join the Maintsupp contractor network</h1>
           <p className="lede">
