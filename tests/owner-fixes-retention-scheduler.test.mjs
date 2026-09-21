@@ -266,9 +266,12 @@ test("the secret comparison is constant-time and folds in the length", async () 
 
 test("the cron is declared, and documented as Production-only", async () => {
   const build = await read(BUILD);
+  /* RE-POINTED (Phase 7 §25): the array now holds a second entry, the daily
+     planned-maintenance generator, so the retention entry is asserted as a
+     member of `crons` rather than as its only element. Same contract. */
   assert.match(
     build,
-    /crons: \[\{ path: "\/api\/cron\/retention", schedule: "[^"]+" \}\]/,
+    /crons: \[[\s\S]*?\{ path: "\/api\/cron\/retention", schedule: "[^"]+" \}[\s\S]*?\]/,
     "the schedule must be in the prebuilt output config",
   );
   /*

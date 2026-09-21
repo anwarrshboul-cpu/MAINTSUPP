@@ -74,6 +74,7 @@ import {
   memberships,
   passwordResets,
   plannedMaintenance,
+  plannedOccurrences,
   platformAdmins,
   quotations,
   reminderDispatch,
@@ -676,6 +677,12 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
       .where(
         sql`site_id in ${seededSites} or unit_id in (select id from units where site_id in ${seededSites})`,
       ),
+  );
+  /* §25 — a generated visit's claim points at its schedule, so it goes first. */
+  await record("planned_occurrences", () =>
+    db
+      .delete(plannedOccurrences)
+      .where(sql`schedule_id in (select id from planned_maintenance where site_id in ${seededSites})`),
   );
   await record("planned_maintenance", () =>
     db.delete(plannedMaintenance).where(sql`site_id in ${seededSites}`),

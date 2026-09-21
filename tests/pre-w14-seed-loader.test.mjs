@@ -385,6 +385,8 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
       "invoices",
       "maintenance_requests",
       "unit_service_records",
+      /* §25: a generated visit's claim references its schedule. */
+      "planned_occurrences",
       "planned_maintenance",
       "units",
       "site_aliases",

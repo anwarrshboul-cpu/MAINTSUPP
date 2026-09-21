@@ -71,6 +71,15 @@ const PUBLIC_ROUTES = new Set([
   "app/api/cron/reminders/route.ts",
   "app/api/cron/retention/route.ts",
   /*
+   * The third scheduler (§25, 2026-09-22), on exactly the footing of the two
+   * above: no session, no organisation, every write under the schedule's own
+   * `organisation_id`. Its 503s mean "CRON_SECRET is unset" or "the run could
+   * not complete"; a sign-in fixes neither. The in-app door onto the same
+   * generator, `/api/planned-maintenance/generate`, is NOT exempt — it has a
+   * session and it calls `anonymousRefusal` first.
+   */
+  "app/api/cron/planned-maintenance/route.ts",
+  /*
    * The emailed Acknowledge / Snooze / Mark-renewed links. On the same footing
    * as the contractor job link above: the single-use token IS the
    * authorisation, and the holder is a store manager or a landlord with no
@@ -287,9 +296,18 @@ test("a comment thread refuses rather than throwing", async (t) => {
    * same statement, failing an assertion about session handling for a reason
    * that had nothing to do with sessions.
    */
+  /*
+   * RE-POINTED (2026-09-22). This pinned `({ db, orgId, … } = await
+   * scopedDb(request))` inside the try. Since 6b21a76 the read asks for
+   * `board.view`, so the scope arrives through `scopedDbWithCapability` and a
+   * `viewGuard`. The contract is unchanged and still asserted: the call that
+   * throws for a signed-out caller is INSIDE the try, followed by the same
+   * destructure. It only runs with a dev server up, which is why the Phase 9
+   * source run did not see it go stale.
+   */
   assert.match(
     source,
-    /try \{\s*\(\{[^}]*\bdb\b[^}]*\borgId\b[^}]*\} = await scopedDb\(request\)\);/,
+    /try \{\s*const viewGuard = await scopedDbWithCapability\(request, "board\.view"\);\s*if \(viewGuard\.denied\) return viewGuard\.denied;\s*\(\{[^}]*\bdb\b[^}]*\borgId\b[^}]*\} = viewGuard\.scope\);/,
   );
   assert.match(source, /const refusal = anonymousRefusal\(error\);/);
 

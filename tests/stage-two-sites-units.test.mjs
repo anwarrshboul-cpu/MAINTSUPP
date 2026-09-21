@@ -105,6 +105,16 @@ test("no configurable list has reappeared as a code constant", async () => {
      */
     ["app/lib/reminders/schedule.ts", /export const TERMINAL_REMINDER_STATUSES = \["acknowledged", "cancelled", "superseded"\] as const;/],
     /*
+     * A RULE OVER A LIST, NOT THE LIST (§25, 2026-09-22). Which of the planned
+     * register's statuses stop a schedule from creating jobs. The register's
+     * own status vocabulary is untouched and still the inline list the form
+     * offers (see KNOWN_INLINE_OPTION_LISTS); this names the two of its values
+     * the generator must not act on. Nobody adds a third from a settings
+     * screen: a new "don't generate" state would need the generator to learn
+     * what it means.
+     */
+    ["app/lib/planned-recurrence.ts", /export const STOPPED_STATUSES = \["Cancelled", "On hold"\] as const;/],
+    /*
      * A FLAG'S OWN LIFECYCLE, and the same shape as the reminder statuses above.
      *
      * §7 raises a flag against an invoice; a person then either clears it (the
@@ -221,8 +231,10 @@ const KNOWN_INLINE_OPTION_LISTS = [
   ["app/(app)/portal/workspace-data-manager.tsx", '"Active"'],
   // Contractor availability, owned by the contractor register.
   ["app/(app)/portal/workspace-data-manager.tsx", '"Available"'],
-  // Planned maintenance frequency and status.
-  ["app/(app)/portal/workspace-data-manager.tsx", '"One-off"'],
+  // Planned maintenance status. The FREQUENCY list left this file in §25
+  // (2026-09-22): it is `PLANNED_FREQUENCIES` in app/lib/planned-recurrence.ts,
+  // because the recurrence generator must understand every value the form
+  // offers — an inline copy could offer one it cannot repeat on.
   ["app/(app)/portal/workspace-data-manager.tsx", '"Scheduled"'],
   // The three workspace roles, which are a permissions concept rather than an
   // admin-editable list.

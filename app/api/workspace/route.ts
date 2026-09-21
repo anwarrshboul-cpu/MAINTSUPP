@@ -111,6 +111,7 @@ import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
+import { recurrenceOnSave, todayUtc } from "../../lib/planned-recurrence";
 import {
   DUTY_HOLDERS,
   isDutyHolder,
@@ -1264,6 +1265,12 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
     lastCompletedAt: item.lastCompletedAt,
     status: item.status,
     reminderDays: item.reminderDays,
+    generationState: item.generationState === "active" ? "active" : "paused",
+    leadDays: item.leadDays,
+    intervalDays: item.intervalDays ?? null,
+    lastGeneratedDueAt: item.lastGeneratedDueAt ?? null,
+    lastGeneratedRequestId: item.lastGeneratedRequestId ?? null,
+    lastGenerationError: item.lastGenerationError ?? null,
   }));
 
   const team: WorkspaceMember[] = userRows.map((member) => ({
@@ -1762,8 +1769,28 @@ export async function POST(request: Request) {
         { kind: "contractor", value: contractorId },
       ]);
       if (badReference) return badReference;
+      const frequency = text(data.frequency, 60) || "Annual";
+      /*
+       * §25 — the recurrence columns. A new schedule is PAUSED unless the save
+       * says otherwise: the owner's decision Q4 makes auto-creation an explicit
+       * opt-in per schedule. Switching one on is refused with words when the
+       * schedule could never generate (no date, or a frequency the calendar
+       * cannot repeat on). See `recurrenceOnSave`.
+       */
+      const recurrence = recurrenceOnSave(
+        {
+          generationState: data.generationState,
+          leadDays: data.leadDays,
+          intervalDays: data.intervalDays,
+          frequency,
+          nextDueAt,
+        },
+        null,
+        todayUtc(),
+      );
+      if (!recurrence.ok) return Response.json({ error: recurrence.error }, { status: 400 });
       id = newId("planned", title);
-      await db.insert(plannedMaintenance).values({ id, organisationId: orgId, siteId, unitId, contractorId, title, category: text(data.category, 80) || "Planned maintenance", frequency: text(data.frequency, 60) || "Annual", nextDueAt, lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40) || "Scheduled", reminderDays: numeric(data.reminderDays, 30, 0, 365) });
+      await db.insert(plannedMaintenance).values({ id, organisationId: orgId, siteId, unitId, contractorId, title, category: text(data.category, 80) || "Planned maintenance", frequency, nextDueAt, lastCompletedAt: optionalText(data.lastCompletedAt, 40), status: text(data.status, 40) || "Scheduled", reminderDays: numeric(data.reminderDays, 30, 0, 365), ...recurrence.fields });
     } else if (entity === "member") {
       const name = text(data.name, 120);
       const email = text(data.email, 180).toLowerCase();
@@ -3664,6 +3691,32 @@ export async function PATCH(request: Request) {
         { kind: "contractor", value: "contractorId" in data ? optionalText(data.contractorId, 100) : null },
       ]);
       if (badReference) return badReference;
+      /*
+       * §25 — the recurrence columns, decided against what is STORED, because
+       * "the pattern changed" and "the date rolls forward when switched on" are
+       * questions about the difference, not about the request. Applied after
+       * the supplied fields below, so a roll-forward wins over the posted date.
+       */
+      const [storedPlanned] = await db
+        .select()
+        .from(plannedMaintenance)
+        .where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)))
+        .limit(1);
+      if (!storedPlanned) {
+        return Response.json({ error: "Planned task not found." }, { status: 404 });
+      }
+      const recurrence = recurrenceOnSave(
+        {
+          generationState: data.generationState,
+          leadDays: data.leadDays,
+          intervalDays: data.intervalDays,
+          frequency: "frequency" in data ? text(data.frequency, 60) : undefined,
+          nextDueAt: "nextDueAt" in data ? text(data.nextDueAt, 40) : undefined,
+        },
+        storedPlanned,
+        todayUtc(),
+      );
+      if (!recurrence.ok) return Response.json({ error: recurrence.error }, { status: 400 });
       await db.update(plannedMaintenance).set({
         ...supplied(data, "siteId", (value) => text(value, 100)),
         ...supplied(data, "unitId", (value) => optionalText(value, 100)),
@@ -3675,6 +3728,7 @@ export async function PATCH(request: Request) {
         ...supplied(data, "lastCompletedAt", (value) => optionalText(value, 40)),
         ...supplied(data, "status", (value) => text(value, 40)),
         ...supplied(data, "reminderDays", (value) => numeric(value, 30, 0, 365)),
+        ...recurrence.fields,
         updatedAt: new Date().toISOString(),
       }).where(and(eq(plannedMaintenance.id, id), eq(plannedMaintenance.organisationId, orgId)));
     } else if (entity === "member") {

@@ -781,6 +781,17 @@ export const maintenanceRequests = sqliteTable(
     scheduledDate: text("scheduled_date"),
     scheduledTime: text("scheduled_time"),
     targetCompletionDate: text("target_completion_date"),
+    /*
+     * THE SCHEDULE A JOB WAS GENERATED FROM, AND WHICH VISIT — §25.
+     *
+     * Both NULL on every job raised any other way. Written only by
+     * `app/lib/planned-generation.ts`. The uniqueness that stops a visit being
+     * generated twice lives on `planned_occurrences`, not here: the claim is
+     * taken BEFORE the job exists, and a unique index on this table would turn
+     * a lost race into a failed job-number allocation instead of a quiet skip.
+     */
+    plannedMaintenanceId: text("planned_maintenance_id"),
+    plannedDueDate: text("planned_due_date"),
     isSeed: integer("is_seed", { mode: "boolean" }).notNull().default(false),
     seedBatchId: text("seed_batch_id"),
     cost: real("cost"),
@@ -873,6 +884,27 @@ export const plannedMaintenance = sqliteTable(
     lastCompletedAt: text("last_completed_at"),
     status: text("status").notNull().default("Scheduled"),
     reminderDays: integer("reminder_days").notNull().default(30),
+    /*
+     * RECURRENCE — §25, the owner's decision Q4. See `app/lib/planned-recurrence.ts`.
+     *
+     * `generation_state` is TEXT, `paused` | `active`, not a boolean: this column
+     * crosses two databases and `sqlite-to-postgres.ts` turns booleans by bare
+     * column name, which a word never needs. Every schedule that existed before
+     * the feature shipped defaults to `paused` — nothing generates because a
+     * deploy happened.
+     */
+    generationState: text("generation_state").notNull().default("paused"),
+    /** Days before the due date the job is created. */
+    leadDays: integer("lead_days").notNull().default(14),
+    /** Only for frequency "Custom": repeat every this many days. */
+    intervalDays: integer("interval_days"),
+    /** The date the repeat pattern counts from, so month-end dates do not drift. */
+    recurrenceAnchor: text("recurrence_anchor"),
+    /** The visit last turned into a job, and the job. */
+    lastGeneratedDueAt: text("last_generated_due_at"),
+    lastGeneratedRequestId: text("last_generated_request_id"),
+    /** Why the last attempt failed, in words, until one succeeds. */
+    lastGenerationError: text("last_generation_error"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   },
@@ -880,6 +912,38 @@ export const plannedMaintenance = sqliteTable(
     index("planned_maintenance_organisation_idx").on(table.organisationId),
     index("planned_maintenance_site_idx").on(table.siteId),
     index("planned_maintenance_due_idx").on(table.nextDueAt),
+  ],
+);
+
+/**
+ * ONE ROW PER GENERATED VISIT — the duplicate guard for §25.
+ *
+ * `(schedule_id, due_date)` is UNIQUE, and the generator INSERTs the claim
+ * before it creates the job: two runs racing for the same visit both try, one
+ * row lands, and the loser skips. That is the owner's "stable schedule +
+ * due-date uniqueness rule", held by the database rather than by a
+ * SELECT-then-INSERT that two runs can both pass. The pattern is
+ * `reminder_dispatch`'s, which has held under the hourly dispatcher.
+ *
+ * `status`: `claimed` while the job is being created, `created` once it
+ * exists (with `request_id`). A failed creation deletes its claim, so the
+ * next run tries again rather than the visit being lost to one bad moment.
+ */
+export const plannedOccurrences = sqliteTable(
+  "planned_occurrences",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    scheduleId: text("schedule_id").notNull().references(() => plannedMaintenance.id),
+    dueDate: text("due_date").notNull(),
+    requestId: text("request_id"),
+    status: text("status").notNull().default("claimed"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("planned_occurrences_once_idx").on(table.scheduleId, table.dueDate),
+    index("planned_occurrences_organisation_idx").on(table.organisationId),
   ],
 );
 
