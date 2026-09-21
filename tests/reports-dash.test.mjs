@@ -542,13 +542,22 @@ test("the route counts the Overview's jobs with the Overview's spend query — a
      contract this pin protects is unchanged and is the reason it stays: this
      route must count THE SAME JOBS as the Overview block, through the same
      helper, never a second scope that happens to agree. */
-  assert.match(route, /dashboardJobScope\(orgId, portfolio\)/, "the same scope as the Overview block");
-  assert.match(route, /loadSpendByMonth\(db, scope,/, "the trend is the Overview's own query");
-  assert.match(route, /resolveDashboardPortfolio\(\s*db,\s*orgId,\s*url\.searchParams\.get\("portfolio"\),\s*siteScope,?\s*\)/,
+  /* RE-POINTED (§32): the loading moved, unchanged, into `app/lib/reports-metrics.ts`
+     so the scheduled report email reads the SAME figures as the page — the
+     scheduler has no request to call the route with. The contract below is
+     asserted where it now lives; the route keeps the guard and the CSV. */
+  const loader = await read("app/lib/reports-metrics.ts");
+  assert.match(loader, /dashboardJobScope\(orgId, portfolio\)/, "the same scope as the Overview block");
+  assert.match(loader, /loadSpendByMonth\(db, scope,/, "the trend is the Overview's own query");
+  assert.match(loader, /resolveDashboardPortfolio\(\s*db,\s*orgId,\s*query\.portfolio \?\? null,\s*siteScope,?\s*\)/,
     "with the membership's site restriction");
+  assert.match(route, /portfolio: url\.searchParams\.get\("portfolio"\),/, "the page's portfolio is the one passed in");
+  assert.match(route, /await loadReportsSnapshot\(\s*db,\s*orgId,\s*siteScope,/, "and the caller's restriction with it");
   assert.match(route, /cells\.map\(csvCell\)/, "every export cell is neutralised");
-  const code = route.replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.doesNotMatch(code, /\.insert\(|\.update\(|\.delete\(|db\.run\(/);
+  for (const source of [route, loader]) {
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.doesNotMatch(code, /\.insert\(|\.update\(|\.delete\(|db\.run\(/);
+  }
   const builder = await read("app/lib/reports-dash.ts");
   assert.doesNotMatch(builder, /from "drizzle-orm"|from "\.\.\/\.\.\/db/, "the builder is pure");
   const overview = await read("app/lib/overview-metrics.ts");

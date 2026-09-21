@@ -25,7 +25,9 @@ export type NotificationRequest = {
     | "compliance"
     | "system"
     | "contractor-application"
-    | "invitation";
+    | "invitation"
+    /** §32 — a scheduled report email; the subject id is the schedule. */
+    | "report";
   subjectId?: string | null;
   to: string;
   subject: string;
@@ -189,6 +191,39 @@ function emailMode(source: Record<string, string | undefined>): EmailMode {
 /** The mode this deployment is in, for the platform panel and for tests. */
 export function outboundEmailMode(): EmailMode {
   return providerConfig().mode;
+}
+
+/**
+ * WHETHER AN EMAIL WOULD ACTUALLY REACH ITS RECIPIENT HERE — and if not, why,
+ * in words a screen can show. §32 (and the owner's decision Q1): a feature that
+ * sends email says so honestly when it cannot, rather than recording "sent".
+ *
+ * Deliverable only with a provider key AND `EMAIL_MODE=live`. Sink mode sends,
+ * but to the internal test inbox, so for the person who was meant to receive
+ * it nothing was delivered.
+ */
+export function emailDeliveryStatus(): { deliverable: boolean; mode: EmailMode; reason: string | null } {
+  /* Read into locals: `sendNotification`'s own `config.mode` guard is the one
+     the email-mode tests locate, and this is a description of it, not a copy. */
+  const { apiKey, mode } = providerConfig();
+  if (!apiKey) {
+    return {
+      deliverable: false,
+      mode,
+      reason: "Email delivery is not configured on this deployment, so nothing is delivered.",
+    };
+  }
+  if (mode === "log") {
+    return { deliverable: false, mode, reason: "Email is in log mode on this deployment: nothing is sent." };
+  }
+  if (mode === "sink") {
+    return {
+      deliverable: false,
+      mode,
+      reason: "Email is in test mode on this deployment: messages go to the internal test inbox, not to the recipients.",
+    };
+  }
+  return { deliverable: true, mode, reason: null };
 }
 
 export function notificationTargets() {
@@ -458,8 +493,7 @@ const SHELL = (title: string, body: string) => `
   ${body}
   <hr style="border:0;border-top:1px solid #dde4e8;margin:22px 0 10px">
   <p style="font-size:12px;color:#6b7a83;margin:0">
-    Maintsupp is a trading name of Maintauk Ltd, registered in England &amp; Wales,
-    company number 17262302.
+    MAINTSUPP LTD, registered in England &amp; Wales, company number 17262302.
   </p>
 </div>`;
 
@@ -532,6 +566,35 @@ export function leadConfirmationTemplate(lead: { name: string }) {
         If it is urgent, call <strong>+44 7852 224644</strong>, Monday to Friday,
         8:30am to 5:30pm.
       </p>`,
+    ),
+  };
+}
+
+/**
+ * A SCHEDULED REPORT — §32. The Reports dashboard's own figures for one
+ * recipient (computed under their own access by `report-delivery.ts`), a link to
+ * the page, and nothing a recipient could not see there. Every value that came
+ * from somebody's typing — the schedule's name, site names — is escaped.
+ */
+export function reportDigestTemplate(report: {
+  scheduleName: string;
+  workspaceName: string;
+  periodLabel: string;
+  rangeLabel: string;
+  figures: Array<{ label: string; value: string }>;
+  topSites: Array<{ name: string; value: string }>;
+  link: string;
+}) {
+  const figureRows = report.figures.map((figure) => row(figure.label, figure.value)).join("");
+  const siteRows = report.topSites.map((site) => row(site.name, site.value)).join("");
+  return {
+    subject: `${report.scheduleName} — ${report.rangeLabel}`,
+    body: SHELL(
+      escapeHtml(report.scheduleName),
+      `<p style="font-size:13px;color:#6b7a83;margin:0 0 12px">${escapeHtml(report.workspaceName)} · ${escapeHtml(report.periodLabel)} (${escapeHtml(report.rangeLabel)})</p>
+       <table style="border-collapse:collapse;margin-bottom:16px">${figureRows}</table>
+       ${siteRows ? `<h3 style="font-size:14px;margin:0 0 6px">Top sites by spend</h3><table style="border-collapse:collapse;margin-bottom:16px">${siteRows}</table>` : ""}
+       <p style="font-size:13px"><a href="${escapeHtml(report.link)}" style="color:#12B4A8">Open the full report in MAINTSUPP</a> — the same figures, with the CSV export.</p>`,
     ),
   };
 }

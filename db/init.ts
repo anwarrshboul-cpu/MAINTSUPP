@@ -371,6 +371,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
      index; no backfill — see `ensureJobStatusHistory`. */
   await ensureJobStatusHistory(d1);
 
+  /* §32 — scheduled report emails. Two guarded tables; no seed. */
+  await ensureReportSchedules(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6216,6 +6219,54 @@ async function ensureJobStatusHistory(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS job_status_history_request_idx ON job_status_history(organisation_id, request_id, created_at)",
+    ),
+  ]);
+}
+
+/**
+ * §32 — A REPORT EMAILED ON A SCHEDULE. Two new tables, no seed: a workspace
+ * has no schedules until somebody makes one. See `reportSchedules` in
+ * db/schema.ts for what is sent, to whom, and how an undelivered run is told.
+ */
+async function ensureReportSchedules(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS report_schedules (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         name TEXT NOT NULL,
+         period TEXT NOT NULL,
+         cadence TEXT NOT NULL,
+         weekday INTEGER,
+         month_day INTEGER,
+         recipients TEXT NOT NULL DEFAULT '[]',
+         state TEXT NOT NULL DEFAULT 'active',
+         next_run_on TEXT,
+         created_by_user_id TEXT,
+         created_by_email TEXT,
+         last_run_on TEXT,
+         last_outcome TEXT,
+         last_detail TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS report_schedules_organisation_idx ON report_schedules(organisation_id)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS report_dispatches (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         schedule_id TEXT NOT NULL REFERENCES report_schedules(id),
+         occurrence TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'claimed',
+         detail TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS report_dispatches_once_idx ON report_dispatches(schedule_id, occurrence)",
     ),
   ]);
 }

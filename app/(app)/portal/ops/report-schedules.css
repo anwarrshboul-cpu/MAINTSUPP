@@ -1,0 +1,168 @@
+/* §32 — scheduled report emails, under the Reports dashboard. See report-schedules.tsx. */
+
+.report-schedules {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-card);
+}
+
+.report-schedules header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.report-schedules h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.report-schedules header p,
+.report-schedules__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.report-schedules button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-head);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.report-schedules button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.report-schedules__primary {
+  border-color: var(--brand-primary) !important;
+  background: var(--brand-primary) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.report-schedules__warning,
+.report-schedules__problem,
+.report-schedules__notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-hover);
+  font-size: 13px;
+}
+
+.report-schedules__problem {
+  color: var(--red-600, #e2445c);
+}
+
+.report-schedules__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.report-schedules__form label:not(.report-schedules__person) {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.report-schedules__form label span {
+  color: var(--muted);
+}
+
+.report-schedules__form input:not([type="checkbox"]),
+.report-schedules__form select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface-head);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.report-schedules__form fieldset {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+}
+
+.report-schedules__person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.report-schedules__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-schedules__form .report-schedules__actions {
+  grid-column: 1 / -1;
+}
+
+.report-schedules__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-schedules__list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+
+.report-schedules__list li > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.report-schedules__list li span,
+.report-schedules__list li small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 767px) {
+  .report-schedules__form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .report-schedules__list li {
+    flex-direction: column;
+  }
+}
