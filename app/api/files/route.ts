@@ -61,6 +61,7 @@ import {
   typeAgreesWithExtension,
 } from "../../lib/file-signature";
 import { uploadSizeRefusal } from "../../lib/upload-policy";
+import { memberSiteCondition } from "../../lib/member-site-scope";
 
 const allowedKinds = new Set<AttachmentKind>([
   "issue",
@@ -338,13 +339,13 @@ async function listFiles(request: Request) {
    * `outsideSiteScope` there. The two must agree: a listing filter alone would
    * leave the documents downloadable to anyone who learned an id elsewhere.
    */
-  const permittedSites =
-    siteScope && siteScope.length
-      ? db
-          .select({ id: sites.id })
-          .from(sites)
-          .where(and(eq(sites.organisationId, orgId), inArray(sites.id, siteScope)))
-      : null;
+  /* Any restriction, an empty one included — it permits no site (fail-closed). */
+  const permittedSites = siteScope
+    ? db
+        .select({ id: sites.id })
+        .from(sites)
+        .where(and(eq(sites.organisationId, orgId), memberSiteCondition(sites.id, siteScope)))
+    : null;
   const siteScopeFilter = permittedSites
     ? or(
         isNull(attachments.siteId),

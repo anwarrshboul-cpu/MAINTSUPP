@@ -345,7 +345,7 @@ export async function POST(request: Request) {
           { status: 403 },
         );
       }
-      if (siteScope && siteScope.length && !siteScope.includes(assetSite)) {
+      if (siteScope && !siteScope.includes(assetSite)) {
         /* The same words a missing entry gets: confirming that it exists at a
            store they cannot see is itself a disclosure. */
         return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });

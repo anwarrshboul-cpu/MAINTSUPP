@@ -386,7 +386,8 @@ export async function GET(
    * Same 404 as a missing file, deliberately: a refusal that said "forbidden"
    * would confirm the document exists.
    */
-  if (!linkScope && siteScope && siteScope.length) {
+  /* Any restriction, an empty one included (it reaches nothing). */
+  if (!linkScope && siteScope) {
     const denied = await outsideSiteScope(db, orgId, siteScope, record);
     if (denied) return Response.json({ error: "File not found." }, { status: 404 });
   }
@@ -598,7 +599,15 @@ async function writeOutsideSiteScope(
     contractorId: string | null;
   },
 ): Promise<boolean> {
-  if (!scope.siteScope || !scope.siteScope.length) return false;
+  if (!scope.siteScope) return false;
+  /*
+   * A CONTRACTOR'S OWN DOCUMENT — anchored to no site, unit or job — is read
+   * through a real link (the owner's Q5), but it serves every site that uses
+   * the contractor: a restricted member may not change, replace or destroy it
+   * (security review — linking a contractor to their own store would otherwise
+   * hand them its insurance certificate to rewrite).
+   */
+  if (!record.siteId && !record.unitId && !record.requestId && record.contractorId) return true;
   return outsideSiteScope(scope.db, scope.orgId, scope.siteScope, record);
 }
 

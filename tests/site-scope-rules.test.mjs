@@ -291,3 +291,41 @@ test("a restricted member's store rename rewrites only that store's jobs; a Supe
   const resolver = code(await read("app/lib/tenant-access.ts"));
   assert.match(resolver, /const siteScope = platformAdmin \|\| ownerHere \? null : \(grantHere\?\.siteScope \?\? null\);/);
 });
+
+/* ── 6. The re-review's residual reads, and the empty-scope fail-open ────── */
+
+test("every site's spend and every rule's runs are refused to a restricted member", async () => {
+  for (const file of ["app/api/overview/contractor-aliases/route.ts", "app/api/contractors/unlinked-names/route.ts"]) {
+    const text = code(await read(file));
+    const get = text.slice(text.indexOf("export async function GET"));
+    assert.match(get, /everySiteRefusal\(\w+\.scope\.siteScope, "contractor linking"\)/, file);
+  }
+  const runs = code(await read("app/api/automations/runs/route.ts"));
+  assert.match(runs.slice(runs.indexOf("export async function GET")), /boardStructureRefusal\(\w+\.scope\.siteScope\)/);
+});
+
+test("a contractor's own document is read through a link but never written by a restricted member", async () => {
+  const byId = code(await read("app/api/files/[id]/route.ts"));
+  const write = byId.slice(byId.indexOf("async function writeOutsideSiteScope"), byId.indexOf("export async function DELETE"));
+  assert.match(write, /if \(!scope\.siteScope\) return false;\s*if \(!record\.siteId && !record\.unitId && !record\.requestId && record\.contractorId\) return true;/);
+});
+
+test("an EMPTY site scope reaches nothing anywhere — no call site reads it as unrestricted", async () => {
+  const documents = code(await read("app/api/files/documents.ts"));
+  assert.match(documents, /export async function outsideSiteScope\([\s\S]*?\): Promise<boolean> \{\s*if \(!siteScope\.length\) return true;/);
+  const files = [];
+  async function walk(dir) {
+    for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) await walk(rel);
+      else if (/\.(ts|tsx)$/.test(entry.name)) files.push(rel);
+    }
+  }
+  await walk("app");
+  const failOpen = [];
+  for (const file of files) {
+    const text = code(await read(file));
+    if (/siteScope && (?:options\.)?siteScope\.length|!siteScope \|\| !siteScope\.length|!scope\.siteScope \|\| !scope\.siteScope\.length/.test(text)) failOpen.push(file);
+  }
+  assert.deepEqual(failOpen, [], "`[]` is a restriction to no site; use memberSiteCondition / siteOutsideMemberScope");
+});

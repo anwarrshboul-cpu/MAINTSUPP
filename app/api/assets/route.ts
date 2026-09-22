@@ -52,7 +52,7 @@
  *     which is the trap `confineToSiteScope` exists for on the dashboard side.
  */
 
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
@@ -89,6 +89,8 @@ import {
   serialiseSpecs,
   wouldCycle,
 } from "../../lib/asset-model";
+import { memberSiteCondition } from "../../lib/member-site-scope";
+import { siteOutsideMemberScope } from "../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -169,7 +171,8 @@ function invalid(message: string): never {
  * "everything" in the other.
  */
 function siteFilter(siteScope: string[] | null) {
-  return siteScope && siteScope.length ? inArray(units.siteId, siteScope) : undefined;
+  /* Fail-closed: an empty restriction reaches no site. */
+  return memberSiteCondition(units.siteId, siteScope);
 }
 
 /**
@@ -195,7 +198,7 @@ async function assertSite(
       and(
         eq(sites.id, siteId),
         eq(sites.organisationId, orgId),
-        siteScope && siteScope.length ? inArray(sites.id, siteScope) : undefined,
+        memberSiteCondition(sites.id, siteScope),
       ),
     )
     .limit(1);
@@ -542,7 +545,7 @@ async function referenceData(db: Db, orgId: string, siteScope: string[] | null) 
       .where(
         and(
           eq(sites.organisationId, orgId),
-          siteScope && siteScope.length ? inArray(sites.id, siteScope) : undefined,
+          memberSiteCondition(sites.id, siteScope),
         ),
       )
       .orderBy(asc(sites.name)),
@@ -600,7 +603,7 @@ export async function GET(request: Request) {
      * nothing, which is the honest answer; letting the parameter widen the
      * predicate is the bug this shape exists to prevent.
      */
-    if (siteId && siteScope && siteScope.length && !siteScope.includes(siteId)) {
+    if (siteId && siteOutsideMemberScope(siteScope, siteId)) {
       return Response.json({
         assets: [],
         totals: { all: 0, equipment: 0, replacementParts: 0, needsReplacement: 0 },
