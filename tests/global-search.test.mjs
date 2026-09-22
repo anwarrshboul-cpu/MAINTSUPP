@@ -54,8 +54,10 @@ test("the workspace comes from the session, never the request", async () => {
 test("every group asks its own screen's question", async () => {
   const route = code(await read("app/api/search/route.ts"));
   /* jobs and sites inside the site restriction */
-  assert.match(route, /restricted \? inArray\(maintenanceRequests\.siteId, restricted\) : undefined/);
-  assert.match(route, /restricted \? inArray\(sites\.id, restricted\) : undefined/);
+  assert.match(route, /memberSiteCondition\(maintenanceRequests\.siteId, siteScope\)/);
+  /* Re-pointed 2026-09-22 (security review): an EMPTY restriction reached every site through
+     `siteScope && siteScope.length`; `memberSiteCondition` reads it as no site. */
+  assert.match(route, /memberSiteCondition\(sites\.id, siteScope\)/);
   assert.match(route, /isNull\(maintenanceRequests\.deletedAt\)/, "a binned job is not a result");
   /* documents: the register's OWN handler, with the caller's own request */
   assert.match(route, /import \{ GET as listDocuments \} from "\.\.\/files\/route";/);

@@ -45,6 +45,7 @@ import {
   type GenerationPlan,
 } from "./planned-recurrence";
 import { createSubmission, type SubmissionDatabase } from "./submission-service";
+import { memberSiteCondition } from "./member-site-scope";
 
 export type GenerationOutcome = {
   scheduleId: string;
@@ -122,8 +123,10 @@ export async function generatePlannedOccurrences(
   const today = options.today ?? todayUtc();
   const conditions = [eq(plannedMaintenance.generationState, "active")];
   if (options.organisationId) conditions.push(eq(plannedMaintenance.organisationId, options.organisationId));
-  if (options.siteScope && options.siteScope.length) {
-    conditions.push(inArray(plannedMaintenance.siteId, [...options.siteScope]));
+  /* Any restriction, an empty one included (it reaches no site — fail-closed). */
+  if (options.siteScope) {
+    const confined = memberSiteCondition(plannedMaintenance.siteId, options.siteScope);
+    if (confined) conditions.push(confined);
   }
   if (options.scheduleIds && options.scheduleIds.length) {
     conditions.push(inArray(plannedMaintenance.id, [...options.scheduleIds]));

@@ -109,7 +109,7 @@ import { isUnreachableEmail } from "../../lib/site-metrics";
 import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
-import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import { memberSiteCondition, memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import {
   contractorRegisterRefusal,
   siteCreationRefusal,
@@ -655,16 +655,44 @@ function withoutDirectory(
 function confineSnapshot(snapshot: WorkspaceSnapshot, siteScope: string[] | null): WorkspaceSnapshot {
   const allowed = memberSiteSet(siteScope);
   if (!allowed) return snapshot;
+  const stores = snapshot.stores.filter((store) => withinMemberScope(allowed, store.id));
+  const compliance = snapshot.compliance.filter((record) => withinMemberScope(allowed, record.siteId));
+  const units = snapshot.units.filter((unit) => withinMemberScope(allowed, unit.siteId));
+  const planned = snapshot.planned.filter((item) => withinMemberScope(allowed, item.siteId));
+  /*
+   * THE ACTIVITY FEED, CONFINED TO WHAT IT IS ABOUT (security review, 2026-09-22).
+   *
+   * It was left whole as "organisation-level", but an entry about a site, a
+   * unit, a compliance record or a planned visit is that record's history —
+   * its id and its detail — and for another store it told a restricted member
+   * what happened there. So an entry about a site-carrying record is kept only
+   * when the record itself is in the member's confined snapshot; an entry
+   * about the workspace (a contractor, the settings, a member) is kept as
+   * before, and still loses its actor for a reader who may not see people.
+   */
+  const visible: Record<string, Set<string>> = {
+    site: new Set(stores.map((store) => store.id)),
+    compliance: new Set(compliance.map((record) => record.id)),
+    unit: new Set(units.map((unit) => unit.id)),
+    planned: new Set(planned.map((item) => item.id)),
+  };
   return {
     ...snapshot,
-    stores: snapshot.stores.filter((store) => withinMemberScope(allowed, store.id)),
-    compliance: snapshot.compliance.filter((record) => withinMemberScope(allowed, record.siteId)),
-    units: snapshot.units.filter((unit) => withinMemberScope(allowed, unit.siteId)),
-    planned: snapshot.planned.filter((item) => withinMemberScope(allowed, item.siteId)),
+    stores,
+    compliance,
+    units,
+    planned,
+    activity: snapshot.activity.filter((entry) => visible[entry.entityType]?.has(entry.entityId) ?? true),
   };
 }
 
-async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceSnapshot> {
+async function readWorkspace(
+  db: WorkspaceDb,
+  orgId: string,
+  /* The reader's sites: every per-contractor figure below counts only their
+     sites' jobs (security review — they were every site's). Null: unchanged. */
+  siteScope: string[] | null = null,
+): Promise<WorkspaceSnapshot> {
   await seedWorkspaceIfEmpty(db, orgId);
   const [
     siteRows,
@@ -852,6 +880,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         and(
           liveWorkOrder(orgId),
           isNull(maintenanceRequests.contractorId),
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
         ),
       )
       .groupBy(maintenanceRequests.contractor),
@@ -868,6 +897,7 @@ async function readWorkspace(db: WorkspaceDb, orgId: string): Promise<WorkspaceS
         and(
           liveWorkOrder(orgId),
           isNotNull(maintenanceRequests.contractorId),
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
         ),
       )
       .groupBy(maintenanceRequests.contractorId),
@@ -1354,7 +1384,7 @@ export async function GET(request: Request) {
     const viewGuard = await scopedDbWithCapability(request, "board.view");
     if (viewGuard.denied) return viewGuard.denied;
     const { actor, db, orgId, siteScope } = viewGuard.scope;
-    const snapshot = confineSnapshot(await readWorkspace(db, orgId), siteScope);
+    const snapshot = confineSnapshot(await readWorkspace(db, orgId, siteScope), siteScope);
     const subject = await resolvePermissions(db, orgId, actor.role, siteScope);
     return Response.json({ workspace: withoutDirectory(snapshot, can(subject, "users.view")) });
   } catch (error) {
