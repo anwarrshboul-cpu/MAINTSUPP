@@ -210,8 +210,9 @@ export async function deleteMediaRows(db: Database, id: string): Promise<boolean
 /**
  * WHERE EACH ASSET IS USED — every website page, live or draft, whose blocks
  * name it. What a delete is refused on and what the library shows beside each
- * asset. Read from the blocks themselves (`mediaIdsIn`), so a new block kind
- * that carries a `mediaId` is counted without a change here.
+ * asset. Read from the blocks themselves (`mediaIdsIn`), so a new block kind is
+ * counted without a change here — whether it EMBEDS the asset by id or only
+ * LINKS to its `/media/...` address, which is the only way a PDF is ever used.
  */
 export async function mediaUsage(db: Database, now = Date.now()): Promise<Map<string, MediaUsage[]>> {
   const rows = await db

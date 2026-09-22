@@ -168,6 +168,22 @@ test("alt text is held to the site's copy rules; usage is read from any block bo
   assert.deepEqual(media.mediaIdsIn(JSON.stringify({ mediaId: id, caption: "x" })), [id]);
   assert.deepEqual(media.mediaIdsIn({ nested: [{ mediaId: id }, { mediaId: "med_nope" }] }), [id]);
   assert.deepEqual(media.mediaIdsIn("{broken"), []);
+  /*
+   * AND AN ASSET THAT IS ONLY LINKED, which is the ONLY way a PDF is ever used:
+   * no block embeds one, so a brochure in use on a live page read as "Not used
+   * yet" while `mediaId` was the only thing counted — Delete stayed enabled and
+   * 404ed the link. Any string value, under any key, at any depth.
+   */
+  const versionId = media.newVersionId();
+  const href = media.mediaUrl(media.mediaObjectKey(id, versionId, "brochure.pdf"));
+  assert.deepEqual(media.mediaIdsIn({ buttonHref: href }), [id], "a cta's href counts as a use");
+  assert.deepEqual(
+    media.mediaIdsIn(JSON.stringify({ html: `<p>See the <a href="${href}">brochure</a>.</p>` })),
+    [id],
+    "and so does a link inside a body",
+  );
+  assert.deepEqual(media.mediaIdsIn({ buttonHref: "/media/med_nothex/mv_x/y.pdf" }), [], "a malformed address names nothing");
+  assert.deepEqual(media.mediaIdsIn({ mediaId: id, buttonHref: href }), [id], "embedded and linked is one use");
 });
 
 test("the image and video blocks name an asset by id, and nothing else passes", () => {
@@ -256,6 +272,24 @@ test("storage: an asset keeps every file it has had, and knows where it is used"
   const usage = (await repo.mediaUsage(db)).get(id);
   assert.deepEqual(usage.map((entry) => [entry.slug, entry.state]).sort(), [["careers", "live"], ["draft", "draft"]], "live AND draft pages count");
 
+  /* A PDF is never embedded — it is LINKED, from a cta's href — and that is a use. */
+  const pdf = media.newMediaId();
+  const pdfVersion = media.newVersionId();
+  sqlite
+    .prepare("INSERT INTO site_blocks (id, page_id, kind, position, body) VALUES ('b4','p1','cta',2,?)")
+    .run(
+      JSON.stringify({
+        title: "Our standards",
+        buttonLabel: "Download the brochure",
+        buttonHref: media.mediaUrl(media.mediaObjectKey(pdf, pdfVersion, "brochure.pdf")),
+      }),
+    );
+  assert.deepEqual(
+    (await repo.mediaUsage(db)).get(pdf)?.map((entry) => entry.slug),
+    ["careers"],
+    "a linked PDF is in use on the live page that links it",
+  );
+
   await repo.updateMediaMeta(db, id, { currentVersionId: first.id, status: "archived", altText: "A shopfront" }, "x");
   const back = await repo.readMedia(db, id);
   assert.equal(back.item.current.id, first.id, "an earlier file can be made current again");
@@ -271,8 +305,25 @@ test("storage: an asset keeps every file it has had, and knows where it is used"
 
 test("separate storage: the website bucket is its own binding and nothing here touches the documents one", async () => {
   const env = code(await read("db/node-workers-env.ts"));
-  assert.match(env, /CMS_BUCKET:\s*createS3BucketFromEnv\(\{\s*\.\.\.process\.env,\s*S3_BUCKET: process\.env\.S3_CMS_BUCKET\?\.trim\(\) \|\| "cms-media",/);
-  assert.match(env, /"cms-media"\),\s*\}\),\s*\};/, "and locally its own directory, never the documents one");
+  assert.match(env, /CMS_BUCKET: cmsMediaBucket\(\),/);
+  assert.match(env, /S3_BUCKET: process\.env\.S3_CMS_BUCKET\?\.trim\(\) \|\| "cms-media",/, "its own bucket name, the other three S3_* shared");
+  /*
+   * RE-POINTED, AND THE RULE CHANGED WITH IT — a MEDIUM finding from the review of
+   * this branch. This used to pin `createS3BucketFromEnv(...) ?? createR2Bucket({
+   * dir: <R2_LOCAL_DIR>/cms-media })`, which meant that a deployment missing ONE
+   * of the four S3_* variables got a per-instance directory — `/tmp/maintsupp-r2`
+   * on Vercel. It lists fine, so `mediaStorageStatus` answered "ready", uploads
+   * appeared to work, and the bytes went with the instance: exactly the silent
+   * loss CLAUDE.md records for `BUCKET`. A half-configured deployment must now get
+   * NO BINDING, so `cmsBucket()` is null and the routes say so.
+   */
+  assert.match(env, /if \(s3IsIntended\(\)\) return undefined;/, "some S3_* but not all is no binding, not a directory");
+  assert.match(
+    env,
+    /const documents = process\.env\.R2_LOCAL_DIR \?\? path\.join\(process\.cwd\(\), "\.r2-local"\);\s*\n\s*return createR2Bucket\(\{ dir: `\$\{documents\}-cms-media` \}\);/,
+    "and where there is no S3 at all, a directory BESIDE the documents one — never inside it, so clearing documents cannot take website media",
+  );
+  assert.doesNotMatch(env, /, "cms-media"\)/, "the directory nested inside the documents root is gone");
   const vite = await read("vite.config.ts");
   assert.match(vite, /binding: "CMS_BUCKET",\s*bucket_name: "site-creator-cms-media"/);
   for (const file of [
@@ -324,9 +375,28 @@ test("the upload path is #78's: session-bound, bucket-listed parts, MD5 per part
      multipart upload (the documents route had the same fault, fixed alongside). */
   const { claimedPartsFrom } = await import("../app/lib/upload-assembly.ts");
   assert.deepEqual(claimedPartsFrom([{ partNumber: 1, etag: " AbC-9_x " }, { partNumber: 0, etag: "z" }, { partNumber: 2 }]), [{ partNumber: 1, etag: "AbC-9_x" }]);
+  /* A body the caller has already said is too big is refused BEFORE it is
+     buffered: `request.arrayBuffer()` holds all of it, so checking afterwards
+     means allocating whatever was sent in order to refuse it. The real length is
+     still checked after — a lying or absent Content-Length changes nothing. */
+  for (const limit of ["MAX_RENDITION_BYTES", "MAX_PART_SIZE"]) {
+    assert.ok(
+      route.indexOf(`declaredOverLimit(request, ${limit})`) < route.indexOf("await request.arrayBuffer()", route.indexOf(`declaredOverLimit(request, ${limit})`)),
+      `the declared length is checked before the body is buffered (${limit})`,
+    );
+  }
   const documents = code(await read("app/api/files/multipart/route.ts"));
   assert.match(documents, /etag: String\(value\.etag \?\? ""\)\.trim\(\),/);
   assert.match(documents, /const declared = new Map\(claimed\.map\(\(part\) => \[part\.partNumber, part\.etag\.toLowerCase\(\)\]\)\);/);
+  /* And the documents route says out loud that it finishes DOCUMENTS sessions
+     only. `validUploadKey` already makes a website session unreachable here, so
+     this states the invariant where the bucket is chosen rather than leaving it
+     to be deduced from a key shape that could change. */
+  assert.match(
+    documents,
+    /if \(session && session\.target && session\.target !== "documents"\) \{\s*\n\s*return Response\.json\(\{ error: "The upload session is invalid\." \}, \{ status: 404 \}\);/,
+    "a website session cannot be fed parts through the documents route",
+  );
   const client = code(await read("app/lib/client-upload.ts"));
   const uploader = client.slice(client.indexOf("export async function uploadWebsiteMedia"));
   /* RE-POINTED: `sendSignedPart` is the shared part sender (a fresh signed URL
@@ -502,6 +572,44 @@ test("live: upload, serve, use on a page, refuse to delete, replace, archive, de
     const refused = await call(`/api/cms-media?id=${item.id}`, { headers: as, method: "DELETE" });
     assert.equal(refused.status, 409);
     assert.match(refused.body.error, new RegExp(pageSlug));
+
+    /*
+     * AND A PDF, WHICH IS ONLY EVER LINKED. No block embeds a document, so the
+     * only way to use one is a cta's href — and a use nothing counted is a delete
+     * nothing refused (the finding this covers: the library said "Not used yet",
+     * Delete went through, and a live page's link 404ed).
+     */
+    const brochure = await uploadThrough(as, `${tag}-brochure.pdf`, "application/pdf", Buffer.from(`%PDF-1.4\n% ${tag}\n`.padEnd(2500, "x")));
+    assert.equal(brochure.complete.status, 201, JSON.stringify(brochure.complete.body));
+    const brochureItem = brochure.complete.body.item;
+    created.push(brochureItem.id);
+    assert.equal(brochureItem.kind, "document");
+    const linkPage = await call("/api/site-pages", {
+      headers: as,
+      method: "PUT",
+      body: JSON.stringify({
+        original: pageSlug,
+        slug: pageSlug,
+        title: `${tag} page`,
+        metaTitle: null,
+        metaDescription: null,
+        published: true,
+        blocks: [
+          { kind: "image", body: { mediaId: item.id, alt: "A test shopfront", caption: `${tag} caption` } },
+          { kind: "cta", body: { title: "Our standards", buttonLabel: "Download the brochure", buttonHref: brochureItem.current.url } },
+        ],
+      }),
+    });
+    assert.equal(linkPage.status, 200, JSON.stringify(linkPage.body));
+    const linkedRefusal = await call(`/api/cms-media?id=${brochureItem.id}`, { headers: as, method: "DELETE" });
+    assert.equal(linkedRefusal.status, 409, "a linked PDF is in use");
+    assert.match(linkedRefusal.body.error, new RegExp(pageSlug), "and the page that links it is named");
+    const linkedLibrary = await call("/api/cms-media", { headers: as });
+    assert.deepEqual(
+      linkedLibrary.body.items.find((entry) => entry.id === brochureItem.id).usage.map((page) => page.slug),
+      [pageSlug],
+      "the library shows the use, so Delete is not offered",
+    );
 
     /* Replace: same asset, new file, every page follows; the old one can come back. */
     const second = await uploadThrough(as, `${tag}-2.png`, "image/png", png(40, 10), { replaces: item.id });

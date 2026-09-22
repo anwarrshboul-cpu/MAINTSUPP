@@ -57,6 +57,48 @@ function usePostgres(): boolean {
   );
 }
 
+/** The four variables `createS3BucketFromEnv()` needs; all four or none. */
+const S3_VARIABLES = ["S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"] as const;
+
+/** Whether this environment is TRYING to use object storage — any one of the four, or the CMS bucket's name. */
+function s3IsIntended(): boolean {
+  return [...S3_VARIABLES, "S3_CMS_BUCKET"].some((name) => (process.env[name] ?? "").trim() !== "");
+}
+
+/**
+ * THE WEBSITE'S MEDIA BUCKET, or NO BINDING AT ALL — decision K, and the one
+ * place where this file deliberately does not behave like `BUCKET`.
+ *
+ * Three states, and the middle one is why this is a function:
+ *
+ *   all four S3_* set   → Supabase Storage, bucket `S3_CMS_BUCKET` (`cms-media`);
+ *   SOME S3_* set       → `undefined`. No binding, so `cmsBucket()` is null, the
+ *                         media routes answer 503 `MEDIA_STORAGE_UNAVAILABLE` and
+ *                         the library screen names the bucket. A half-configured
+ *                         deployment CANNOT be given a directory here: on Vercel
+ *                         `R2_LOCAL_DIR` is `/tmp/maintsupp-r2`, so the fallback
+ *                         would be per-instance scratch that lists fine — the
+ *                         status light would say "ready", uploads would appear to
+ *                         work, and the bytes would go with the instance. That is
+ *                         exactly the silent loss CLAUDE.md records for `BUCKET`,
+ *                         and a brand-new binding does not have to inherit it;
+ *   no S3_* at all       → a directory, for a genuinely local Node run (`node
+ *                         dist/...`, a Railway box with a volume and no S3). Its
+ *                         own directory, a SIBLING of the documents one and never
+ *                         inside it, so clearing the documents root cannot take
+ *                         the website's media with it.
+ */
+function cmsMediaBucket(): unknown {
+  const s3 = createS3BucketFromEnv({
+    ...process.env,
+    S3_BUCKET: process.env.S3_CMS_BUCKET?.trim() || "cms-media",
+  });
+  if (s3) return s3;
+  if (s3IsIntended()) return undefined;
+  const documents = process.env.R2_LOCAL_DIR ?? path.join(process.cwd(), ".r2-local");
+  return createR2Bucket({ dir: `${documents}-cms-media` });
+}
+
 export const env: Record<string, unknown> = {
   /**
    * Lazy, because the database is resolved and opened on first touch. A
@@ -97,20 +139,14 @@ export const env: Record<string, unknown> = {
    *
    * Same credentials, different name: the S3 keys are project-wide, so the
    * bucket is `S3_CMS_BUCKET` (default `cms-media`) with the other three S3_*
-   * variables unchanged. Where S3 is not configured it is its own directory
-   * beside the documents one — never the documents directory, and never
-   * `BUCKET` itself. A deployment whose `cms-media` bucket was never created
-   * gets S3's own "no such bucket" on the first upload, which the media routes
-   * report as exactly that; nothing falls back anywhere.
+   * variables unchanged. Where S3 is configured AT ALL this binding is S3 or
+   * nothing — see `cmsMediaBucket()`, which is where the three states and the
+   * reason for them are written down. A deployment whose `cms-media` bucket was
+   * never created gets S3's own "no such bucket" on the first upload, which the
+   * media routes report as exactly that; nothing falls back to `BUCKET`, to the
+   * documents directory, or to a container's scratch disk.
    */
-  CMS_BUCKET:
-    createS3BucketFromEnv({
-      ...process.env,
-      S3_BUCKET: process.env.S3_CMS_BUCKET?.trim() || "cms-media",
-    }) ??
-    createR2Bucket({
-      dir: path.join(process.env.R2_LOCAL_DIR ?? path.join(process.cwd(), ".r2-local"), "cms-media"),
-    }),
+  CMS_BUCKET: cmsMediaBucket(),
 };
 
 /**
