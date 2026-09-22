@@ -9908,3 +9908,77 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
+
+/*
+ * The keyboard ring, second pass: the rest of the inventory (§47).
+ *
+ * Every rule under app/ that sets `outline: 0 | none` was listed and each control
+ * it reaches was focused BY KEYBOARD in a browser, in both themes, with the
+ * computed change measured against the unfocused state. The whole
+ * classification, with the reason for each rule left alone, is pinned in
+ * tests/a11y-keyboard.test.mjs, so a new ringless control fails there.
+ *
+ * Answered below: the controls where a keyboard user saw nothing. That means
+ * no computed change at all, or a change under 1.5:1 against the unfocused
+ * state in either theme. In practice that was a 10-12% teal glow (1.09-1.29:1)
+ * or a background tint (1.12-1.22:1), left on its own because the border
+ * colour meant to go with it is overridden in the dark theme or by a more
+ * specific rule; or an in-place editor drawn barely off its cell (1.15:1 in
+ * light). The expiry editor showed a ring on the dev build only because the
+ * global one won a (0,1,0) tie on load order, which is not a guarantee.
+ *
+ * Each selector outranks the rule it answers without depending on load order.
+ * Per-view stylesheets land after this file and win ties (see the note above
+ * `:root :is(input, select, textarea)`), so where a plain `X:focus-visible`
+ * would only tie, the selector carries a `:root` prefix. Offsets follow the
+ * block above: -3px (inside) where the control sits in a box that clips (a
+ * sheet cell, a scrolling menu, a panel), 2px otherwise. A borderless control
+ * inside a bordered <label> rings the label through `:has(:focus-visible)`,
+ * because the label is what the reader sees as the field.
+ */
+.fix-tracker__search:has(input:focus-visible),
+.fix-tracker__location:has(select:focus-visible),
+.fix-tracker__sort:has(select:focus-visible),
+.workspace-manager__toolbar > label:has(input:focus-visible),
+.column-picker > header label:has(input:focus-visible),
+.mobile-sheet-search:has(input:focus-visible),
+.mobile-board-bar > .board-theme-picker--mobile:has(select:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.site-contractors__link :is(input[type="search"], select):focus-visible,
+.contractor-profile__link :is(input[type="search"], select):focus-visible,
+.column-settings-dialog__body > label > input:not([type="range"]):focus-visible,
+.column-settings-dialog__choices > div > div > input:not([type="color"]):focus-visible,
+.column-settings-dialog__add > input:focus-visible,
+.group-creator > input:focus-visible,
+.sheet-group__header > input:focus-visible,
+.form-field :is(input, select, textarea):focus-visible,
+.mobile-text-editor :is(input, textarea):focus-visible,
+.mobile-date-editor input:focus-visible,
+.mobile-timeline-editor input:focus-visible,
+.mobile-request-field-editor__body > :is(textarea, input):focus-visible,
+:root .account-field :is(input, select, textarea):focus-visible,
+:root .board-date-popover__type .sheet-date-input:focus-visible,
+:root .form-edit__titleinput:focus-visible,
+:root .form-edit__helpinput:focus-visible,
+:root .form-edit__pagename:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/*
+ * `body` as well as `:root` on the menu row: its outline is also removed by
+ * `.ba-menu__item:hover:not([aria-disabled="true"])` at (0,3,0), and a row
+ * the pointer happens to rest on can still be the one the keyboard is on.
+ */
+.sheet-inline-input:focus-visible,
+.sheet-item-name-input:focus-visible,
+.expiry-cell__input:focus-visible,
+.sheet-subitem-add td:has(input:focus-visible),
+:root body .ba-menu__item:focus-visible,
+:root .reports-panel:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
