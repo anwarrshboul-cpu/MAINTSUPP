@@ -1,0 +1,89 @@
+/* §38 — the version history under a versioned setting. Theme tokens only. */
+
+.version-history {
+  margin-top: 12px;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 10px;
+}
+
+.version-history__toggle,
+.version-history__more {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--teal-500);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.version-history__body {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.version-history__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.version-history__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.version-history__row > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.version-history__row strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.version-history__row small,
+.version-history__empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.version-history__summary {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.version-history__badge {
+  justify-self: start;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.version-history__badge--current {
+  border-color: var(--teal-500);
+  color: var(--teal-500);
+}
+
+.version-history__error {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+}

@@ -52,6 +52,7 @@ import {
 import { fetchNavigation, forgetNavigation } from "../navigation-store";
 import type { SidebarNavEntry } from "../sidebar-nav";
 import "./nav-icons-panel.css";
+import { VersionHistory } from "./version-history";
 
 export function NavIconsPanel({ catalogue }: { catalogue: SidebarNavEntry[] }) {
   const [workspace, setWorkspace] = useState<NavArrangementItem[] | null>(null);
@@ -280,6 +281,18 @@ export function NavIconsPanel({ catalogue }: { catalogue: SidebarNavEntry[] }) {
           </span>
         ) : null}
       </div>
+      {/* §38 — the WORKSPACE default sidebar's versions (a person's own
+          arrangement is not versioned). After a restore the cached navigation
+          is dropped and the page reloads, exactly as a save here does. */}
+      <VersionHistory
+        subject="navigation"
+        subjectKey="workspace"
+        title="Sidebar history (workspace default)"
+        onRestored={() => {
+          forgetNavigation();
+          window.location.reload();
+        }}
+      />
     </section>
   );
 }

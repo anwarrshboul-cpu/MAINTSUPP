@@ -52,6 +52,21 @@ import {
   themeTokenDefinition,
   validateThemeToken,
 } from "../../lib/theme-tokens.ts";
+import { THEME_TOKEN_KEYS } from "../../lib/theme-tokens.ts";
+import {
+  restoreVersionFrom,
+  summariseChange,
+  themeRestoreTokens,
+  themeSnapshot,
+  type ThemeSnapshot,
+} from "../../lib/config-versions-model.ts";
+import {
+  ensureConfigBaseline,
+  latestSnapshot,
+  loadRestoreSnapshot,
+  recordConfigVersion,
+  type VersionTarget,
+} from "../../lib/config-versions.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -137,7 +152,23 @@ export async function PUT(request: Request) {
 
     const payload = (await request.json().catch(() => null)) as {
       tokens?: Record<string, unknown>;
+      restoreVersion?: unknown;
     } | null;
+
+    /*
+     * §38 — RESTORE: a version's colours, sent back through THIS route, so the
+     * same validation below runs on them and the result is recorded as a new
+     * version. The snapshot is loaded here, from this workspace's history only;
+     * the request carries just the number. Every token today's catalogue knows
+     * is sent — the snapshot's value, or a reset — so a restore is exact.
+     */
+    const versionTarget: VersionTarget = { organisationId: scope.orgId, subject: "theme", key: "tokens" };
+    const restoring = restoreVersionFrom(payload);
+    if (payload && restoring) {
+      const loaded = await loadRestoreSnapshot(scope.db, versionTarget, restoring);
+      if (!loaded.ok) return Response.json({ error: loaded.error }, { status: loaded.status });
+      payload.tokens = themeRestoreTokens(loaded.snapshot as ThemeSnapshot, THEME_TOKEN_KEYS);
+    }
 
     if (!payload || typeof payload.tokens !== "object" || payload.tokens === null) {
       return Response.json(
@@ -172,6 +203,10 @@ export async function PUT(request: Request) {
 
     const before = await readThemeOverrides(scope.db, scope.orgId);
     const actorEmail = scope.identityEmail.toLowerCase();
+    const versionActor = { email: actorEmail, userId: scope.session?.user.id ?? null };
+    const changes = writes.some((write) => (before[write.key] ?? null) !== write.value);
+    /* §38 — the state as it was, as version 1, before history's first write. */
+    if (changes) await ensureConfigBaseline(scope.db, versionTarget, themeSnapshot(before), versionActor);
 
     for (const write of writes) {
       /* Nothing to record and nothing to write when the value is unchanged.
@@ -207,6 +242,30 @@ export async function PUT(request: Request) {
     }
 
     const after = await readThemeOverrides(scope.db, scope.orgId);
+    /* §38 — every change is a version; a restore is one even when it changed nothing. */
+    if (changes || restoring) {
+      const previous = await latestSnapshot(scope.db, versionTarget);
+      const summary = summariseChange("theme", previous, themeSnapshot(after));
+      const recorded = await recordConfigVersion(scope.db, versionTarget, {
+        snapshot: themeSnapshot(after),
+        summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+        restoredFrom: restoring,
+        actor: versionActor,
+      });
+      if (restoring) {
+        await recordAudit({
+          db: scope.db,
+          organisationId: scope.orgId,
+          actor: auditActor(scope),
+          action: "config.version_restored",
+          entityType: "config_version",
+          entityId: "theme/tokens",
+          summary: `Restored the brand colours and fonts from version ${restoring}.`,
+          detail: { subject: "theme", key: "tokens", from: restoring, version: recorded },
+          request,
+        });
+      }
+    }
     return Response.json({
       canEdit: true,
       tokens: describe(after),

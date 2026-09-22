@@ -32,6 +32,19 @@ import {
   type NavCatalogueEntry,
 } from "./layout";
 import { isIconName } from "../workspace-sections/catalogue";
+import {
+  navigationSnapshot,
+  restoreVersionFrom,
+  summariseChange,
+  type NavigationSnapshot,
+} from "../../lib/config-versions-model";
+import {
+  ensureConfigBaseline,
+  latestSnapshot,
+  loadRestoreSnapshot,
+  recordConfigVersion,
+  type VersionTarget,
+} from "../../lib/config-versions";
 
 type LayoutRow = typeof navigationLayouts.$inferSelect;
 
@@ -404,7 +417,60 @@ export async function PUT(request: Request) {
       );
     }
 
+    /*
+     * §38 — RESTORE the workspace default to a recorded version, through the
+     * rest of this route: a version that was "no default" goes down the reset
+     * path below; any other puts its items and locks in the body, and the same
+     * icon and lock checks run on them. Only the WORKSPACE default is versioned
+     * — a person's own sidebar is theirs to rearrange without a trail. Loaded
+     * from this workspace's history; the request carries just the number.
+     */
+    const versionTarget: VersionTarget = { organisationId: context.orgId, subject: "navigation", key: "workspace" };
+    const restoring = restoreVersionFrom(body);
+    if (restoring) {
+      if (scope !== "workspace") {
+        return Response.json({ error: "Only the workspace default sidebar has a version history." }, { status: 400 });
+      }
+      const loaded = await loadRestoreSnapshot(context.db, versionTarget, restoring);
+      if (!loaded.ok) return Response.json({ error: loaded.error }, { status: loaded.status });
+      const snapshot = loaded.snapshot as NavigationSnapshot;
+      if (snapshot.present) {
+        body.items = snapshot.items;
+        body.locked = snapshot.locked;
+        body.reset = false;
+      } else {
+        body.reset = true;
+      }
+    }
+    const versionActor = { email: context.identityEmail, userId: context.session?.user.id ?? null };
+
     const { workspace, personal } = await loadRows(context, userId);
+    const workspaceSnapshot = () =>
+      navigationSnapshot(workspace ? { items: parseItems(workspace), locked: parseLocked(workspace) } : null);
+    /* §38 — the version recorded after a change to the workspace default. */
+    const recordDefaultVersion = async (after: NavigationSnapshot) => {
+      const previous = await latestSnapshot(context.db, versionTarget);
+      const summary = summariseChange("navigation", previous, after);
+      const recorded = await recordConfigVersion(context.db, versionTarget, {
+        snapshot: after,
+        summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+        restoredFrom: restoring,
+        actor: versionActor,
+      });
+      if (restoring) {
+        await recordAudit({
+          db: context.db,
+          organisationId: context.orgId,
+          actor: auditActor(context),
+          action: "config.version_restored",
+          entityType: "config_version",
+          entityId: "navigation/workspace",
+          summary: `Restored the workspace default sidebar from version ${restoring}.`,
+          detail: { subject: "navigation", key: "workspace", from: restoring, version: recorded },
+          request,
+        });
+      }
+    };
 
     /*
      * Reset — throw the row away rather than writing an "empty" one, so the
@@ -418,12 +484,14 @@ export async function PUT(request: Request) {
      */
     if (body.reset === true) {
       const row = scope === "workspace" ? workspace : personal;
+      if (scope === "workspace" && row) await ensureConfigBaseline(context.db, versionTarget, workspaceSnapshot(), versionActor);
       if (row) {
         await context.db
           .delete(navigationLayouts)
           .where(eq(navigationLayouts.id, row.id));
       }
       if (scope === "workspace" && row) await recordDefaultNavigationChange(context, request, "reset", null);
+      if (scope === "workspace" && (row || restoring)) await recordDefaultVersion(navigationSnapshot(null));
       return Response.json({ ok: true, scope, reset: true });
     }
 
@@ -493,8 +561,10 @@ export async function PUT(request: Request) {
     }
 
     const existing = scope === "workspace" ? workspace : personal;
+    if (scope === "workspace") await ensureConfigBaseline(context.db, versionTarget, workspaceSnapshot(), versionActor);
     await writeRow(context, userId, existing, items, locked);
     if (scope === "workspace") {
+      await recordDefaultVersion(navigationSnapshot({ items, locked }));
       await recordDefaultNavigationChange(context, request, "saved", {
         items,
         locked,

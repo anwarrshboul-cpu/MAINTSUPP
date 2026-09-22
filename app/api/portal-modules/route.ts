@@ -50,6 +50,20 @@ import {
   type ModuleOverrides,
 } from "../../lib/portal-modules.ts";
 import type { WorkspaceRole } from "../../lib/roles";
+import {
+  modulesRestoreSwitches,
+  modulesSnapshot,
+  restoreVersionFrom,
+  summariseChange,
+  type ModulesSnapshot,
+} from "../../lib/config-versions-model.ts";
+import {
+  ensureConfigBaseline,
+  latestSnapshot,
+  loadRestoreSnapshot,
+  recordConfigVersion,
+  type VersionTarget,
+} from "../../lib/config-versions.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -140,7 +154,24 @@ export async function PUT(request: Request) {
 
     const payload = (await request.json().catch(() => null)) as {
       modules?: Record<string, unknown>;
+      restoreVersion?: unknown;
     } | null;
+
+    /*
+     * §38 — RESTORE: a version's switches, sent back through this route so the
+     * checks below still apply (a module that can no longer be switched off
+     * refuses the whole restore with its own reason) and recorded as a new
+     * version. Loaded from THIS workspace's history; the request carries only
+     * the number. Every module today's catalogue has is set: on, unless the
+     * version had it off.
+     */
+    const versionTarget: VersionTarget = { organisationId: scope.orgId, subject: "portal_modules", key: "switches" };
+    const restoring = restoreVersionFrom(payload);
+    if (payload && restoring) {
+      const loaded = await loadRestoreSnapshot(scope.db, versionTarget, restoring);
+      if (!loaded.ok) return Response.json({ error: loaded.error }, { status: loaded.status });
+      payload.modules = modulesRestoreSwitches(loaded.snapshot as ModulesSnapshot, PORTAL_MODULES.map((entry) => entry.key));
+    }
 
     if (!payload || typeof payload.modules !== "object" || payload.modules === null) {
       return Response.json(
@@ -185,6 +216,10 @@ export async function PUT(request: Request) {
 
     const before = await readModuleOverrides(scope.db, scope.orgId);
     const actorEmail = scope.identityEmail.toLowerCase();
+    const versionActor = { email: actorEmail, userId: scope.session?.user.id ?? null };
+    const changes = writes.some((write) => (before[write.key] !== false) !== write.enabled);
+    /* §38 — the switches as they were, as version 1, before history's first write. */
+    if (changes) await ensureConfigBaseline(scope.db, versionTarget, modulesSnapshot(before), versionActor);
 
     for (const write of writes) {
       /* An unchanged switch is not a decision. Skipping keeps the audit log a
@@ -221,6 +256,30 @@ export async function PUT(request: Request) {
     }
 
     const after = await readModuleOverrides(scope.db, scope.orgId);
+    /* §38 — every change is a version; a restore is one even when it changed nothing. */
+    if (changes || restoring) {
+      const previous = await latestSnapshot(scope.db, versionTarget);
+      const summary = summariseChange("portal_modules", previous, modulesSnapshot(after));
+      const recorded = await recordConfigVersion(scope.db, versionTarget, {
+        snapshot: modulesSnapshot(after),
+        summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+        restoredFrom: restoring,
+        actor: versionActor,
+      });
+      if (restoring) {
+        await recordAudit({
+          db: scope.db,
+          organisationId: scope.orgId,
+          actor: auditActor(scope),
+          action: "config.version_restored",
+          entityType: "config_version",
+          entityId: "portal_modules/switches",
+          summary: `Restored the portal modules from version ${restoring}.`,
+          detail: { subject: "portal_modules", key: "switches", from: restoring, version: recorded },
+          request,
+        });
+      }
+    }
     return Response.json({
       canEdit: true,
       modules: describe(
