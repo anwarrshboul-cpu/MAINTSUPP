@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components";
+import { VersionHistory } from "./views/version-history";
 
 export type DashboardWidget = {
   key: string;
@@ -289,6 +290,16 @@ export function DashboardWidgets({
               </button>
             )}
           </div>
+          {/* §38 — the workspace default's versions. A person's own layout, if
+              they have one, still takes priority over whichever is restored. */}
+          {canSetWorkspaceDefault && (
+            <VersionHistory
+              subject="dashboard"
+              subjectKey={surface}
+              title={`Workspace default ${surface} history`}
+              onRestored={() => window.location.reload()}
+            />
+          )}
         </div>
       )}
 

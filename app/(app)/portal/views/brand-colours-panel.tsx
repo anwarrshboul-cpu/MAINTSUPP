@@ -36,6 +36,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "../../../components";
 import "./brand-colours-panel.css";
+import { VersionHistory } from "./version-history";
 
 type ThemeToken = {
   key: string;
@@ -345,6 +346,16 @@ export function BrandColoursPanel() {
             </span>
           ) : null}
         </div>
+      ) : null}
+      {/* §38 — every saved palette, and a way back to any of them. The page
+          reloads after a restore for the reason `save` gives above. */}
+      {canEdit ? (
+        <VersionHistory
+          subject="theme"
+          subjectKey="tokens"
+          title="Colour and typeface history"
+          onRestored={() => window.location.reload()}
+        />
       ) : null}
     </section>
   );

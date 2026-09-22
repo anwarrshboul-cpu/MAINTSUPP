@@ -4,6 +4,19 @@ import { dashboardLayouts } from "../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { can, resolvePermissions } from "../../lib/permissions";
 import { auditActor, recordAudit } from "../../lib/audit";
+import {
+  dashboardSnapshot,
+  restoreVersionFrom,
+  summariseChange,
+  type DashboardSnapshot,
+} from "../../lib/config-versions-model";
+import {
+  ensureConfigBaseline,
+  latestSnapshot,
+  loadRestoreSnapshot,
+  recordConfigVersion,
+  type VersionTarget,
+} from "../../lib/config-versions";
 
 export const dynamic = "force-dynamic";
 
@@ -146,7 +159,6 @@ async function saveLayout(request: Request) {
   }
 
   const surface = surfaceFrom(payload.surface);
-  const items = cleanItems(payload.items);
   const asWorkspaceDefault = payload.scope === "workspace";
 
   /*
@@ -171,6 +183,24 @@ async function saveLayout(request: Request) {
     }
   }
 
+  /*
+   * §38 — RESTORE the workspace default to a recorded version: its widgets go
+   * through the same `cleanItems` below and the save is recorded as a new
+   * version. Only the workspace default is versioned. Loaded from THIS
+   * workspace's history for this surface; the request carries only the number.
+   */
+  const versionTarget: VersionTarget = { organisationId: orgId, subject: "dashboard", key: surface };
+  const restoring = restoreVersionFrom(payload);
+  if (restoring) {
+    if (!asWorkspaceDefault) {
+      return Response.json({ error: "Only the workspace default dashboard has a version history." }, { status: 400 });
+    }
+    const loaded = await loadRestoreSnapshot(db, versionTarget, restoring);
+    if (!loaded.ok) return Response.json({ error: loaded.error }, { status: loaded.status });
+    payload.items = (loaded.snapshot as DashboardSnapshot).items;
+  }
+  const items = cleanItems(payload.items);
+
   const userId = asWorkspaceDefault ? null : session?.user.id ?? null;
   if (!asWorkspaceDefault && !userId) {
     // An anonymous browser has nowhere to save to. Saying so is better than
@@ -182,7 +212,7 @@ async function saveLayout(request: Request) {
   }
 
   const existing = await db
-    .select({ id: dashboardLayouts.id })
+    .select({ id: dashboardLayouts.id, items: dashboardLayouts.items })
     .from(dashboardLayouts)
     .where(
       and(
@@ -192,6 +222,18 @@ async function saveLayout(request: Request) {
       ),
     )
     .limit(1);
+
+  const versionActor = { email: actor.email, userId: session?.user.id ?? null };
+  if (asWorkspaceDefault) {
+    /* §38 — the default as it was, as version 1, before history's first write. */
+    let stored: unknown[] | null = null;
+    try {
+      stored = existing[0] ? (JSON.parse(existing[0].items) as unknown[]) : null;
+    } catch {
+      stored = null;
+    }
+    await ensureConfigBaseline(db, versionTarget, dashboardSnapshot(surface, stored), versionActor);
+  }
 
   const serialised = JSON.stringify(items);
   if (existing[0]) {
@@ -235,6 +277,29 @@ async function saveLayout(request: Request) {
       detail: { surface, items },
       request,
     });
+    /* §38 — every change a version; a restore always one. */
+    const after = dashboardSnapshot(surface, items);
+    const previous = await latestSnapshot(db, versionTarget);
+    const summary = summariseChange("dashboard", previous, after);
+    const recorded = await recordConfigVersion(db, versionTarget, {
+      snapshot: after,
+      summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+      restoredFrom: restoring,
+      actor: versionActor,
+    });
+    if (restoring) {
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor(scope),
+        action: "config.version_restored",
+        entityType: "config_version",
+        entityId: `dashboard/${surface}`,
+        summary: `Restored the workspace default ${surface} dashboard from version ${restoring}.`,
+        detail: { subject: "dashboard", key: surface, from: restoring, version: recorded },
+        request,
+      });
+    }
   }
 
   return Response.json({ ok: true, surface, items, scope: asWorkspaceDefault ? "workspace" : "user" });

@@ -384,6 +384,10 @@ async function applyMigrations(d1: D1DatabaseLike) {
   /* §35b — outbound webhooks. Two guarded tables; no seed. */
   await ensureWebhooks(d1);
 
+  /* §38 — version history for workspace settings. One guarded table, two
+     unique indexes; no seed. See `ensureConfigVersions`. */
+  await ensureConfigVersions(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6400,6 +6404,42 @@ async function ensureWebhooks(d1: D1DatabaseLike) {
     d1.prepare("CREATE INDEX IF NOT EXISTS webhook_deliveries_due_idx ON webhook_deliveries(status, next_attempt_at)"),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS webhook_deliveries_log_idx ON webhook_deliveries(organisation_id, endpoint_id, created_at)",
+    ),
+  ]);
+}
+
+/**
+ * §38 — EVERY SAVED STATE OF A VERSIONED SETTING. One append-only table, no
+ * seed: a setting gains its first version (a "baseline" of what it was) the
+ * first time it is saved after this ships. The partial index keeps
+ * installation-wide rows (organisation_id NULL — the website CMS) numbered
+ * uniquely too, since NULLs never collide in the first index. Nothing here, or
+ * anywhere in the app, updates or deletes a row.
+ */
+async function ensureConfigVersions(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS config_versions (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT REFERENCES organisations(id),
+         subject_type TEXT NOT NULL,
+         subject_key TEXT NOT NULL,
+         version_no INTEGER NOT NULL,
+         change_kind TEXT NOT NULL DEFAULT 'saved',
+         snapshot TEXT NOT NULL,
+         digest TEXT NOT NULL,
+         summary TEXT NOT NULL DEFAULT '',
+         restored_from_version INTEGER,
+         actor_email TEXT,
+         actor_user_id TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS config_versions_org_subject_idx ON config_versions(organisation_id, subject_type, subject_key, version_no)",
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS config_versions_installation_subject_idx ON config_versions(subject_type, subject_key, version_no) WHERE organisation_id IS NULL",
     ),
   ]);
 }

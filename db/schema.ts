@@ -2190,6 +2190,41 @@ export const webhookDeliveries = sqliteTable(
   ],
 );
 
+/**
+ * §38 — every saved state of a versioned setting, kept for ever (the owner's
+ * rule: every version is kept; a restore writes the old state back through the
+ * setting's own save route and is recorded as a NEW version, never by rewriting
+ * or removing one). Append-only: nothing in `app/**` updates or deletes a row.
+ *
+ * `organisation_id` NULL means installation-wide (the website CMS, next);
+ * `snapshot` is the whole state as canonical JSON and `digest` its SHA-256, so
+ * "is this version the current state" is one comparison. Two UNIQUE indexes on
+ * the database side keep numbering honest under concurrency:
+ *   config_versions_org_subject_idx           UNIQUE (organisation_id, subject_type, subject_key, version_no)
+ *   config_versions_installation_subject_idx  UNIQUE (subject_type, subject_key, version_no)
+ *                                             WHERE organisation_id IS NULL
+ * A concurrent `max + 1` loses and takes the next number (`recordConfigVersion`).
+ */
+export const configVersions = sqliteTable(
+  "config_versions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").references(() => organisations.id),
+    subjectType: text("subject_type").notNull(),
+    subjectKey: text("subject_key").notNull(),
+    versionNo: integer("version_no").notNull(),
+    changeKind: text("change_kind").notNull().default("saved"),
+    snapshot: text("snapshot").notNull(),
+    digest: text("digest").notNull(),
+    summary: text("summary").notNull().default(""),
+    restoredFromVersion: integer("restored_from_version"),
+    actorEmail: text("actor_email"),
+    actorUserId: text("actor_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("config_versions_org_subject_idx").on(table.organisationId, table.subjectType, table.subjectKey, table.versionNo)],
+);
+
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(
   "job_access_tokens",

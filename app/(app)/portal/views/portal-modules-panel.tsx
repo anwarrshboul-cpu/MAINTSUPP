@@ -47,6 +47,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Icon } from "../../../components";
 import "./portal-modules-panel.css";
+import { VersionHistory } from "./version-history";
 
 type PortalModuleRow = {
   key: string;
@@ -266,6 +267,13 @@ export function PortalModulesPanel() {
           </span>
         ) : null}
       </div>
+      {/* §38 — every saved set of switches, and a way back to any of them. */}
+      <VersionHistory
+        subject="portal_modules"
+        subjectKey="switches"
+        title="Module history"
+        onRestored={() => window.location.reload()}
+      />
     </section>
   );
 }
