@@ -9,7 +9,10 @@
  *   1. §25 planned maintenance — `generatePlannedOccurrences`, the same
  *      generator `/api/cron/planned-maintenance` and "Create due visits now" run;
  *   2. §32 scheduled reports — `deliverScheduledReports`, the same path as
- *      "Send now".
+ *      "Send now";
+ *   3. §35b webhook retries — `retryWebhookDeliveries`, the same claim-and-send
+ *      the Retry button and the next event use, within a 20-second budget; it
+ *      also prunes delivered rows older than 30 days. Never throws.
  *
  * AUTHENTICATION as every cron here: `CRON_SECRET`, bearer or `x-cron-secret`,
  * and REFUSED when unset (`authoriseCron` fails closed). A scheduler has no
@@ -22,6 +25,7 @@ import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
 import { generatePlannedOccurrences } from "../../../lib/planned-generation";
 import { publicOrigin } from "../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../lib/report-delivery";
+import { retryWebhookDeliveries } from "../../../lib/integrations/webhooks";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +43,7 @@ export async function POST(request: Request) {
       console.error("[/api/cron/daily] scheduled reports", error);
       return null;
     });
+    const webhooks = await retryWebhookDeliveries(db, { limit: 200, budgetMs: 20_000 });
     /* Counts and ids only: this lands in platform logs. */
     return Response.json({
       ok: planned !== null && reports !== null,
@@ -46,6 +51,7 @@ export async function POST(request: Request) {
       reports: reports
         ? reports.map(({ scheduleId, organisationId, occurrence, outcome, recipients }) => ({ scheduleId, organisationId, occurrence, outcome, recipients }))
         : { error: true },
+      webhooks,
       ranAt: new Date().toISOString(),
     }, { status: planned !== null && reports !== null ? 200 : 503 });
   } catch (error) {

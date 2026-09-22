@@ -21,6 +21,7 @@ import {
   AccountStatus,
 } from "./account-ui";
 import { AccountApiTokensCard } from "./account-api-tokens";
+import { AccountWebhooksCard } from "./account-webhooks";
 
 type PlatformPayload = {
   developers: {
@@ -134,11 +135,13 @@ export function AccountDevelopersPanel({ onNotify }: { onNotify?: (message: stri
 
       {/* §35 — issue and revoke API tokens; renders only for integrations.manage. */}
       {data && <AccountApiTokensCard onNotify={onNotify} />}
+      {/* §35b — signed webhooks and Slack; renders only for integrations.manage. */}
+      {data && <AccountWebhooksCard onNotify={onNotify} />}
 
       {data && (
         <AccountCard
           title="Webhooks"
-          description="monday lists subscriptions here. This product has none in either direction, and the reason for each is worth stating rather than leaving as a blank list."
+          description="What this workspace sends out and accepts in. Outbound webhooks are managed in the card above; no inbound callback is accepted. The state of each, and why, is stated rather than left as a blank list."
           tone="notice"
         >
           <dl className="account-definitions">

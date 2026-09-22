@@ -225,10 +225,12 @@ export async function GET(request: Request) {
             },
           ],
           webhooks: {
+            /* §35b — built; usable only where credentials can be stored (Q2). */
             outbound: {
-              available: false,
-              reason:
-                "Outbound webhooks are not available yet: nothing posts to a subscriber URL. An integration can read jobs and sites through /api/v1 with an API token instead.",
+              available: secrets.configured,
+              reason: secrets.configured
+                ? "Signed webhooks for job.created and job.status_changed, with retries and a delivery log. Managed on this page."
+                : `Built, but not configured here: ${secrets.reason} A webhook's address and signing secret are only ever stored encrypted, so none can be added until the key is set.`,
             },
             inbound: {
               available: false,
@@ -328,7 +330,9 @@ export async function GET(request: Request) {
             name: "Slack",
             category: "Notifications",
             configured: false,
-            detail: "Not connected. MAINTSUPP does not post to Slack today.",
+            detail: secrets.configured
+              ? "Add a Slack incoming webhook on Developers → Webhooks to post new jobs and status changes to a channel."
+              : "Not connected. Slack posts are built but need MAINTSUPP_SECRETS_KEY, which is not set here, to store the Slack address.",
           },
           /* No button on either: there is no Microsoft or HubSpot connection in
              this product, and a Connect button would be a promise. */

@@ -381,6 +381,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
   /* §35 — workspace API tokens (hashed only). One guarded table; no seed. */
   await ensureApiTokens(d1);
 
+  /* §35b — outbound webhooks. Two guarded tables; no seed. */
+  await ensureWebhooks(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6338,6 +6341,66 @@ async function ensureApiTokens(d1: D1DatabaseLike) {
     ),
     d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS api_tokens_hash_idx ON api_tokens(token_hash)"),
     d1.prepare("CREATE INDEX IF NOT EXISTS api_tokens_organisation_idx ON api_tokens(organisation_id, revoked_at)"),
+  ]);
+}
+
+/**
+ * §35b — OUTBOUND WEBHOOKS. Two new tables, no seed. Credentials are stored only
+ * as secret-box envelopes; `next_attempt_at` and `claimed_until` are BIGINT for
+ * the reason `sign_in_failures` gives (epoch ms overflow a Postgres integer).
+ * The UNIQUE (endpoint_id, event_id) index is the idempotency key.
+ */
+async function ensureWebhooks(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS webhook_endpoints (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         kind TEXT NOT NULL DEFAULT 'webhook',
+         name TEXT NOT NULL,
+         url_host TEXT NOT NULL,
+         url_hint TEXT NOT NULL,
+         url_sealed TEXT NOT NULL,
+         secret_sealed TEXT,
+         secret_hint TEXT,
+         events TEXT NOT NULL DEFAULT '[]',
+         state TEXT NOT NULL DEFAULT 'on',
+         state_reason TEXT,
+         consecutive_failures INTEGER NOT NULL DEFAULT 0,
+         created_by_user_id TEXT NOT NULL,
+         created_by_email TEXT NOT NULL,
+         last_outcome TEXT,
+         last_delivered_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS webhook_endpoints_organisation_idx ON webhook_endpoints(organisation_id, state)"),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS webhook_deliveries (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         endpoint_id TEXT NOT NULL REFERENCES webhook_endpoints(id),
+         event_id TEXT NOT NULL,
+         event_type TEXT NOT NULL,
+         payload TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'pending',
+         attempts INTEGER NOT NULL DEFAULT 0,
+         next_attempt_at BIGINT NOT NULL DEFAULT 0,
+         claimed_until BIGINT NOT NULL DEFAULT 0,
+         last_attempt_at TEXT,
+         response_status INTEGER,
+         response_excerpt TEXT,
+         error TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS webhook_deliveries_once_idx ON webhook_deliveries(endpoint_id, event_id)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS webhook_deliveries_due_idx ON webhook_deliveries(status, next_attempt_at)"),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS webhook_deliveries_log_idx ON webhook_deliveries(organisation_id, endpoint_id, created_at)",
+    ),
   ]);
 }
 
