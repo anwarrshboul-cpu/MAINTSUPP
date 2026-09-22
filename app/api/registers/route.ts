@@ -62,6 +62,7 @@ import {
   toRegisterColumn,
   unpinOtherRegisterColumns,
 } from "../../lib/register-columns";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -161,6 +162,16 @@ export async function GET(request: Request) {
     const scope = viewGuard.scope;
     const columns = await loadRegisterColumns(scope.db, scope.orgId, named.register);
     const values = await loadRegisterValues(scope.db, scope.orgId, named.register);
+    /*
+     * The sites register is one row per site, so a restricted member is sent
+     * only their sites' values. The contractors register is workspace-wide, as
+     * the contractor list itself is (`confineSnapshot` confines stores, not
+     * contractors), and is sent whole.
+     */
+    const allowed = named.register === "sites" ? memberSiteSet(scope.siteScope) : null;
+    const visibleValues = allowed
+      ? Object.fromEntries(Object.entries(values).filter(([siteId]) => withinMemberScope(allowed, siteId)))
+      : values;
 
     /* Resolved once and asked twice, rather than two `scopedDbWithCapability`
        probes: each of those re-resolves tenant access from scratch, and this is
@@ -169,7 +180,7 @@ export async function GET(request: Request) {
     return Response.json({
       register: named.register,
       columns,
-      values,
+      values: visibleValues,
       /* Stated rather than inferred from the role, because a role whose
          `board.edit` was revoked in Roles is still called "Admin". */
       canConfigure: can(subject, "board.edit"),

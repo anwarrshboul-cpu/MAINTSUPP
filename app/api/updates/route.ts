@@ -14,6 +14,7 @@ import {
 } from "../../lib/automations";
 import { boardKeyForRequest } from "../../lib/board-registry";
 import { isBoardDiscussionId } from "../board/discussion/discussion-store";
+import { memberSiteCondition } from "../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -81,10 +82,11 @@ export async function GET(request: Request) {
   let db: Awaited<ReturnType<typeof scopedDb>>["db"];
   let orgId: string;
   let actor: Awaited<ReturnType<typeof scopedDb>>["actor"];
+  let siteScope: string[] | null;
   try {
     const viewGuard = await scopedDbWithCapability(request, "board.view");
     if (viewGuard.denied) return viewGuard.denied;
-    ({ db, orgId, actor } = viewGuard.scope);
+    ({ db, orgId, actor, siteScope } = viewGuard.scope);
   } catch (error) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
@@ -121,6 +123,8 @@ export async function GET(request: Request) {
          * cannot tell "deleted" from "never existed".
          */
         isNull(maintenanceRequests.deletedAt),
+        // A job at a site outside the member's scope is the same 404.
+        memberSiteCondition(maintenanceRequests.siteId, siteScope),
       ),
     )
     .limit(1);
