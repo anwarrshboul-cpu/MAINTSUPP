@@ -8,7 +8,7 @@
  */
 
 import { ensureDatabase } from "../../../../db/init";
-import { currentCatalog } from "../../../lib/automations/store";
+import { workspaceCatalog } from "../../../lib/automations/store";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,8 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    return Response.json(currentCatalog());
+    /* §34 — per workspace: its own Slack connections and webhooks are choices. */
+    return Response.json(await workspaceCatalog(guard.scope.db, guard.scope.orgId));
   } catch (error) {
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;

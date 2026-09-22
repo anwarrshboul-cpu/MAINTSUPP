@@ -93,7 +93,24 @@ export type AutomationCatalog = {
 export type CatalogEnvironment = {
   /** Whether an email provider is configured (RESEND_API_KEY). */
   emailConfigured: boolean;
+  /**
+   * §34 — THIS workspace's Slack connections and signed webhooks that are on
+   * (`webhook_endpoints`, §35b), offered as the choices of the Slack and webhook
+   * actions. Optional so a catalogue built without a workspace (a test, a
+   * preview) is honest by default: nothing to send to, so both are greyed.
+   */
+  slackEndpoints?: Array<{ value: string; label: string }>;
+  webhookEndpoints?: Array<{ value: string; label: string }>;
+  /** Whether this deployment can store a credential at all (MAINTSUPP_SECRETS_KEY). */
+  secretsConfigured?: boolean;
 };
+
+/** Why a Slack or webhook action cannot be chosen yet, in the builder's words. */
+function connectionReason(env: CatalogEnvironment, what: "Slack connection" | "webhook") {
+  return env.secretsConfigured
+    ? `Add a ${what} under Account → Developers first`
+    : "Requires MAINTSUPP_SECRETS_KEY, which is not set on this deployment";
+}
 
 export const TIME_BASED_NOTE =
   "Time-based rules are checked when the board is opened, at most once every ten minutes.";
@@ -391,15 +408,42 @@ export function buildCatalog(env: CatalogEnvironment): AutomationCatalog {
       available: true,
       needsItem: true,
     },
+    /*
+     * §34 — real now: both post through the §35b delivery pipeline (sealed
+     * address, retries, delivery log), to one connection THIS workspace has.
+     * The choices are the workspace's own endpoints, so a rule cannot name
+     * another workspace's — `validateRule` checks the value is one of them.
+     */
     {
       type: "slack_notify",
       label: "Notify in Slack",
-      description: "Requires a Slack connection. None exists in this workspace.",
+      description: (env.slackEndpoints ?? []).length
+        ? "Post a message to one of this workspace's Slack connections."
+        : "Posts to a Slack channel through a Slack connection. This workspace has none yet.",
       icon: "slack",
       group: "Featured",
-      fields: [],
-      available: false,
-      reason: "Requires a connection",
+      fields: [
+        { key: "endpoint", label: "Slack connection", kind: "choice", options: env.slackEndpoints ?? [] },
+        { key: "message", label: "message", kind: "long_text" },
+      ],
+      available: (env.slackEndpoints ?? []).length > 0,
+      reason: (env.slackEndpoints ?? []).length ? undefined : connectionReason(env, "Slack connection"),
+      needsItem: false,
+    },
+    {
+      type: "send_webhook",
+      label: "Send to a webhook",
+      description: (env.webhookEndpoints ?? []).length
+        ? "Send a signed event to one of this workspace's webhooks (Zapier, Make, your own server)."
+        : "Sends a signed event to a webhook. This workspace has none yet.",
+      icon: "bell",
+      group: "Featured",
+      fields: [
+        { key: "endpoint", label: "webhook", kind: "choice", options: env.webhookEndpoints ?? [] },
+        { key: "message", label: "message", kind: "long_text", optional: true },
+      ],
+      available: (env.webhookEndpoints ?? []).length > 0,
+      reason: (env.webhookEndpoints ?? []).length ? undefined : connectionReason(env, "webhook"),
       needsItem: false,
     },
     {

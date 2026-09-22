@@ -20,7 +20,7 @@ import { auditActor, recordAudit } from "../../lib/audit";
 import { automationContext, sweepTimeBasedRules } from "../../lib/automations";
 import {
   boardVocabulary,
-  currentCatalog,
+  workspaceCatalog,
   exposeRule,
   exposeVocabulary,
   findRule,
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     const body = record(await request.json().catch(() => ({})));
     const boardId = await resolveBoardId(db, orgId, body.boardId);
     const { columns, groups } = await boardVocabulary(db, orgId, boardId);
-    const outcome = validateRule(currentCatalog(), columns, groups, {
+    const outcome = validateRule(await workspaceCatalog(db, orgId), columns, groups, {
       triggerType: text(body.triggerType, 60),
       triggerConfig: record(body.triggerConfig),
       actionType: text(body.actionType, 60),
@@ -198,7 +198,7 @@ export async function PATCH(request: Request) {
      */
     if (body.triggerType !== undefined || body.actionType !== undefined || body.triggerConfig !== undefined || body.actionConfig !== undefined) {
       const { columns, groups } = await boardVocabulary(db, orgId, existing.boardId);
-      const outcome = validateRule(currentCatalog(), columns, groups, {
+      const outcome = validateRule(await workspaceCatalog(db, orgId), columns, groups, {
         triggerType: text(body.triggerType, 60) || existing.triggerType,
         triggerConfig: body.triggerConfig !== undefined ? record(body.triggerConfig) : parseConfig(existing.triggerConfig),
         actionType: text(body.actionType, 60) || existing.actionType,

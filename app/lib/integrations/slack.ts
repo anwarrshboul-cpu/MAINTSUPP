@@ -22,6 +22,7 @@ export function slackEscape(value: unknown) {
 type Payload = {
   type?: string;
   data?: {
+    message?: string | null;
     job?: { id?: string; reference?: string; title?: string; priority?: string | null; location?: string | null };
     change?: { from?: string | null; to?: string | null };
   };
@@ -40,6 +41,10 @@ export function slackMessage(payload: Payload, origin: string | null) {
     const from = slackEscape(payload.data?.change?.from ?? "no status");
     const to = slackEscape(payload.data?.change?.to ?? "no status");
     text = `Job ${reference} (${title}) moved from ${from} to ${to}`;
+  } else if (payload.type === "automation.action") {
+    /* §34 — the rule's own words, then the job it fired on, if any. */
+    const said = slackEscape(payload.data?.message ?? "");
+    text = job ? `${said || "Automation"} — ${reference}: ${title}` : said || "Automation";
   } else {
     text = "MAINTSUPP test message: this Slack connection works.";
   }

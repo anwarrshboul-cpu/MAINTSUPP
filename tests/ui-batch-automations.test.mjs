@@ -269,7 +269,11 @@ test("every rule read and write is scoped to the caller's organisation", async (
 
 test("the rule is validated against the catalogue and THIS board before it is stored", async () => {
   const route = await read("app/api/automations/route.ts");
-  assert.match(route, /validateRule\(currentCatalog\(\), columns, groups/);
+  /* RE-POINTED (§34): the catalogue is now built per workspace — its own Slack
+     connections and webhooks are the choices of two actions — so the route
+     validates against `workspaceCatalog(db, orgId)`. Same contract, tighter: a
+     stored rule can only ever name THIS workspace's endpoint. */
+  assert.match(route, /validateRule\(await workspaceCatalog\(db, orgId\), columns, groups/);
   const store = await read("app/lib/automations/store.ts");
   assert.match(store, /if \(!trigger\.available\) return \{ ok: false/);
   assert.match(store, /if \(!action\.available\) return \{ ok: false/);
