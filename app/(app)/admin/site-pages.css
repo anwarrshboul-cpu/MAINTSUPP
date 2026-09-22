@@ -37,6 +37,44 @@
   background: var(--status-yellow-bg);
   color: var(--status-yellow-fg);
 }
+/* Published, but outside its window: waiting to open, or already closed. */
+.cms-admin__state--scheduled {
+  background: var(--status-blue-bg);
+  color: var(--status-blue-fg);
+}
+.cms-admin__state--ended {
+  background: var(--status-orange-bg);
+  color: var(--status-orange-fg);
+}
+
+.cms-admin__redirects {
+  margin: 14px 0 22px;
+}
+/* An address — and a title made from one — is one unbroken word. With a
+   28-character address the page list was 51px wider than a 390px screen
+   before this rule (measured on origin/main) and 0px after. Let a cell break
+   anywhere rather than scroll the whole console sideways. */
+.cms-admin__list td,
+.cms-admin__redirects td {
+  overflow-wrap: anywhere;
+}
+.cms-admin__redirects td {
+  padding-right: 12px;
+}
+/* The same no-breakpoint grid as the page's own fields. The two hints differ in
+   length, so the fields align at the top and the button takes its own row
+   rather than sitting beside whichever hint wrapped. */
+.cms-admin__redirect-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: start;
+  gap: 10px;
+  margin-top: 12px;
+}
+.cms-admin__redirect-form > button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
 
 .cms-admin__omissions {
   margin: 6px 0 0;

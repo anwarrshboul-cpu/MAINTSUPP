@@ -2,8 +2,9 @@
  * CMS integrity and editor safety (post-§77 plan B+C).
  *
  *   - Changing a page's address MOVES it: the same page takes the new address and
- *     the old one stops resolving. It used to create a second page and leave the
- *     first one published.
+ *     the old one answers a 308 to it (it answered 404 until the CMS gained
+ *     redirects). It used to create a second page and leave the first one
+ *     published.
  *   - A new page cannot land on an address another page holds: 409. It used to
  *     overwrite that page's content without a word.
  *   - Duplicate (§77 item 10): a new unpublished `<slug>-copy` with the same blocks.
@@ -195,7 +196,12 @@ test("live: a new page on a taken address is refused, and an address edit moves 
   assert.equal(moved.body.saved, b);
   const slugs = moved.body.pages.map((entry) => entry.slug);
   assert.ok(slugs.includes(b) && !slugs.includes(a), "one page, at the new address");
-  assert.equal((await fetch(`${BASE_URL}/p/${a}`)).status, 404, "the old address stops resolving");
+  /* RE-POINTED from 404 when a move started leaving a redirect behind: the old
+     address now leads to the new one, permanently, so a saved link keeps
+     working. `redirect: "manual"` so the 308 itself is what is asserted. */
+  const old = await fetch(`${BASE_URL}/p/${a}`, { redirect: "manual" });
+  assert.equal(old.status, 308, "the old address redirects");
+  assert.equal(new URL(old.headers.get("location"), BASE_URL).pathname, `/p/${b}`, "to the new one");
   assert.equal((await fetch(`${BASE_URL}/p/${b}`)).status, 200, "the new one serves the page");
 
   const newHistory = await history(b);
@@ -258,5 +264,10 @@ after(async () => {
   if (!cookie) return;
   for (const slug of made) {
     await fetch(`${BASE_URL}/api/site-pages?slug=${slug}`, { method: "DELETE", headers: { cookie } }).catch(() => undefined);
+  }
+  /* The redirect a move left behind, swept by this run's prefix. */
+  const redirects = (await call("/api/site-pages", { headers: { cookie } })).body?.redirects ?? [];
+  for (const entry of redirects.filter((row) => row.from.startsWith(`/p/${RUN}`))) {
+    await fetch(`${BASE_URL}/api/site-pages?redirect=${encodeURIComponent(entry.from)}`, { method: "DELETE", headers: { cookie } }).catch(() => undefined);
   }
 });
