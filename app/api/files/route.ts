@@ -52,6 +52,7 @@ import {
   pendingReview,
   resolveUploadAuthority,
   resolveUploadTenant,
+  ungrantedAnonymousRefusal,
 } from "./upload-authority";
 import {
   SIGNATURE_BYTES,
@@ -607,6 +608,9 @@ export async function POST(request: Request) {
       .trim()
       .slice(0, 100);
     const uploadToken = String(form.get("uploadToken") ?? "").trim();
+    /* No session and no grant: 401 before any lookup can say what exists. See the helper. */
+    const ungranted = ungrantedAnonymousRefusal(scope, uploadToken);
+    if (ungranted) return ungranted;
     /*
      * W07-07 — WHAT THIS DOCUMENT BELONGS TO.
      *
