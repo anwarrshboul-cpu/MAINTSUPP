@@ -14,6 +14,7 @@ import { publicOrigin } from "../../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../../lib/report-delivery";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../../lib/tenant-db";
 import { everySiteRefusal } from "../../../../lib/job-site-scope";
+import { moduleRefusal } from "../../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,10 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
     if (everySite) return everySite;
     const scope = guard.scope;

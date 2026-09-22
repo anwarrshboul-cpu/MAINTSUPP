@@ -48,6 +48,7 @@ import {
   trimmed,
 } from "../../admin-context";
 import { createReset, RESET_EXPIRY_HOURS } from "../../../auth/password-resets/reset-tokens";
+import { moduleRefusal } from "../../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,10 @@ export async function POST(request: Request) {
 
     const context = await adminContext(request, body.organisationId ?? null);
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-users");
+    if (switchedOff) return switchedOff;
 
     const denied = requireCapability(context.subject, "users.edit");
     if (denied) return denied;

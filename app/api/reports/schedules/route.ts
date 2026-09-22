@@ -21,6 +21,7 @@ import { can, resolvePermissions } from "../../../lib/permissions";
 import { nextRunOn, REPORT_PERIODS, validateSchedule } from "../../../lib/report-schedule-rules";
 import { anonymousRefusal, scopedDbWithCapability, type ScopedDatabase } from "../../../lib/tenant-db";
 import { everySiteRefusal } from "../../../lib/job-site-scope";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
     if (everySite) return everySite;
     const scope = guard.scope;
@@ -116,6 +121,10 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
     if (everySite) return everySite;
     const scope = guard.scope;
@@ -169,6 +178,10 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
     if (everySite) return everySite;
     const scope = guard.scope;
@@ -223,6 +236,10 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
     if (everySite) return everySite;
     const scope = guard.scope;

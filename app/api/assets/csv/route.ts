@@ -44,6 +44,7 @@ import { auditActor, recordAudit } from "../../../lib/audit";
 import { csvDocument, csvDownload } from "../../../lib/finance/exports";
 import { assetKindLabel, parseSpecs, specsSummary } from "../../../lib/asset-model";
 import { memberSiteCondition } from "../../../lib/member-site-scope";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "assets");
+    if (switchedOff) return switchedOff;
     const { db, orgId, siteScope } = guard.scope;
 
     const url = new URL(request.url);

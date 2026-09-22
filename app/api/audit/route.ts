@@ -25,6 +25,7 @@ import { auditEvents, organisations } from "../../../db/schema";
 import { can, requireCapability, resolvePermissions } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { roleInOrganisation, siteScopeInOrganisation } from "../../lib/tenant-access";
+import { moduleRefusal, moduleSwitchedOff } from "../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -120,7 +121,12 @@ async function auditReadable(scope: Awaited<ReturnType<typeof scopedDb>>): Promi
     const role = roleInOrganisation(scope, id);
     if (!role) continue;
     const subject = await resolvePermissions(scope.db, id, role, siteScopeInOrganisation(scope, id));
-    if (can(subject, "audit.read")) readable.push(id);
+    if (!can(subject, "audit.read")) continue;
+    /* Nor a workspace that has switched Audit off. The switch is per workspace,
+       so a cross-workspace read is judged workspace by workspace — see
+       `module-guard.ts`. */
+    if (await moduleSwitchedOff(scope.db, id, "audit")) continue;
+    readable.push(id);
   }
   return readable;
 }
@@ -136,6 +142,10 @@ export async function GET(request: Request) {
     const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "audit.read");
     if (refusal) return refusal;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(scope, "audit");
+    if (switchedOff) return switchedOff;
 
     const url = new URL(request.url);
     const params = url.searchParams;
