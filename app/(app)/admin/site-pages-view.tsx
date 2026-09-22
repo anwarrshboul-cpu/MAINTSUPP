@@ -48,6 +48,8 @@ import {
   useAdminResource,
 } from "../portal/views/admin-shell";
 import "./site-pages.css";
+import { VersionHistory } from "../portal/views/version-history";
+import { formatShortDateTime } from "../../lib/format-date";
 
 /* The server's shapes. Mirrored, not imported: `app/lib/cms-blocks.ts` is a server
    module and these are what crosses the wire. */
@@ -251,7 +253,23 @@ export function SitePagesView() {
           onDelete={draft.original ? () => remove(draft.original as string) : null}
           saving={saving}
         />
-      ) : (
+      ) : null}
+      {/* §38b — every saved version of this page, and a way back to any of them.
+          A restore goes through the same save (and the same content rules) and is
+          recorded as a new version; the editor closes so the list shows the result. */}
+      {draft?.original ? (
+        <VersionHistory
+          subject="site_page"
+          subjectKey={draft.original}
+          title="Page history"
+          onRestored={() => {
+            setDraft(null);
+            setFlash({ ok: true, message: `Restored /p/${draft.original}. The restore is saved as a new version.` });
+            void reload();
+          }}
+        />
+      ) : null}
+      {!draft ? (
         <>
           <div className="admin-toolbar">
             <strong>Website pages</strong>
@@ -318,6 +336,15 @@ export function SitePagesView() {
             </table>
           )}
 
+          {/* §38b — pages deleted since history began, each restorable from the
+              version before its deletion. */}
+          <DeletedPages
+            onRestored={(slug) => {
+              setFlash({ ok: true, message: `Brought back /p/${slug} as a new version.` });
+              void reload();
+            }}
+          />
+
           {/* The server's own list of what this slice does not do. Printed rather
               than restated, so it cannot drift from the code that means it. */}
           <AdminNotice tone="info" icon="alert" title="What this editor does not do yet">
@@ -328,7 +355,41 @@ export function SitePagesView() {
             </ul>
           </AdminNotice>
         </>
-      )}
+      ) : null}
+    </div>
+  );
+}
+
+type DeletedPayload = { deleted: Array<{ key: string; deletedAt: string; deletedBy: string | null; version: number }> };
+
+/** §38b — the pages whose latest version is a deletion, each with its history. */
+function DeletedPages({ onRestored }: { onRestored: (slug: string) => void }) {
+  const { data, reload } = useAdminResource<DeletedPayload>("/api/versions?subject=site_page&deleted=1");
+  if (!data || data.deleted.length === 0) return null;
+  return (
+    <div className="cms-admin__deleted">
+      <strong>Deleted pages</strong>
+      <p>
+        <small>Restore the version before a page&rsquo;s deletion to bring it back at the same address.</small>
+      </p>
+      {data.deleted.map((entry) => (
+        <div key={entry.key} className="cms-admin__deleted-row">
+          <code>/p/{entry.key}</code>{" "}
+          <small>
+            deleted {formatShortDateTime(entry.deletedAt)}
+            {entry.deletedBy ? ` · ${entry.deletedBy}` : ""}
+          </small>
+          <VersionHistory
+            subject="site_page"
+            subjectKey={entry.key}
+            title="Versions"
+            onRestored={() => {
+              onRestored(entry.key);
+              void reload();
+            }}
+          />
+        </div>
+      ))}
     </div>
   );
 }

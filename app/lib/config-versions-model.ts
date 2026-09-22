@@ -11,14 +11,20 @@
  * tests load this directly. The database half is `config-versions.ts`.
  */
 
-export type VersionScope = "workspace";
+/** `installation` = one for the whole product (the website), not per workspace. */
+export type VersionScope = "workspace" | "installation";
 
 export type VersionSubjectDefinition = {
   label: string;
   scope: VersionScope;
-  /** The capability that may read the history and restore — the same one that may edit the setting. */
-  capability: "settings.edit" | "navigation.edit";
-  keys: readonly string[];
+  /**
+   * Who may read the history and restore — the same as who may edit the
+   * setting: a workspace capability, or `platform` (MAINTSUPP platform staff,
+   * `requirePlatformAdmin`'s rule) for installation-wide content.
+   */
+  capability: "settings.edit" | "navigation.edit" | "platform";
+  /** The keys a subject has, or `slug` for any well-formed page slug. */
+  keys: readonly string[] | "slug";
 };
 
 export const VERSION_SUBJECTS = {
@@ -26,14 +32,20 @@ export const VERSION_SUBJECTS = {
   portal_modules: { label: "Portal modules", scope: "workspace", capability: "navigation.edit", keys: ["switches"] },
   navigation: { label: "Workspace default sidebar", scope: "workspace", capability: "navigation.edit", keys: ["workspace"] },
   dashboard: { label: "Workspace default dashboard", scope: "workspace", capability: "settings.edit", keys: ["overview", "reports"] },
+  /* §38b — a website page, keyed by its slug, so history follows the address. */
+  site_page: { label: "Website page", scope: "installation", capability: "platform", keys: "slug" },
 } as const satisfies Record<string, VersionSubjectDefinition>;
 
 export type VersionSubject = keyof typeof VERSION_SUBJECTS;
 
 export function versionSubject(subject: unknown, key: unknown): { subject: VersionSubject; key: string } | null {
   if (typeof subject !== "string" || !Object.prototype.hasOwnProperty.call(VERSION_SUBJECTS, subject)) return null;
-  const definition = VERSION_SUBJECTS[subject as VersionSubject];
-  if (typeof key !== "string" || !(definition.keys as readonly string[]).includes(key)) return null;
+  const definition: VersionSubjectDefinition = VERSION_SUBJECTS[subject as VersionSubject];
+  if (typeof key !== "string") return null;
+  if (definition.keys === "slug") {
+    return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(key) && key.length <= 80 ? { subject: subject as VersionSubject, key } : null;
+  }
+  if (!definition.keys.includes(key)) return null;
   return { subject: subject as VersionSubject, key };
 }
 
@@ -62,6 +74,15 @@ export type ThemeSnapshot = { tokens: Record<string, string> };
 export type ModulesSnapshot = { disabled: string[] };
 export type NavigationSnapshot = { present: boolean; items: unknown[]; locked: string[] };
 export type DashboardSnapshot = { present: boolean; surface: string; items: unknown[] };
+/** §38b — exactly what the page editor saves (`PageInput`), so a restore is that save again. */
+export type PageSnapshot = {
+  slug: string;
+  title: string;
+  metaTitle: string | null;
+  metaDescription: string | null;
+  published: boolean;
+  blocks: Array<{ kind: string; body: unknown }>;
+};
 
 export function themeSnapshot(overrides: Readonly<Record<string, string>>): ThemeSnapshot {
   return { tokens: Object.fromEntries(Object.entries(overrides).sort(([left], [right]) => left.localeCompare(right))) };
@@ -82,6 +103,28 @@ export function navigationSnapshot(row: { items: unknown[]; locked: string[] } |
 
 export function dashboardSnapshot(surface: string, items: unknown[] | null): DashboardSnapshot {
   return items ? { present: true, surface, items } : { present: false, surface, items: [] };
+}
+
+/** A stored page (blocks in position order) or a page about to be saved, as the same shape. */
+export function pageSnapshot(page: {
+  slug: string;
+  title: string;
+  metaTitle: string | null;
+  metaDescription: string | null;
+  published: boolean;
+  blocks: Array<{ kind: string; body: unknown; position?: number }>;
+}): PageSnapshot {
+  const blocks = [...page.blocks]
+    .sort((left, right) => (left.position ?? 0) - (right.position ?? 0))
+    .map((block) => ({ kind: block.kind, body: block.body }));
+  return {
+    slug: page.slug,
+    title: page.title,
+    metaTitle: page.metaTitle ?? null,
+    metaDescription: page.metaDescription ?? null,
+    published: page.published,
+    blocks,
+  };
 }
 
 /* ── Restore bodies: an old state, as the setting's own save route expects it ─ */
@@ -127,6 +170,18 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
     if (!state.present) return "Reset to the built-in order.";
     return `Saved the default sidebar: ${state.items.length} item${state.items.length === 1 ? "" : "s"}, ${state.locked.length} locked.`;
   }
+  if (subject === "site_page") {
+    const from = before as PageSnapshot | null;
+    const to = after as PageSnapshot;
+    const parts: string[] = [];
+    if (!from) parts.push("Created");
+    if (from && from.title !== to.title) parts.push("retitled");
+    if (from && from.published !== to.published) parts.push(to.published ? "published" : "unpublished");
+    if (from && canonicalJson(from.blocks) !== canonicalJson(to.blocks)) parts.push("content changed");
+    if (from && (from.metaTitle !== to.metaTitle || from.metaDescription !== to.metaDescription)) parts.push("search text changed");
+    const said = parts.length ? parts.join(", ") : "Saved with no change";
+    return `${said[0].toUpperCase()}${said.slice(1)} — ${to.blocks.length} block${to.blocks.length === 1 ? "" : "s"}, ${to.published ? "published" : "draft"}.`;
+  }
   const state = after as DashboardSnapshot;
   if (!state.present || state.items.length === 0) return `The built-in ${state.surface} layout.`;
   const hidden = state.items.filter((item) => (item as { hidden?: unknown })?.hidden === true).length;
@@ -150,6 +205,8 @@ export function restoreRequest(subject: VersionSubject, key: string, version: nu
       return { url: "/api/navigation", body: { scope: "workspace", restoreVersion: version } };
     case "dashboard":
       return { url: "/api/dashboard-layout", body: { scope: "workspace", surface: key, restoreVersion: version } };
+    case "site_page":
+      return { url: "/api/site-pages", body: { slug: key, restoreVersion: version } };
   }
 }
 

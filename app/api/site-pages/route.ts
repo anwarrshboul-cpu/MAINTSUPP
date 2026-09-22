@@ -49,6 +49,19 @@ import {
   writePage,
   type PageInput,
 } from "../../lib/cms-repository.ts";
+import {
+  pageSnapshot,
+  restoreVersionFrom,
+  summariseChange,
+  type PageSnapshot,
+} from "../../lib/config-versions-model.ts";
+import {
+  ensureConfigBaseline,
+  latestSnapshot,
+  loadRestoreSnapshot,
+  recordConfigVersion,
+  type VersionTarget,
+} from "../../lib/config-versions.ts";
 
 export const dynamic = "force-dynamic";
 
@@ -136,9 +149,33 @@ export async function PUT(request: Request) {
       metaDescription?: unknown;
       published?: unknown;
       blocks?: unknown;
+      restoreVersion?: unknown;
     } | null;
     if (!payload) {
       return Response.json({ error: "Send a page object." }, { status: 400 });
+    }
+
+    /*
+     * §38b — RESTORE a page to a recorded version, keyed by its slug: the
+     * version's title, search text, published flag and blocks replace the body,
+     * then EVERY check below runs on them — the slug rules, `validateBlock`, the
+     * claims rules — so an old page that breaks today's rules is refused whole.
+     * The history is the installation's (no workspace); the request carries
+     * only the slug and the number. A page that was deleted comes back this way:
+     * restore the version before its deletion marker.
+     */
+    const restoring = restoreVersionFrom(payload);
+    if (restoring) {
+      const key = cleanSlug(payload.slug);
+      if (!key) return Response.json({ error: "Name the page to restore." }, { status: 400 });
+      const loaded = await loadRestoreSnapshot(scope.db, { organisationId: null, subject: "site_page", key }, restoring);
+      if (!loaded.ok) return Response.json({ error: loaded.error }, { status: loaded.status });
+      const snapshot = loaded.snapshot as PageSnapshot;
+      payload.title = snapshot.title;
+      payload.metaTitle = snapshot.metaTitle;
+      payload.metaDescription = snapshot.metaDescription;
+      payload.published = snapshot.published;
+      payload.blocks = snapshot.blocks;
     }
 
     const slug = cleanSlug(payload.slug);
@@ -213,9 +250,37 @@ export async function PUT(request: Request) {
     }
 
     const before = (await listPages(scope.db)).find((page) => page.slug === slug) ?? null;
+    const versionTarget: VersionTarget = { organisationId: null, subject: "site_page", key: slug };
+    const versionActor = { email: scope.identityEmail, userId: scope.session?.user.id ?? null };
+    /* §38b — an existing page's state before history's first write, as version 1. */
+    if (before) await ensureConfigBaseline(scope.db, versionTarget, pageSnapshot(before), versionActor);
     const result = await writePage(scope.db, input, scope.identityEmail.toLowerCase());
     if (!result.ok) {
       return Response.json({ error: result.reason }, { status: 503 });
+    }
+    {
+      const previous = await latestSnapshot(scope.db, versionTarget);
+      const after = pageSnapshot(input);
+      const summary = summariseChange("site_page", previous && !("absent" in (previous as object)) ? previous : null, after);
+      const recorded = await recordConfigVersion(scope.db, versionTarget, {
+        snapshot: after,
+        summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+        restoredFrom: restoring,
+        actor: versionActor,
+      });
+      if (restoring) {
+        await recordAudit({
+          db: scope.db,
+          organisationId: scope.orgId,
+          actor: auditActor(scope),
+          action: "config.version_restored",
+          entityType: "config_version",
+          entityId: `site_page/${slug}`,
+          summary: `Restored the website page /p/${slug} from version ${restoring}.`,
+          detail: { subject: "site_page", key: slug, from: restoring, version: recorded },
+          request,
+        });
+      }
     }
 
     /*
@@ -269,9 +334,24 @@ export async function DELETE(request: Request) {
     if (!slug) {
       return Response.json({ error: "Name the page to delete." }, { status: 400 });
     }
+    /* §38b — the page as it was, read before it goes: the deletion is recorded
+       as a version carrying that state, so "restore the version before it"
+       brings the page back exactly. The delete itself stays a real delete. */
+    const doomed = (await listPages(scope.db)).find((page) => page.slug === slug) ?? null;
+    const versionTarget: VersionTarget = { organisationId: null, subject: "site_page", key: slug };
+    const versionActor = { email: scope.identityEmail, userId: scope.session?.user.id ?? null };
+    if (doomed) await ensureConfigBaseline(scope.db, versionTarget, pageSnapshot(doomed), versionActor);
     const result = await deletePage(scope.db, slug);
     if (!result.ok) {
       return Response.json({ error: "There is no page with that slug." }, { status: 404 });
+    }
+    if (doomed) {
+      await recordConfigVersion(scope.db, versionTarget, {
+        snapshot: pageSnapshot(doomed),
+        kind: "deleted",
+        summary: `Deleted /p/${slug}. Restore the version before this one to bring it back.`,
+        actor: versionActor,
+      });
     }
 
     await recordAudit({
