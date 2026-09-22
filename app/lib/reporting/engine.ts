@@ -88,6 +88,7 @@ import type {
 import { computeInvoiceSection } from "./invoice-compute";
 import { computeMaintenanceSection } from "./maintenance-compute";
 import { poundsToPence } from "./money";
+import { approvedQuotePenceByJob } from "./approved-quotes";
 import { addDays, dateOnly, previousComparablePeriod } from "./period";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -169,7 +170,10 @@ async function loadApprovedQuotes(
     db
       .select({
         requestId: quotations.requestId,
-        amount: quotations.amount,
+        /* Integer pence, the quote's money since Module 5 — never the legacy
+           `amount` REAL, which is written as zero. See `approved-quotes.ts`. */
+        netPence: quotations.netPence,
+        grossPence: quotations.grossPence,
         approvedAt: quotations.approvedAt,
       })
       .from(quotations)
@@ -180,23 +184,9 @@ async function loadApprovedQuotes(
         ),
       ),
   );
-  const latest = new Map<string, { amount: number; approvedAt: string }>();
-  for (const row of rows) {
-    // Only an APPROVED quote is a commitment. A quote awaiting approval is a
-    // price somebody sent, and putting it in a spend total would report money
-    // nobody has agreed to.
-    if (!row.approvedAt) continue;
-    const held = latest.get(row.requestId);
-    if (!held || row.approvedAt > held.approvedAt) {
-      latest.set(row.requestId, { amount: row.amount, approvedAt: row.approvedAt });
-    }
-  }
-  const quotes = new Map<string, number>();
-  for (const [requestId, entry] of latest) {
-    const pence = poundsToPence(entry.amount);
-    if (pence !== null) quotes.set(requestId, pence);
-  }
-  return quotes;
+  // Only an APPROVED quote is a commitment; the latest one on each job, in
+  // pence. The rule lives in `approved-quotes.ts`, where it is tested.
+  return approvedQuotePenceByJob(rows);
 }
 
 async function loadExistingCharges(

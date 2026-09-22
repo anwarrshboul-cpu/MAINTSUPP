@@ -263,17 +263,24 @@ test("the two money boundaries stay separate, and each says why", async () => {
 /* What the phase deliberately did not do                              */
 /* ------------------------------------------------------------------ */
 
-test("the other float money columns are left alone, knowingly", async () => {
+test("the legacy invoice/quotation float columns stay in the schema, and are no longer money", async () => {
   const schema = await read("db/schema.ts");
 
   /*
-   * `invoices.amount` and `quotations.amount` are also floats. Measured 2026-09-20,
-   * BOTH HAVE ZERO ROWS IN PRODUCTION, so nothing is at risk there today and
-   * converting them is a separate decision rather than something to fold in silently.
-   * Asserted so that the day one of them gains rows, this test is the record of the
-   * decision rather than a surprise.
+   * `invoices.amount` and `quotations.amount` are floats. Measured 2026-09-20 and
+   * again 2026-09-22: BOTH HAVE ZERO ROWS IN PRODUCTION (and on Staging).
+   *
+   * Re-pointed 2026-09-22, when the owner approved normalising them. Their money
+   * has been integer pence since Module 5 (`net_pence` / `vat_pence` /
+   * `gross_pence`); the float is written as zero, and after that decision nothing
+   * reads it or sends it — see tests/finance-legacy-amount.test.mjs, which is now
+   * the record. The column itself stays, because this bootstrap performs no
+   * destructive ALTER and dropping a column is a hard stop; so this pin still
+   * asserts it is there, and the other test asserts it is inert.
    */
-  assert.match(schema, /amount: real\("amount"\)/, "invoices/quotations amount is still a float");
+  assert.match(schema, /amount: real\("amount"\)/, "the legacy float column is still in the schema (never dropped)");
+  const inert = await read("tests/finance-legacy-amount.test.mjs");
+  assert.match(inert, /no code anywhere reads invoices\.amount or quotations\.amount/, "and its inertness is pinned elsewhere");
   const shared = await read("app/lib/cost-sql.ts");
   assert.doesNotMatch(
     decommented(shared),
