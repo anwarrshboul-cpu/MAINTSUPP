@@ -1,0 +1,101 @@
+/*
+ * Settings → Workspace logo.
+ *
+ * Tokens only, like `brand-colours-panel.css` beside it, and no media query for
+ * the same reason: the row is a wrapping flex layout that reflows on a phone
+ * without a breakpoint.
+ */
+
+.workspace-logo__scope {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-logo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+/* A letterbox the size the sidebar tile would scale from: a wide wordmark and a
+   square badge both fit without stretching. */
+.workspace-logo__preview {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  width: 168px;
+  height: 72px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+
+.workspace-logo__image {
+  border-radius: 7px;
+}
+
+.workspace-logo__fallback {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+
+.workspace-logo__fallback small {
+  font-size: 11px;
+}
+
+.workspace-logo__body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workspace-logo__body strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-logo__body small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-logo__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 14px;
+}
+
+/* The native picker is driven by the button beside it; kept in the document so
+   the browser (and a test) can still hand it a file. */
+.workspace-logo__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.workspace-logo__status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-logo__failure {
+  color: var(--status-red-fg);
+  font-size: 12px;
+}

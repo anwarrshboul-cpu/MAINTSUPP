@@ -33,8 +33,8 @@
  */
 
 import type { CombinedReportPayload, DocumentKind } from "../reporting/contract";
-import { buildReportDocument, keyValuesFor, sectionsFor } from "./document-model";
-import type { DocCell, DocSection, DocTable, ReportDocument } from "./document-model";
+import { NO_BRANDING, buildReportDocument, coverLogoSize, keyValuesFor, sectionsFor } from "./document-model";
+import type { DocCell, DocSection, DocTable, DocumentBranding, ReportDocument } from "./document-model";
 import { ZipWriter } from "./zip";
 import { XML_DECLARATION, xmlText } from "./xml";
 
@@ -335,6 +335,58 @@ const DOCUMENT_RELS = `${XML_DECLARATION}
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
 
+/* ── The workspace logo, when there is one ────────────────────────────────── */
+
+/*
+ * Only a branded file carries these parts, so an unbranded one is byte-for-byte
+ * what it always was. The logo is the JPEG copy made for documents: Word embeds
+ * a JPEG natively, where a WebP would open as a broken picture in older Word.
+ */
+const LOGO_PART = "word/media/workspace-logo.jpeg";
+const LOGO_RELATIONSHIP = "rIdWorkspaceLogo";
+/* EMU: 914,400 to the inch. A letterhead's height; at most a third of the width. */
+const COVER_LOGO_BOX_EMU = { width: 2_160_000, height: 612_000 };
+const EMU_PER_PIXEL = 9_525;
+
+const CONTENT_TYPES_WITH_LOGO = CONTENT_TYPES.replace(
+  '<Default Extension="xml" ContentType="application/xml"/>',
+  '<Default Extension="xml" ContentType="application/xml"/>\n<Default Extension="jpeg" ContentType="image/jpeg"/>',
+);
+
+const DOCUMENT_RELS_WITH_LOGO = DOCUMENT_RELS.replace(
+  "</Relationships>",
+  `<Relationship Id="${LOGO_RELATIONSHIP}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/workspace-logo.jpeg"/>\n</Relationships>`,
+);
+
+/** The drawing namespaces, declared on the root only when a drawing is present. */
+const DRAWING_NAMESPACES =
+  ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"' +
+  ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"' +
+  ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"' +
+  ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
+
+/** An inline picture of the logo, in its own paragraph above the title. */
+function logoParagraph(logo: NonNullable<DocumentBranding["logo"]>): string {
+  const size = coverLogoSize(
+    { width: logo.width * EMU_PER_PIXEL, height: logo.height * EMU_PER_PIXEL },
+    COVER_LOGO_BOX_EMU,
+  );
+  const cx = Math.max(1, Math.round(size.width));
+  const cy = Math.max(1, Math.round(size.height));
+  return (
+    `<w:p><w:pPr><w:spacing w:after="160"/></w:pPr><w:r><w:drawing>` +
+    `<wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/>` +
+    `<wp:docPr id="1" name="Workspace logo" descr="Workspace logo"/>` +
+    `<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>` +
+    `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">` +
+    `<pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="workspace-logo.jpeg"/><pic:cNvPicPr/></pic:nvPicPr>` +
+    `<pic:blipFill><a:blip r:embed="${LOGO_RELATIONSHIP}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>` +
+    `<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+    `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic>` +
+    `</a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+  );
+}
+
 function coreProperties(document: ReportDocument, generatedAtIso: string): string {
   return `${XML_DECLARATION}
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -358,11 +410,15 @@ const APP_PROPERTIES = `${XML_DECLARATION}
 export function renderDocx(
   payload: CombinedReportPayload,
   kind: DocumentKind = "combined",
+  branding: DocumentBranding = NO_BRANDING,
 ): Uint8Array {
   const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "all");
+  const logo = branding.logo;
 
   const cover: string[] = [
+    /* The workspace's own mark above the title — the title stays MAINTSUPP's. */
+    ...(logo ? [logoParagraph(logo)] : []),
     paragraph(run(document.title), { style: "Title" }),
     paragraph(
       run(
@@ -408,16 +464,17 @@ export function renderDocx(
 
   const lastIsLandscape = printed.length ? printed[printed.length - 1]!.number === 2 : true;
   const documentXml = `${XML_DECLARATION}
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body.join("")}${sectionProperties(lastIsLandscape)}</w:body></w:document>`;
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"${logo ? DRAWING_NAMESPACES : ""}><w:body>${body.join("")}${sectionProperties(lastIsLandscape)}</w:body></w:document>`;
 
   const zip = new ZipWriter();
-  zip.addFile("[Content_Types].xml", CONTENT_TYPES);
+  zip.addFile("[Content_Types].xml", logo ? CONTENT_TYPES_WITH_LOGO : CONTENT_TYPES);
   zip.addFile("_rels/.rels", ROOT_RELS);
   zip.addFile("docProps/core.xml", coreProperties(document, payload.generatedAt));
   zip.addFile("docProps/app.xml", APP_PROPERTIES);
-  zip.addFile("word/_rels/document.xml.rels", DOCUMENT_RELS);
+  zip.addFile("word/_rels/document.xml.rels", logo ? DOCUMENT_RELS_WITH_LOGO : DOCUMENT_RELS);
   zip.addFile("word/styles.xml", STYLES);
   zip.addFile("word/document.xml", documentXml);
+  if (logo) zip.addFile(LOGO_PART, logo.jpeg);
   return zip.toUint8Array();
 }
 

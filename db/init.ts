@@ -403,6 +403,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      navigation). See `ensureSiteNavigation`. */
   await ensureSiteNavigation(d1);
 
+  /* The workspace logo — one row per workspace naming a private object. One
+     guarded table; no seed (no row means "no logo", which is a correct state,
+     not an unfinished one). See `ensureOrganisationLogos`. */
+  await ensureOrganisationLogos(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -7801,4 +7806,50 @@ async function seedOptionValues(
       )
       .run();
   }
+}
+
+/**
+ * THE WORKSPACE LOGO — which private object is this workspace's logo.
+ *
+ * A TABLE OF ITS OWN, NOT COLUMNS ON `organisations`. The organisation row is
+ * handed to the browser whole (`/api/context` spreads it into
+ * `currentOrganisation`), so an `object_key` column there would publish the
+ * bucket path to every member. Here it is read only by the logo routes, and the
+ * browser is given `/api/branding/logo/image?v=<logo_id>` instead.
+ * `organisations.logo_url` predates this and nothing writes it; it is left as it
+ * is rather than repurposed.
+ *
+ * `organisation_id` is the PRIMARY KEY: one logo per workspace, so a replace is
+ * an update of the one row and can never leave two rows disagreeing.
+ * `logo_id` is minted per upload and names the object, so a new logo is a new
+ * URL and the old bytes may be served `immutable`. `byte_size` is BIGINT so the
+ * shim cannot narrow it; the times are ISO text written by the app.
+ *
+ * `print_width` / `print_height` describe the JPEG the browser draws for the
+ * reports (a PDF and a Word file cannot embed a WebP): NULL until that copy is
+ * stored, and reset to NULL by every new logo, so a report never prints a copy
+ * drawn from the logo before.
+ *
+ * No backfill: no workspace has a logo until someone with `settings.edit`
+ * uploads one, and until then the portal draws the default mark.
+ */
+async function ensureOrganisationLogos(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS organisation_logos (
+         organisation_id TEXT PRIMARY KEY NOT NULL REFERENCES organisations(id),
+         logo_id TEXT NOT NULL,
+         object_key TEXT NOT NULL,
+         content_type TEXT NOT NULL,
+         byte_size BIGINT NOT NULL,
+         width INTEGER NOT NULL,
+         height INTEGER NOT NULL,
+         original_name TEXT NOT NULL,
+         print_width INTEGER,
+         print_height INTEGER,
+         uploaded_by_email TEXT,
+         updated_at TEXT NOT NULL
+       )`,
+    ),
+  ]);
 }
