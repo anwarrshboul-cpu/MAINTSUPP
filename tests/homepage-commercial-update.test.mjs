@@ -366,7 +366,13 @@ test("the enquiry form offers the pricing bands, plus the honest way to say no",
 
 test("the nav carries Contractors, and it is a route rather than an anchor", async () => {
   const chrome = await read(`${SECTIONS}/chrome.tsx`);
-  assert.match(chrome, /\["\/contractors", "Contractors"\]/);
+  /* RE-POINTED (decision J): the header's links became data that platform
+     staff edit, and the list that ships — the fallback when nothing is stored
+     or the database cannot answer — moved to `app/lib/site-navigation.ts`,
+     because a server module cannot read a value out of a "use client" file.
+     The claim is unchanged: Contractors is in the shipped nav, as a route. */
+  const navigation = await read("app/lib/site-navigation.ts");
+  assert.match(navigation, /\["\/contractors", "Contractors"\]/);
   assert.match(chrome, /const isAnchor = \(href: string\) => href\.startsWith\("#"\);/);
   /*
    * RE-POINTED: one component now decides `<a>` versus `<Link>`, and the rule

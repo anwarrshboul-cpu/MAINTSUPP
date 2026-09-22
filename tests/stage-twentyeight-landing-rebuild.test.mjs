@@ -1003,19 +1003,37 @@ test("Portal Login is the name everywhere, and it points at the portal", async (
     .replace(/^\s*\/\/.*$/gm, "");
 
   const hits = [...chrome.matchAll(/Portal Login/g)];
-  assert.ok(hits.length >= 3, `expected it in the utility bar, header and footer; found ${hits.length}`);
+  /* RE-POINTED (decision J): the three in the chrome are now the utility bar,
+     the header and the drawer — the frame, which is not editable. The footer's
+     copy moved into the navigation staff edit, where it is the shipped label
+     and a LOCKED link: it cannot be removed, hidden or pointed away from
+     /portal. Both halves are asserted. */
+  assert.ok(hits.length >= 3, `expected it in the utility bar, header and drawer; found ${hits.length}`);
   assert.match(chrome, /href="\/portal"/);
   assert.doesNotMatch(chrome, /Client Login/, "the brief names it Portal Login for a reason");
+  const navigation = await read("app/lib/site-navigation.ts");
+  assert.match(navigation, /\{ id: "ftr-portal", href: "\/portal", label: "Portal Login" \}/);
+  assert.doesNotMatch(navigation, /Client Login/);
+  const { LOCKED_LINKS } = await import("../app/lib/site-navigation.ts");
+  assert.ok(LOCKED_LINKS.some((lock) => lock.id === "ftr-portal" && lock.href === "/portal"), "the footer's door is locked");
 });
 
 test("every nav anchor names a section that exists", async () => {
-  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  /* RE-POINTED (decision J): the shared nav list is the SHIPPED navigation in
+     `app/lib/site-navigation.ts` now — the fallback, and what an installation
+     that never edits it shows. A stored navigation can only use anchors from
+     `HOMEPAGE_ANCHORS`, and every one of those must be a section, below. */
+  const chrome = await read("app/lib/site-navigation.ts");
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
   const targets = [...nav.matchAll(/\["#([a-z-]+)"/g)].map((match) => match[1]);
   assert.ok(targets.length >= 5, "four in-page destinations from the brief, plus Contact Us");
   assert.ok(targets.includes("contact"), "Contact Us points at #contact");
   for (const target of targets) {
     assert.ok(ANCHORS.includes(target), `#${target} has no section`);
+  }
+  const { HOMEPAGE_ANCHORS } = await import("../app/lib/site-navigation.ts");
+  for (const anchor of HOMEPAGE_ANCHORS) {
+    assert.ok(ANCHORS.includes(anchor.id), `the editor offers #${anchor.id}, which has no section`);
   }
 
   /* And `#contact` is a real element, not a name in a list. It lives on the
@@ -1027,8 +1045,11 @@ test("every nav anchor names a section that exists", async () => {
   /* The footer's own Contact link moves with the nav; the CTA buttons do not. */
   const chromeSrc = await read("app/(marketing)/_sections/chrome.tsx");
   /* RE-POINTED at `SectionLink` — same destination, same position in the
-     footer, now resolved against the page it is rendered on. */
-  assert.match(chromeSrc, /<li><SectionLink href="#contact">Contact<\/SectionLink><\/li>/);
+     footer, now resolved against the page it is rendered on.
+     RE-POINTED AGAIN (decision J): the entry is in the shipped footer data, and
+     the chrome renders every footer entry through `SectionLink`. */
+  assert.match(chrome, /\{ id: "ftr-contact", href: "#contact", label: "Contact" \}/);
+  assert.match(chromeSrc, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/);
   /* RE-POINTED: those two buttons book. They jumped to the enquiry panel while
      the hero and the final CTA opened the calendar, so the chrome's only CTA —
      the one on every page — asked a visitor who had decided to book a slot to

@@ -74,6 +74,9 @@ const ENTRIES = [
   ["roles", "app/(app)/admin/roles/page.tsx", "/admin/roles"],
   ["audit", "app/(app)/admin/audit/page.tsx", "/admin/audit"],
   ["pages", "app/(app)/admin/pages/page.tsx", "/admin/pages"],
+  /* TEN: Website navigation (decision J, §77 item 11) arrived with
+     `/api/site-navigation`, and sits beside Website pages — the same website. */
+  ["navigation", "app/(app)/admin/navigation/page.tsx", "/admin/navigation"],
   ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
   ["applications", "app/(app)/admin/applications/page.tsx", "/admin/applications"],
   /* NINE: Backups (§39) arrived with `/api/admin/backups` — visibility only. */
@@ -84,7 +87,7 @@ const ENTRIES = [
 /* The catalogue                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the console lists nine screens, and every one has a route", async () => {
+test("the console lists ten screens, and every one has a route", async () => {
   assert.equal(PLATFORM_SECTIONS.length, ENTRIES.length);
   assert.deepStrictEqual(
     [...PLATFORM_SECTION_KEYS],
