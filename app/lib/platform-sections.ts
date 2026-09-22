@@ -176,6 +176,19 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     blurb: "Who has applied to join the contractor network, and where each application has got to.",
     capability: null,
   },
+  /*
+   * Backups and recovery (§39), added with its API (`/api/admin/backups`) — the
+   * rule kept once more. Visibility only: the database host takes the backups
+   * and the portal cannot read their status, so the screen states that and what
+   * it CAN see (database, storage, migration state) and offers no action.
+   */
+  {
+    key: "backups",
+    label: "Backups",
+    icon: "shield",
+    blurb: "What the portal can truthfully say about backups, the database, file storage and migrations.",
+    capability: null,
+  },
 ] as const;
 
 export const PLATFORM_SECTION_KEYS: readonly string[] = PLATFORM_SECTIONS.map((s) => s.key);

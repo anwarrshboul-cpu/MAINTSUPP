@@ -147,6 +147,10 @@ server's `Content-Disposition` follows the same rule.
 
 ## Test suite conventions
 
+**Both static gates are zero-error on `main`** (since #77 and #80, 2026-09-22):
+`npx tsc --noEmit` reports 0 errors and `npm run lint` exits 0 (59 warnings). A new
+error in either is a regression, not baseline noise; do not let the warning count grow.
+
 Every `tests/*.test.mjs`, `node:test`, no framework — a couple of hundred files,
 and the count moves with almost every batch, so measure it (`ls tests/*.test.mjs |
 wc -l`) rather than trusting a number written here. Three things make the suite
@@ -172,7 +176,11 @@ first. Measure both before planning anything that adds to it.
 stage tests fail on any other width.
 
 ~32 files make live HTTP calls and **skip** (not fail) when no dev server
-answers, defaulting to `localhost:5173` or `localhost:3000`. Consequences worth
+answers, defaulting to `localhost:5173` or `localhost:3000` — and some probe
+`3000` and `5173`–`5177` in turn, so they will find ANY dev server on those ports,
+including one running another branch in a parallel worktree. For a run with no
+live tests while other servers are up, point `MAINTSUPP_BASE_URL` at a dead port
+(e.g. `http://localhost:5999`); for a live run, point it at your own server. Consequences worth
 internalising:
 
 - Run the suite against a **quiet** tree. Concurrent work starves the dev server;
@@ -204,19 +212,17 @@ regression, and do not weaken them to get green.
 
 ## Editing notes
 
-Line endings: **the committed blob is LF**, and `core.autocrlf=true` rewrites the
-working tree to CRLF on checkout — so a file git has touched is CRLF on disk,
-while one an editor rewrote keeps whatever the editor wrote. Read a file's actual
-bytes before matching, and restore what was there when writing, or diffs become
-unreadable. This paragraph used to say `app/api/files/route.ts` was CRLF while
-`portal-app.tsx` and `globals.css` were LF; measured, all three blobs are LF and
-the first two are CRLF on disk. The wrong specifics misdirected two people in one
-batch, so trust the measurement, not a remembered list.
+Line endings, **measured 2026-09-22**: `core.autocrlf` is **false** and there is no
+`.gitattributes`, so git writes files exactly as committed. TypeScript, TSX, MJS and
+Markdown files are **LF** in the blob and on disk (measured: `app/api/files/route.ts`,
+`app/(app)/portal/portal-app.tsx`, this file). Earlier versions of this paragraph said
+`autocrlf=true` and CRLF-on-disk; both were wrong and misdirected people, so trust a fresh
+measurement over any remembered list — including this one.
 
-`app/globals.css` is the one real exception — **mixed in the blob itself**, 16,621
-CRLF against 20 LF. Normalising it and restoring the dominant ending silently
-flips those 20 lines, turning an 18-line addition into 38 insertions and 20
-deletions. Splice a mixed file at byte level; never normalise it.
+`app/globals.css` is the one exception: **pure CRLF**, in the blob and on disk alike
+(17,140 CRLF, 0 bare LF). Write CRLF when editing it and splice at byte level; never
+normalise it. (It used to be mixed — 20 LF lines among 16,621 CRLF — and normalising a
+mixed file is how an 18-line addition becomes 38 insertions and 20 deletions.)
 
 **Bash cannot measure any of this here.** Inside `$( )`, `$'\r'` expands to an
 empty string, so a `grep -c` for it becomes `grep -c ''` and matches every line —

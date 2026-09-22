@@ -623,8 +623,9 @@ test("the console lists the screen because the screen has an API", async () => {
      only one landed. `platform-admin-shell.test.mjs` compares against its own
      ENTRIES list rather than a literal, so it needed no change.
      Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
-     API (`/api/contractor-applications/inbox`) — the same rule kept once more. */
-  assert.equal(PLATFORM_SECTIONS.length, 8);
+     API (`/api/contractor-applications/inbox`) — the same rule kept once more.
+     Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`. */
+  assert.equal(PLATFORM_SECTIONS.length, 9);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -645,12 +646,16 @@ test("the console lists the screen because the screen has an API", async () => {
    * And a third was: `applications`, the contractor applications inbox, for the
    * leads entry's own reason — an anonymous application used to be filed under a
    * client's workspace, and the rows belong to the platform either way.
+   *
+   * And a fourth: `backups` (§39), which is not in any workspace at all — it
+   * describes the deployment's database, storage and migrations, so no
+   * per-workspace capability could be right about it.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "leads", "pages"],
-    "only the three platform-owned surfaces answer to no capability",
+    ["applications", "backups", "leads", "pages"],
+    "only the four platform-owned surfaces answer to no capability",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

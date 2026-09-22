@@ -49,7 +49,13 @@ test("the site restriction resolves the job anchor, not only site and asset", as
    * documents reached one hop sideways, and a member confined to three stores
    * could read them.
    */
-  const byId = await read("app/api/files/[id]/route.ts");
+  /*
+   * RE-POINTED (site-scope reads, 2026-09-22): `outsideSiteScope` moved, body
+   * unchanged, from `app/api/files/[id]/route.ts` to `app/api/files/documents.ts`,
+   * so the upload doors can ask the same rule. The pins follow the function;
+   * the bytes path is pinned to call it in the next test.
+   */
+  const byId = await read("app/api/files/documents.ts");
 
   assert.match(
     byId,
@@ -103,7 +109,16 @@ test("the catalogue and the bytes narrow by the same three anchors", async () =>
    * extended to close in the first place.
    */
   const listing = await read("app/api/files/route.ts");
-  const byId = await read("app/api/files/[id]/route.ts");
+  /* RE-POINTED (site-scope reads, 2026-09-22): the three anchor checks live in
+     `outsideSiteScope`, now in `documents.ts`; the bytes path must still call it. */
+  const byId = await read("app/api/files/documents.ts");
+  const bytesPath = await read("app/api/files/[id]/route.ts");
+  assert.match(
+    bytesPath,
+    /const denied = await outsideSiteScope\(db, orgId, siteScope, record\);/,
+    "the bytes path must ask the shared rule",
+  );
+  assert.match(bytesPath, /  outsideSiteScope,\n[\s\S]{0,120}\} from "\.\.\/documents";/);
 
   for (const [name, anchor] of [
     ["site", /siteScopeFilter/],
