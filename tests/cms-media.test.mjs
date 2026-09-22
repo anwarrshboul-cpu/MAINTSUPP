@@ -689,7 +689,20 @@ test("live: upload, serve, use on a page, refuse to delete, replace, archive, de
     assert.equal((await call(`/api/site-pages?slug=${pageSlug}`, { headers: as, method: "DELETE" })).status, 200);
     assert.equal((await call(`/api/cms-media?id=${item.id}`, { headers: as, method: "DELETE" })).status, 200);
     created.splice(created.indexOf(item.id), 1);
-    assert.equal((await fetch(`${BASE_URL}${item.current.url}`)).status, 404, "deleted means the file is gone");
+    /*
+     * THE ORIGIN, not the edge. This route sends `immutable` and a day of
+     * `CDN-Cache-Control` because the bytes under a key never change — a
+     * replacement is a new key — so after a delete a CDN keeps serving its copy
+     * until that day is up, which the library screen states. Asking the same URL
+     * deployed therefore answers 200 from cache, and the assertion that the file
+     * is gone has to ask the origin: a unique query string is a different cache
+     * key, and the route reads its path segments only, so the handler sees the
+     * same request. (This assertion passed locally, where there is no edge, and
+     * failed on the first deployed run — the cache was right and the test was
+     * incomplete.)
+     */
+    const fromOrigin = await fetch(`${BASE_URL}${item.current.url}?deleted-check=${Date.now().toString(36)}`);
+    assert.equal(fromOrigin.status, 404, "deleted means the origin no longer has the file");
   } finally {
     await call(`/api/site-pages?slug=${pageSlug}`, { headers: as, method: "DELETE" });
     for (const id of created) await call(`/api/cms-media?id=${id}`, { headers: as, method: "DELETE" });
