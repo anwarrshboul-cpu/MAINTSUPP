@@ -80,6 +80,12 @@ const jsxStub = asModule(`
 `);
 const componentsStub = asModule(`export const Icon = () => null;`);
 const cssStub = asModule(`export default {};`);
+/* The tray's confirm now takes the shared modal behaviour (Escape, focus, Tab
+   trap) from `overlay/dialog-behaviour.ts`. Components are never rendered here,
+   so the hook only has to exist and return its shape. */
+const dialogBehaviourStub = asModule(`
+  export const useDialogBehaviour = () => ({ surface: { current: null }, onBackdrop: () => {}, onKeyDown: () => {} });
+`);
 
 const chipInkUrl = await build("app/(app)/portal/chip-ink.ts", {});
 const formatDateUrl = await build("app/lib/format-date.ts", {});
@@ -121,6 +127,7 @@ const tray = await import(
       "./job-side-panel.css": cssStub,
     }),
     "./planned-visit": plannedVisitUrl,
+    "./overlay/dialog-behaviour": dialogBehaviourStub,
     "./unscheduled-tray.css": cssStub,
   })
 );

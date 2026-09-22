@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Icon } from "../../components";
 import type { BuilderForm } from "./form-builder-model";
+import { useDialogBehaviour } from "./overlay/dialog-behaviour";
 
 /**
  * The Share form dialog — monday's, reproduced.
@@ -33,21 +34,14 @@ export default function FormShareDialog({
   const [copied, setCopied] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const closeRef = useRef<HTMLButtonElement>(null);
-
   /*
-   * Escape closes, and focus starts on the close button rather than on the URL
-   * field — a dialog that opens with a text input focused reads to a screen
-   * reader as "edit text" before it has said what the dialog is.
+   * Escape closes, and focus starts on the close button (`data-autofocus`)
+   * rather than on the URL field — a dialog that opens with a text input
+   * focused reads to a screen reader as "edit text" before it has said what the
+   * dialog is. Escape, focus in and back, the Tab trap and the scroll lock come
+   * from the one shared implementation — see `dialog-behaviour.ts`.
    */
-  useEffect(() => {
-    closeRef.current?.focus();
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
 
   /* The "Copied" confirmation is transient and must not outlive the dialog. */
   useEffect(() => {
@@ -76,17 +70,20 @@ export default function FormShareDialog({
   return (
     <div className="form-share__backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={surface}
         className="form-share"
         role="dialog"
         aria-modal="true"
         aria-labelledby="form-share-title"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onClick={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           className="form-share__close"
           onClick={onClose}
-          ref={closeRef}
+          data-autofocus
           aria-label="Close"
         >
           <Icon name="close" size={18} />

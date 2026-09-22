@@ -29,8 +29,9 @@ import { useBodyScrollLock } from "./anchored";
 const FOCUSABLE =
   'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function useDialogBehaviour(open: boolean, onClose: () => void) {
-  const surface = useRef<HTMLDivElement | null>(null);
+/* Generic in the surface's element: most dialogs are a `<div>`, the job panel is a `<section>`. */
+export function useDialogBehaviour<T extends HTMLElement = HTMLDivElement>(open: boolean, onClose: () => void) {
+  const surface = useRef<T | null>(null);
   const closeRef = useRef(onClose);
   useEffect(() => {
     closeRef.current = onClose;
@@ -88,7 +89,7 @@ export function useDialogBehaviour(open: boolean, onClose: () => void) {
   }, []);
 
   // Keep Tab inside the dialog.
-  const onKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+  const onKeyDown = useCallback((event: React.KeyboardEvent<T>) => {
     if (event.key !== "Tab") return;
     const node = surface.current;
     if (!node) return;

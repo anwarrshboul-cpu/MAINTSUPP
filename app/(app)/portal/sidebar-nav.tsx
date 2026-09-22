@@ -794,6 +794,19 @@ export function SidebarNav({
                          * "false" on the others so only one element carries it.
                          */
                         aria-current={activeSection === item.key ? "page" : undefined}
+                        /*
+                         * With a count, the name is written out in full: "Jobs,
+                         * 158 open jobs". Built from content it read "Jobs158",
+                         * and a visually-hidden ", 158 …" beside the label read
+                         * "Jobs , 158" in Chrome, which spaces out any positioned
+                         * child. It starts with the visible label, so a voice
+                         * command of "click Jobs" still finds the button.
+                         */
+                        aria-label={
+                          !editing && count > 0
+                            ? `${item.label}, ${count}${countLabel ? ` ${countLabel}` : ""}`
+                            : undefined
+                        }
                         data-nav-key={item.key}
                         data-nav-hidden={item.hidden ? "true" : "false"}
                         data-nav-locked={item.locked ? "true" : "false"}
@@ -848,10 +861,13 @@ export function SidebarNav({
                           </span>
                         )}
                         {!editing && count > 0 && (
+                          /* Drawn for the eye; the button's `aria-label` above
+                             is what is spoken. (An `aria-label` HERE, on a plain
+                             span, was ignored — hence "Jobs158".) */
                           <span
                             className="nav-count"
                             title={countLabel ? count + " " + countLabel : undefined}
-                            aria-label={countLabel ? count + " " + countLabel : undefined}
+                            aria-hidden="true"
                           >
                             {count}
                           </span>

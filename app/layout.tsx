@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { SkipLink } from "./skip-link";
 
 export const metadata: Metadata = {
   title: {
@@ -114,7 +115,11 @@ export default function RootLayout({
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" type="image/png" />
       </head>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        {/* First in the tab order on every page — see app/skip-link.tsx. */}
+        <SkipLink />
+        {children}
+      </body>
     </html>
   );
 }

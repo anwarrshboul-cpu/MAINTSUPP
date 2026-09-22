@@ -87,6 +87,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { submissionTitle } from "../../lib/submission-title";
 import { Icon } from "../../components";
 import "./raise-ticket.css";
+import { useDialogBehaviour } from "./overlay/dialog-behaviour";
 
 /* ------------------------------------------------------------------ */
 /* The context a section hands over                                    */
@@ -548,13 +549,10 @@ function RaiseTicketDialog({
     firstField.current?.focus();
   }, [access]);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation (`dialog-behaviour.ts`).
+     The first-field focus above still wins once the site register loads. */
+  const { surface, onKeyDown } = useDialogBehaviour<HTMLFormElement>(true, onClose);
 
   const chips = attachmentChips(context);
   const site = sites.find((entry) => entry.id === siteId) ?? null;
@@ -664,10 +662,13 @@ function RaiseTicketDialog({
         onClick={onClose}
       />
       <form
+        ref={surface}
         className="raise-ticket"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onSubmit={submit}
       >
         <header className="raise-ticket__top">

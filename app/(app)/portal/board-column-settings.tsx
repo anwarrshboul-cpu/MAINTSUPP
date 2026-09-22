@@ -17,7 +17,7 @@
  * edit, which is the same reason the view pane left `board-chrome.tsx`.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Icon } from "../../components";
 import { choiceList } from "./board-format";
 import { columnTypeDefinitions, groupColors } from "./board-model";
@@ -27,6 +27,7 @@ import type {
   BoardColumnType,
   MaintenanceBoardColumn,
 } from "../../lib/types";
+import { useDialogBehaviour } from "./overlay/dialog-behaviour";
 
 export function columnSettingsActionLabel(type: BoardColumnType) {
   if (type === "status" || type === "dropdown") return "Edit labels";
@@ -74,13 +75,9 @@ export function ColumnSettingsDialog({
   const [savingSettings, setSavingSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [onClose]);
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
 
   const addChoice = () => {
     const label = newChoice.trim();
@@ -125,10 +122,13 @@ export function ColumnSettingsDialog({
 
   return (
     <div
+      ref={surface}
       className="column-settings-dialog"
       role="dialog"
       aria-modal="true"
       aria-label={`${column.title} settings`}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
     >
       <button
         className="column-settings-dialog__scrim"

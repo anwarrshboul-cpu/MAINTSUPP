@@ -258,7 +258,7 @@ export function AccountWebhooksCard({ onNotify }: { onNotify?: (message: string)
                 <th>Events</th>
                 <th>State</th>
                 <th>Last delivered</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -319,7 +319,7 @@ export function AccountWebhooksCard({ onNotify }: { onNotify?: (message: string)
                 <th>Attempts</th>
                 <th>Answer</th>
                 <th>Queued</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>

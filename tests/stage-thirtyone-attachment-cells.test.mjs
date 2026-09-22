@@ -198,7 +198,10 @@ test("every '…' opens the menu for its OWN file, and every verb acts on it", a
   assert.match(manager, /toggleMenuAt\(event\.currentTarget, hoveredFile\)/);
   /* …and each overflow row's "…" carries that row's file. */
   const rows = manager.slice(manager.indexOf("hiddenFiles.map"));
-  assert.match(rows.slice(0, 1600), /toggleMenuAt\(event\.currentTarget, file\)/);
+  /* 1600 → 1900 for the a11y pass: the row's picture became `TileImage` (the
+     missing-bytes glyph fallback), two props longer, so the "…" now sits ~1624
+     characters in — still inside the row map, which closes at ~1800. */
+  assert.match(rows.slice(0, 1900), /toggleMenuAt\(event\.currentTarget, file\)/);
   /* Toggling is by id — the same "…" closes its own menu, nothing else's. */
   assert.match(manager, /if \(menu\?\.file\.id === file\.id\) \{\s*setMenu\(null\);/);
   /* The verbs read the menu's file, never an index, never files[0]. */
