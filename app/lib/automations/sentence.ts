@@ -112,6 +112,12 @@ export function actionSentence(
       }`;
     case "notify_person":
       return `notify ${configString(config, "to") || "someone"} by email`;
+    /* §34 — the endpoint's name is not known to the sentence (its choices are
+       per workspace), so the verb carries the meaning. */
+    case "slack_notify":
+      return "post in Slack";
+    case "send_webhook":
+      return "send to a webhook";
     case "set_date": {
       const days = configNumber(config, "days") ?? 0;
       const name = column ? resolve.column(column) : "a date";

@@ -141,11 +141,14 @@ export function webhookJob(row: JobRow) {
 
 export function eventPayload(input: {
   eventId: string;
-  type: WebhookEvent | "ping";
+  type: WebhookEvent | "ping" | "automation.action";
   organisationId: string;
   createdAt: string;
   job?: ReturnType<typeof webhookJob>;
   change?: JobEvent["change"];
+  /** §34 — the rule that sent it, and what it said. */
+  automation?: { id: string; name: string };
+  message?: string | null;
 }) {
   return JSON.stringify({
     id: input.eventId,
@@ -155,6 +158,8 @@ export function eventPayload(input: {
     data: {
       ...(input.job ? { job: input.job } : {}),
       ...(input.change ? { change: input.change } : {}),
+      ...(input.automation ? { automation: input.automation } : {}),
+      ...(input.message ? { message: input.message } : {}),
       ...(input.type === "ping" ? { message: "A test event from MAINTSUPP." } : {}),
     },
   });
@@ -559,4 +564,69 @@ export async function sendTestEvent(db: Database, organisationId: string, endpoi
     .where(and(eq(webhookDeliveries.id, id), eq(webhookDeliveries.organisationId, organisationId)))
     .limit(1);
   return { deliveryId: id, outcome, ...row };
+}
+
+/**
+ * §34 — one automation rule sending to one of THIS workspace's endpoints. The
+ * endpoint is re-read here — the right workspace, the right kind, and on —
+ * because a rule is stored and runs later: the connection may have been paused
+ * or removed since. Then it is the same pipeline as every event: a delivery row
+ * (so the log and the retries apply), one attempt straight away.
+ */
+export async function sendAutomationEvent(
+  db: Database,
+  input: {
+    organisationId: string;
+    endpointId: string;
+    kind: "slack" | "webhook";
+    rule: { id: string; name: string };
+    message: string | null;
+    job: ReturnType<typeof webhookJob> | null;
+  },
+  transport: Transport = defaultTransport,
+): Promise<{ outcome: DeliveryOutcome | "missing"; endpointName: string | null; error: string | null }> {
+  const [endpoint] = await db
+    .select({ id: webhookEndpoints.id, name: webhookEndpoints.name, kind: webhookEndpoints.kind, state: webhookEndpoints.state })
+    .from(webhookEndpoints)
+    .where(and(eq(webhookEndpoints.id, input.endpointId), eq(webhookEndpoints.organisationId, input.organisationId)))
+    .limit(1);
+  if (!endpoint || endpoint.kind !== input.kind || endpoint.state === "deleted") {
+    return { outcome: "missing", endpointName: null, error: "That connection no longer exists in this workspace." };
+  }
+  if (endpoint.state !== "on") {
+    return { outcome: "missing", endpointName: endpoint.name, error: `"${endpoint.name}" is ${endpoint.state === "paused" ? "paused" : "switched off"}.` };
+  }
+  const now = Date.now();
+  const createdAt = new Date(now).toISOString();
+  const eventId = newId("evt");
+  const id = newId("whd");
+  await db.insert(webhookDeliveries).values({
+    id,
+    organisationId: input.organisationId,
+    endpointId: endpoint.id,
+    eventId,
+    eventType: "automation.action",
+    payload: eventPayload({
+      eventId,
+      type: "automation.action",
+      organisationId: input.organisationId,
+      createdAt,
+      job: input.job ?? undefined,
+      automation: input.rule,
+      message: input.message,
+    }),
+    status: "pending",
+    attempts: 0,
+    nextAttemptAt: now,
+    claimedUntil: 0,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const outcome = await attemptDelivery(db, id, input.organisationId, transport, INLINE_TIMEOUT_MS);
+  const [row] = await db
+    .select({ error: webhookDeliveries.error })
+    .from(webhookDeliveries)
+    .where(and(eq(webhookDeliveries.id, id), eq(webhookDeliveries.organisationId, input.organisationId)))
+    .limit(1);
+  return { outcome, endpointName: endpoint.name, error: row?.error ?? null };
 }

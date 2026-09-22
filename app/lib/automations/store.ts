@@ -14,6 +14,7 @@ import {
   boardAutomations,
   maintenanceBoardColumns,
   maintenanceGroups,
+  webhookEndpoints,
 } from "../../../db/schema";
 import { SYSTEM_FIELD_BY_KEY, isSystemColumnKey } from "../request-fields";
 import {
@@ -27,6 +28,7 @@ import {
 import { composeSentence, type SentenceResolver } from "./sentence";
 import { configString, parseConfig, type AutomationRule, type Database } from "./types";
 import { resolveBoard } from "../board-registry";
+import { secretBoxConfigured } from "../secret-box";
 
 export const BOARD_IDS = ["maintenance", "store-documentation"] as const;
 export type BoardId = (typeof BOARD_IDS)[number];
@@ -75,6 +77,28 @@ export function catalogEnvironment(): CatalogEnvironment {
 
 export function currentCatalog(): AutomationCatalog {
   return buildCatalog(catalogEnvironment());
+}
+
+/**
+ * §34 — the catalogue as ONE workspace sees it: the environment above, plus the
+ * Slack connections and signed webhooks this workspace has switched on, which
+ * become the choices of the Slack and webhook actions. The rule routes validate
+ * against this, so a stored rule can only ever name this workspace's endpoint.
+ */
+export async function workspaceCatalog(db: Database, organisationId: string): Promise<AutomationCatalog> {
+  const endpoints = await db
+    .select({ id: webhookEndpoints.id, name: webhookEndpoints.name, kind: webhookEndpoints.kind })
+    .from(webhookEndpoints)
+    .where(and(eq(webhookEndpoints.organisationId, organisationId), eq(webhookEndpoints.state, "on")))
+    .orderBy(asc(webhookEndpoints.name));
+  const choices = (kind: string) =>
+    endpoints.filter((endpoint) => endpoint.kind === kind).map((endpoint) => ({ value: endpoint.id, label: endpoint.name }));
+  return buildCatalog({
+    ...catalogEnvironment(),
+    slackEndpoints: choices("slack"),
+    webhookEndpoints: choices("webhook"),
+    secretsConfigured: secretBoxConfigured(),
+  });
 }
 
 type ColumnRow = typeof maintenanceBoardColumns.$inferSelect;

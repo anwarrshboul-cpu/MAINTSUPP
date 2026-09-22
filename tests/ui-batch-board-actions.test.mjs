@@ -146,9 +146,13 @@ test("permissions gate what they should, through the capability hook", async () 
 test("no fake integrations anywhere on the automations surfaces", async () => {
   const connections = await read("app/api/automations/connections/route.ts");
   assert.match(connections, /connected: emailConfigured/, "email is connected only when a key exists");
-  for (const fake of ["whatsapp", "slack", "teams", "gmail", "outlook"]) {
+  /* RE-POINTED (§34): Slack is a connection this product HAS now (§35b Slack
+     endpoints), so it left the list of fakes — and in its place the entry must
+     be computed from the workspace's real endpoints, never asserted. */
+  for (const fake of ["whatsapp", "teams", "gmail", "outlook"]) {
     assert.doesNotMatch(connections, new RegExp(`key: "${fake}"`), `${fake} is not a connection this product has`);
   }
+  assert.match(connections, /connected: slackOn > 0,/, "Slack is connected only when this workspace has a Slack endpoint on");
   const panels = await read(`${ACTIONS}/automations-panels.tsx`);
   assert.match(panels, /No automation runs yet/);
   assert.match(panels, /Deleted rule/, "a run whose rule is gone is labelled, not dropped");

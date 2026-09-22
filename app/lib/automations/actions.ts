@@ -38,6 +38,7 @@ import {
 import { normalizeBoardCellValue, dateOfCell } from "../board-cell-values";
 import { contractorLinkValues } from "../contractor-reference";
 import { sendNotification } from "../notifications";
+import { sendAutomationEvent, webhookJob } from "../integrations/webhooks";
 import { sendJobsToBin } from "../recycle-bin";
 import {
   SYSTEM_FIELD_BY_KEY,
@@ -325,6 +326,33 @@ export async function executeAction(
       return { summary: `email to ${to} not delivered`, skipped: result.error ?? "Email delivery is not configured." };
     }
     throw new Error(result.error ?? "The email could not be sent.");
+  }
+  /*
+   * §34 — Slack and webhook actions, through the §35b pipeline: the endpoint is
+   * one of THIS workspace's (validated when the rule was saved, re-read now),
+   * the address stays sealed, and a delivery that fails is retried and logged
+   * like any other. A first attempt that failed is not a failed rule — the
+   * delivery is queued — so the run says exactly that; only an endpoint that has
+   * gone, or a receiver that has said "gone", fails or skips the rule.
+   */
+  if (type === "slack_notify" || type === "send_webhook") {
+    const endpointId = configString(config, "endpoint");
+    const item = event.requestId ? await loadItem(ctx, event.requestId) : null;
+    const written = configString(config, "message") || (type === "slack_notify" ? rule.name : "");
+    const message = written.replaceAll("{name}", item?.title ?? "");
+    const sent = await sendAutomationEvent(ctx.db, {
+      organisationId: ctx.orgId,
+      endpointId,
+      kind: type === "slack_notify" ? "slack" : "webhook",
+      rule: { id: rule.id, name: rule.name },
+      message: message || null,
+      job: item ? webhookJob(item) : null,
+    });
+    const where = type === "slack_notify" ? `Slack "${sent.endpointName}"` : `webhook "${sent.endpointName}"`;
+    if (sent.outcome === "missing") return { summary: "", skipped: sent.error ?? "That connection is no longer on." };
+    if (sent.outcome === "delivered") return { summary: type === "slack_notify" ? `posted to ${where}` : `sent to ${where}` };
+    if (sent.outcome === "abandoned") throw new Error(sent.error ?? `${where} refused the delivery.`);
+    return { summary: `queued for ${where}, not delivered yet (${sent.error ?? "it will be retried"}); it will be retried` };
   }
 
   if (!event.requestId) {
