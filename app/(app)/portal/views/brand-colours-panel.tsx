@@ -37,6 +37,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../../components";
 import "./brand-colours-panel.css";
 import { VersionHistory } from "./version-history";
+import { useUnsavedChanges } from "../../../lib/use-unsaved-changes";
 
 type ThemeToken = {
   key: string;
@@ -110,6 +111,12 @@ export function BrandColoursPanel() {
     void load();
   }, [load]);
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  /* §69 — leaving with colours or fonts chosen but not saved asks first. Worked
+     out here, before the early returns, so the hook runs on every render. */
+  useUnsavedChanges(
+    Object.entries(draft).some(([key, value]) => state?.tokens.find((token) => token.key === key)?.value !== value),
+  );
 
   if (failure && !state) {
     return (

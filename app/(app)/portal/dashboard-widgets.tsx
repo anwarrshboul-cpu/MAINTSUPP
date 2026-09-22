@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components";
 import { VersionHistory } from "./views/version-history";
+import { useUnsavedChanges } from "../../lib/use-unsaved-changes";
 
 export type DashboardWidget = {
   key: string;
@@ -113,6 +114,9 @@ export function DashboardWidgets({
   const [layout, setLayout] = useState<LayoutItem[] | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  /* §69 — this editor saves as you go, so the only thing to lose is a save still
+     in flight; leaving while one is asks first. */
+  useUnsavedChanges(saving);
 
   useEffect(() => {
     let active = true;
@@ -193,6 +197,27 @@ export function DashboardWidgets({
       void persist(next, "user");
       return next;
     });
+  };
+
+  /* §77 item 17 — the workspace default can be taken away, not only replaced. It
+     stays in the history below, so the version before the removal restores it. */
+  const removeDefault = async () => {
+    if (
+      !window.confirm(
+        "Remove the workspace default layout? Everyone without their own arrangement goes back to the built-in order. It stays in the history and can be restored.",
+      )
+    ) {
+      return;
+    }
+    const response = await fetch(`/api/dashboard-layout?surface=${surface}&scope=workspace`, { method: "DELETE" }).catch(
+      () => null,
+    );
+    const body = response ? ((await response.json().catch(() => ({}))) as { error?: string }) : {};
+    onNotify?.(
+      response?.ok
+        ? "The workspace default was removed; the built-in order applies to anyone without their own layout."
+        : body.error ?? "The workspace default could not be removed.",
+    );
   };
 
   const reset = async () => {
@@ -287,6 +312,11 @@ export function DashboardWidgets({
                 onClick={() => persist(effective, "workspace")}
               >
                 Save as the workspace default
+              </button>
+            )}
+            {canSetWorkspaceDefault && (
+              <button className="secondary-button" type="button" onClick={() => void removeDefault()}>
+                Remove the workspace default
               </button>
             )}
           </div>
