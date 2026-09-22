@@ -59,6 +59,7 @@ import {
   sites,
 } from "../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "./job-status-history";
+import { recordJobMilestones } from "./job-milestones";
 import {
   highestJobReference,
   jobReferenceWindowInconclusive,
@@ -922,6 +923,16 @@ export async function createSubmission(
     actorEmail: input.actor?.email ?? null,
     source: `created:${input.source}`,
     changes: statusChangesBetween(allocated.request.id, null, allocated.request),
+  });
+  /* Decision N — creation is not handling, so nothing is acknowledged here; a
+     job raised already naming a contractor (a planned visit) is assigned. */
+  await recordJobMilestones(db, {
+    organisationId: input.organisationId,
+    actorEmail: input.actor?.email ?? null,
+    source: `created:${input.source}`,
+    human: false,
+    handled: false,
+    changes: [{ requestId: allocated.request.id, before: null, after: allocated.request }],
   });
 
   return {

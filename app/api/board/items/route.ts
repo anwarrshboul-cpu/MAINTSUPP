@@ -9,6 +9,7 @@ import {
   maintenanceRequests,
 } from "../../../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "../../../lib/job-status-history";
+import { recordJobMilestones } from "../../../lib/job-milestones";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { isBoardNotFound, nextReference, resolveBoard } from "../../../lib/board-registry";
 import { dateDecorationValue } from "../../../lib/board-cell-values";
@@ -767,6 +768,16 @@ export async function PATCH(request: Request) {
         db, orgId, board.key, requestId, who, "changed",
         column.key, existing?.value ?? null, value,
       );
+      /* Decision N — a person editing one of the job's cells has handled it. */
+      await recordJobMilestones(db, {
+        organisationId: orgId,
+        actorEmail: actor.email,
+        source: "board.cell",
+        human: true,
+        handled: true,
+        changes: [{ requestId, before: null, after: null }],
+        request,
+      });
       /*
        * Named by column KEY for a system column and by id for a custom one —
        * the same handles the automation builder offers, so a rule on "Status"
@@ -962,6 +973,17 @@ export async function PATCH(request: Request) {
       actorEmail: actor.email,
       source: "board.bulk",
       changes: afterRows.flatMap((row) => statusChangesBetween(row.id, beforeRows.get(row.id), row)),
+    });
+    /* Decision N — a person's bulk edit handles every job it reached, and
+       assigns those it gave a person. */
+    await recordJobMilestones(db, {
+      organisationId: orgId,
+      actorEmail: actor.email,
+      source: "board.bulk",
+      human: true,
+      handled: true,
+      changes: afterRows.map((row) => ({ requestId: row.id, before: beforeRows.get(row.id) ?? null, after: row })),
+      request,
     });
 
     await dispatchAutomationEvents(

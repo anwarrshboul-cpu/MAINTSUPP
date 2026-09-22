@@ -7,6 +7,7 @@ import {
   maintenanceRequests,
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import { recordJobMilestones } from "../../lib/job-milestones";
 import {
   automationContext,
   dispatchAutomationEvents,
@@ -429,6 +430,17 @@ export async function POST(request: Request) {
     authorName: actor.displayName || actor.email,
     authorEmail: actor.email ?? null,
     body,
+  });
+  /* Decision N — posting an update on a job is a person handling it. A board
+     discussion id is not a job and matches no work order, so records nothing. */
+  await recordJobMilestones(db, {
+    organisationId: orgId,
+    actorEmail: actor.email ?? null,
+    source: "update.posted",
+    human: true,
+    handled: true,
+    changes: [{ requestId, before: null, after: null }],
+    request,
   });
 
   /*

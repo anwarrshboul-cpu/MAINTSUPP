@@ -224,6 +224,7 @@ import { WorkspaceEmailPanel } from "./views/workspace-email-panel";
 import { GlobalSearch } from "./global-search";
 import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
+import { JobMilestonesPanel } from "./job-milestones-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -8725,6 +8726,17 @@ function RequestDrawer({
 
           {/* The job's type, for a job on the Jobs board — the desktop drawer's only way to change it; see cells/job-type-cell.tsx. */}
           {isOnJobsBoard(request) ? <JobTypeDrawerField request={request} hidden={activeTab !== "columns"} onFieldsChange={onFieldsChange} onRequestChange={onRequestChange} onNotify={onNotify} /> : null}
+
+          {/* Decision N — acknowledged, assigned, attended; see job-milestones-panel.tsx. */}
+          {isOnJobsBoard(request) ? (
+            <JobMilestonesPanel
+              requestId={request.id}
+              hidden={activeTab !== "columns"}
+              refreshKey={`${request.stage}|${request.status}|${request.assignee ?? ""}|${request.contractor ?? ""}`}
+              onRecorded={() => void loadActivities()}
+              onNotify={onNotify}
+            />
+          ) : null}
 
           <section
             className={`drawer-section desktop-request-columns${
