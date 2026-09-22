@@ -244,15 +244,19 @@ test("BUG 4: the type gate is the SERVER's inline allowlist, not a guess", async
 
 test("BUG 4: a missing or refused picture is an icon, never a broken image", async () => {
   const thumb = stripComments(await read(THUMB));
-  assert.match(thumb, /onError=\{\(\) => setFailed\(true\)\}/);
+  /* Re-pointed for the lint-zero pass: the component now remembers WHICH `src`
+     failed rather than whether one did (the reset effect was a setState in an
+     effect, which the React Compiler rule refuses). Same two contracts. */
+  assert.match(thumb, /onError=\{\(\) => setFailedSrc\(src\)\}/);
   assert.match(thumb, /if \(!src \|\| failed\) \{/, "no src and a failed load take one path");
   assert.match(thumb, /<Icon name=\{fallbackIcon\} size=\{fallbackSize\} \/>/);
   /*
    * The register pages and re-sorts in place, so React reuses this node for a
    * different row. Without a reset, one denied picture poisons every document
-   * that later lands on the same node.
+   * that later lands on the same node — so `failed` is true only for the very
+   * `src` that failed, and a new document on the node starts clean.
    */
-  assert.match(thumb, /useEffect\(\(\) => setFailed\(false\), \[src\]\)/);
+  assert.match(thumb, /const failed = failedSrc !== null && failedSrc === src;/);
 });
 
 test("BUG 4: the picture costs a thumbnail, not a photograph", async () => {

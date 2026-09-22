@@ -1250,19 +1250,15 @@ export function LiveMaintenanceBoard({
   const visibilityKeyFor = (entry: BoardDisplayColumn) =>
     entry.kind === "system" ? entry.key : `custom:${entry.column.id}`;
 
-  /*
-   * Seeded from the board payload, and re-seeded whenever the columns reload —
-   * a board switch or a refresh brings its own visibility with it.
-   */
-  useEffect(() => {
+  /* Seeded from the board payload, re-seeded whenever the columns reload (a board
+     switch or refresh brings its own visibility) — during render, not an effect. */
+  const [seededColumns, setSeededColumns] = useState<BoardDisplayColumn[] | null>(null);
+  if (seededColumns !== allBoardColumns) {
+    setSeededColumns(allBoardColumns);
     setHiddenColumns(
-      new Set(
-        allBoardColumns
-          .filter((entry) => entry.column.visible === false)
-          .map(visibilityKeyFor),
-      ),
+      new Set(allBoardColumns.filter((entry) => entry.column.visible === false).map(visibilityKeyFor)),
     );
-  }, [allBoardColumns]);
+  }
 
   /*
    * The saved sort and filter, read back off the columns that carry them.

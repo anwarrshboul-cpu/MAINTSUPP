@@ -695,7 +695,8 @@ export function FileHoverPreview({
    * TILES never need it: the payload's preview entries already carry id,
    * name, type and size, which is everything a card shows.
    */
-  const [allFiles, setAllFiles] = useState<AttachmentRecord[] | null>(null);
+  /* The overflow list, with the strip it was fetched for — see `stripSignature`. */
+  const [allFilesEntry, setAllFilesEntry] = useState<{ signature: string; files: AttachmentRecord[] } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   /*
    * The per-file "…" menu — monday's. At most one is open, it belongs to ONE
@@ -715,6 +716,11 @@ export function FileHoverPreview({
     left: number;
     top: number;
   } | null>(null);
+  /* The "…" menu never outlives the surface it was opened from: every close is both. */
+  const dismiss = () => {
+    setHover(null);
+    setMenu(null);
+  };
   /* The strip's measured width — null until the first layout. */
   const [stripWidth, setStripWidth] = useState<number | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
@@ -859,7 +865,7 @@ export function FileHoverPreview({
   };
   const scheduleClose = () => {
     cancelClose();
-    closeTimer.current = window.setTimeout(() => setHover(null), 140);
+    closeTimer.current = window.setTimeout(dismiss, 140);
   };
   useEffect(() => cancelClose, []);
 
@@ -874,10 +880,6 @@ export function FileHoverPreview({
     return () => window.removeEventListener("scroll", close, { capture: true });
   }, [hover, menu]);
 
-  /* The "…" menu never outlives the surface it was opened from. */
-  useEffect(() => {
-    if (!hover) setMenu(null);
-  }, [hover]);
 
   /*
    * Touch has no pointerleave, and a click-away should dismiss the menu on
@@ -907,9 +909,7 @@ export function FileHoverPreview({
    * no-reload upload and delete flows.
    */
   const stripSignature = `${count}:${preview.map((file) => file.id).join(",")}`;
-  useEffect(() => {
-    setAllFiles(null);
-  }, [stripSignature]);
+  const allFiles = allFilesEntry?.signature === stripSignature ? allFilesEntry.files : null;
 
   /* Fetch the full list only when the overflow list actually opens. */
   useEffect(() => {
@@ -920,15 +920,15 @@ export function FileHoverPreview({
     fetch(`/api/files?requestId=${encodeURIComponent(requestId)}${kindQuery}${columnQuery}`)
       .then((response) => response.json())
       .then((payload: { files?: AttachmentRecord[] }) => {
-        if (active) setAllFiles([...(payload.files ?? [])].sort(stripOrder));
+        if (active) setAllFilesEntry({ signature: stripSignature, files: [...(payload.files ?? [])].sort(stripOrder) });
       })
       .catch(() => {
-        if (active) setAllFiles([]);
+        if (active) setAllFilesEntry({ signature: stripSignature, files: [] });
       });
     return () => {
       active = false;
     };
-  }, [allFiles, columnId, count, hover, kind, requestId]);
+  }, [allFiles, columnId, count, hover, kind, requestId, stripSignature]);
 
   /*
    * The three real actions, each against the EXACT file it was invoked on.
@@ -966,10 +966,10 @@ export function FileHoverPreview({
       .then((response) => {
         if (!response.ok) throw new Error();
         /* The list repaints now; the strip repaints on the board's refetch. */
-        setAllFiles((current) =>
-          current ? current.filter((entry) => entry.id !== file.id) : current,
+        setAllFilesEntry((current) =>
+          current ? { ...current, files: current.files.filter((entry) => entry.id !== file.id) } : current,
         );
-        if (hover?.target === "file") setHover(null);
+        if (hover?.target === "file") dismiss();
         window.dispatchEvent(new Event("maintsupp:refresh-board"));
       })
       .catch(() => setActionError("The file could not be deleted."));
@@ -1030,7 +1030,7 @@ export function FileHoverPreview({
         onClick={() => {
           // A tap that opens the panel must not leave the desktop hover
           // surfaces hanging over it.
-          setHover(null);
+          dismiss();
           onOpen();
         }}
       >

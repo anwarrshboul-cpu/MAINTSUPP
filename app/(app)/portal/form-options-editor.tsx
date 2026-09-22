@@ -130,11 +130,6 @@ export function FormQuestionOptionsEditor({
     }
   }, [kind.kind, kind.kind === "registry" ? kind.setKey : ""]);
 
-  React.useEffect(() => {
-    if (expanded && kind.kind !== "plain" && siteRows === null && registryRows === null) {
-      void loadCanonical();
-    }
-  }, [expanded, kind.kind, loadCanonical, registryRows, siteRows]);
 
   /*
    * What the editor lists: the canonical options in the form's own order, with
@@ -441,7 +436,14 @@ export function FormQuestionOptionsEditor({
         type="button"
         className="form-options__toggle"
         aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={() => {
+          /* The canonical options load when the editor OPENS — an event, so no
+             effect has to watch `expanded` and set state from inside itself. */
+          if (!expanded && kind.kind !== "plain" && siteRows === null && registryRows === null) {
+            void loadCanonical();
+          }
+          setExpanded((current) => !current);
+        }}
       >
         <Icon name="list" size={13} />
         Options
