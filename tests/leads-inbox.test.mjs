@@ -435,7 +435,8 @@ test("the console lists the inbox because the inbox now has a server side", asyn
      `/api/site-navigation`.
      Re-pointed 10 → 11 for Website media (decision K), which arrived with
      `/api/cms-media` and its upload route. */
-  assert.equal(PLATFORM_SECTIONS.length, 11);
+  /* TWELVE since decision L added Website copy with `/api/site-content`. */
+  assert.equal(PLATFORM_SECTIONS.length, 12);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the

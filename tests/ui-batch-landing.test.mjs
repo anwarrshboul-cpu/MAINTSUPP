@@ -387,8 +387,20 @@ test("Contact Us is in both navs, and both send you to the section the footer al
   assert.match(finalCta, /className="wrap finalcta__inner" id="contact"/, "#contact names the same place");
   /* The copy has to earn the nav item: a reader who clicked Contact Us must
      not land under a heading that only offers a portfolio review. */
-  assert.match(finalCta, /Contact us or book a portfolio review/);
-  assert.match(finalCta, /Or use the\s+same form to tell us what you need\./);
+  /* RE-POINTED (decision L): the heading is `HOME_COPY.finalCta.heading` now. The
+     rule is unchanged and is checked in both halves — the words in the file that
+     owns them, and the section drawing them rather than a heading of its own. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /Contact us or book a portfolio review/,
+  );
+  assert.match(finalCta, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "drawn by the section");
+  /* RE-POINTED (decision L): the line beneath the heading is
+     `HOME_COPY.finalCta.lede`, and the section draws it (asserted just above). */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /Or use the same form to tell us what you need\./,
+  );
 });
 
 test("the pricing band buttons do not move under the thumb that pressed them", async () => {

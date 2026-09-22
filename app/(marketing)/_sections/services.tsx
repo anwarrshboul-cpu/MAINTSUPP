@@ -1,4 +1,5 @@
 import { PhotoSlot } from "./photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION 4 — What we offer. A merge of two sections into one.
@@ -118,13 +119,13 @@ const TRADES = [
   { slot: "trade-fabric", label: "General repairs", glyph: P.brush, c1: "#FDBA74", c2: "#9A3412" },
 ] as const;
 
-export function Services() {
+export function Services({ copy = HOME_COPY.services }: { copy?: HomeCopy["services"] }) {
   return (
     <section className="section" id="services">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">What we offer</p>
-          <h2 className="h2">If it breaks at a commercial site, we coordinate the repair.</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
         </div>
 
         {/*
@@ -149,7 +150,7 @@ export function Services() {
 
         {/* The standalone trades section, reduced to the one row it was. */}
         <div className="faults reveal">
-          <h3 className="faults__title">Faults we handle most</h3>
+          <h3 className="faults__title">{copy.faultsHeading}</h3>
           <ul className="faults__row">
             {TRADES.map((trade) => (
               <li className="tile tile--static" key={trade.slot}>

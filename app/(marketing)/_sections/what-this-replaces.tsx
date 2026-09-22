@@ -1,3 +1,4 @@
+import { HOME_COPY, type HomeCopy } from "./copy";
 /**
  * SECTION — What this replaces. New in Homepage V3.
  *
@@ -94,17 +95,14 @@ const REPLACES: ReadonlyArray<{ icon: string; gone: string; instead: string }> =
   },
 ];
 
-export function WhatThisReplaces() {
+export function WhatThisReplaces({ copy = HOME_COPY.replaces }: { copy?: HomeCopy["replaces"] }) {
   return (
     <section className="section" id="replaces">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">What this replaces</p>
-          <h2 className="h2">One coordination layer instead of six half-jobs.</h2>
-          <p className="lede">
-            Maintsupp is not another system to keep up to date alongside the ones you
-            already have. It takes over the work those were standing in for.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
+          <p className="lede">{copy.lede}</p>
         </div>
 
         {/*

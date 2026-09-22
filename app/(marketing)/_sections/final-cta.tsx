@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { track } from "./analytics";
 import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION 10 — Trust strip, then the final CTA.
@@ -197,7 +198,7 @@ export function TrustStrip() {
 
 /* ── the CTA ──────────────────────────────────────────────────────────────── */
 
-export function FinalCta() {
+export function FinalCta({ copy = HOME_COPY.finalCta }: { copy?: HomeCopy["finalCta"] }) {
   const formRef = useRef<HTMLFormElement>(null);
 
   const [error, setError] = useState<FieldError | null>(null);
@@ -359,14 +360,9 @@ export function FinalCta() {
       */}
       <div className="wrap finalcta__inner" id="contact">
         <div>
-          <p className="eyebrow">Contact us or book a portfolio review</p>
-          <h2 className="h2">
-            Not sure where your maintenance is leaking time and money?
-          </h2>
-          <p className="lede">
-            Book a free portfolio review — 30 minutes, no obligation. Or use the
-            same form to tell us what you need.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
+          <p className="lede">{copy.lede}</p>
           <ul className="ticks" style={{ marginTop: 22 }}>
             {REVIEW_POINTS.map((point) => (
               <li key={point}>
@@ -400,10 +396,7 @@ export function FinalCta() {
               Book a Portfolio Review
             </a>
           </p>
-          <p className="note">
-            Best suited to multi-site commercial operators seeking ongoing coordination
-            rather than one-off domestic repairs.
-          </p>
+          <p className="note">{copy.note}</p>
         </div>
 
         <form className="stepform" id="leadForm" ref={formRef} noValidate onSubmit={handleSubmit}>

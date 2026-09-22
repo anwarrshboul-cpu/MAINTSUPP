@@ -37,6 +37,10 @@ export const VERSION_SUBJECTS = {
   /* Decision J — the public website's header menu and footer links. One of
      them, installation-wide, keyed "public". */
   site_navigation: { label: "Website navigation", scope: "installation", capability: "platform", keys: ["public"] },
+  /* Decision L — the copy of the pages that ship with the site, held as
+     overrides on the words in `app/(marketing)/_sections/copy.ts`. One of them,
+     installation-wide, keyed "public". */
+  site_content: { label: "Website page copy", scope: "installation", capability: "platform", keys: ["public"] },
 } as const satisfies Record<string, VersionSubjectDefinition>;
 
 export type VersionSubject = keyof typeof VERSION_SUBJECTS;
@@ -93,6 +97,28 @@ type SiteNavigationShape = {
 
 export function siteNavigationSnapshot(navigation: SiteNavigationShape | null): SiteNavigationSnapshot {
   return navigation ? { present: true, navigation } : { present: false, navigation: null };
+}
+
+/**
+ * Decision L — the built-in pages' copy: the whole stored document of OVERRIDES,
+ * or `present: false` for "no row", which is every page exactly as it ships (what
+ * a reset leaves behind). Typed loosely here for the reason above;
+ * `app/lib/site-content.ts` owns the shape and validates a restore again.
+ */
+export type SiteContentSnapshot = { present: boolean; content: SiteContentShape | null };
+type SiteContentShape = {
+  pages: Record<
+    string,
+    {
+      seo?: Record<string, string>;
+      sections?: Record<string, { hidden?: boolean; fields?: Record<string, unknown> }>;
+      order?: string[];
+    }
+  >;
+};
+
+export function siteContentSnapshot(content: SiteContentShape | null): SiteContentSnapshot {
+  return content ? { present: true, content } : { present: false, content: null };
 }
 
 /** §38b — exactly what the page editor saves (`PageInput`), so a restore is that save again. */
@@ -197,6 +223,7 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
     return `Saved the default sidebar: ${state.items.length} item${state.items.length === 1 ? "" : "s"}, ${state.locked.length} locked.`;
   }
   if (subject === "site_navigation") return summariseNavigation(before as SiteNavigationSnapshot | null, after as SiteNavigationSnapshot);
+  if (subject === "site_content") return summariseContent(before as SiteContentSnapshot | null, after as SiteContentSnapshot);
   if (subject === "site_page") {
     const from = before as PageSnapshot | null;
     const to = after as PageSnapshot;
@@ -213,6 +240,72 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
   if (!state.present || state.items.length === 0) return `The built-in ${state.surface} layout.`;
   const hidden = state.items.filter((item) => (item as { hidden?: unknown })?.hidden === true).length;
   return `Saved the default ${state.surface} dashboard: ${state.items.length} widget${state.items.length === 1 ? "" : "s"}${hidden ? `, ${hidden} hidden` : ""}.`;
+}
+
+/**
+ * A copy save in one line, by the names the document uses: which fields were
+ * edited, which sections were hidden or shown again, whether the homepage was
+ * reordered, and which pages' search-engine text changed.
+ *
+ * "home: hero.titleLead, pricing.heading, title; hid caseStudy; reordered. faqs:
+ * questions.items." Field KEYS rather than the editor's labels, because this
+ * module imports nothing — the labels live in `app/lib/site-content.ts`, and a
+ * summary that had to be kept in step with them would go stale in silence.
+ */
+function summariseContent(before: SiteContentSnapshot | null, after: SiteContentSnapshot): string {
+  if (!after.present || !after.content) return "Reset to the words the site ships with.";
+  const fieldsOf = (snapshot: SiteContentSnapshot | null) => {
+    const out = new Map<string, string>();
+    if (!snapshot?.present || !snapshot.content) return out;
+    for (const [page, body] of Object.entries(snapshot.content.pages ?? {})) {
+      for (const [name, value] of Object.entries(body.seo ?? {})) out.set(`${page}\u0000${name}`, String(value));
+      for (const [section, state] of Object.entries(body.sections ?? {})) {
+        if (state.hidden === true) out.set(`${page}\u0000hidden:${section}`, "hidden");
+        for (const [field, value] of Object.entries(state.fields ?? {})) {
+          out.set(`${page}\u0000${section}.${field}`, JSON.stringify(value));
+        }
+      }
+      if (body.order?.length) out.set(`${page}\u0000order`, body.order.join(","));
+    }
+    return out;
+  };
+  const now = fieldsOf(after);
+  const was = fieldsOf(before);
+  const perPage = new Map<string, { edited: string[]; hid: string[]; showed: string[]; reordered: boolean }>();
+  const entryFor = (page: string) => {
+    const found = perPage.get(page) ?? { edited: [], hid: [], showed: [], reordered: false };
+    perPage.set(page, found);
+    return found;
+  };
+  for (const [key, value] of now) {
+    if (was.get(key) === value) continue;
+    const [page, name] = key.split("\u0000");
+    const entry = entryFor(page);
+    if (name.startsWith("hidden:")) entry.hid.push(name.slice(7));
+    else if (name === "order") entry.reordered = true;
+    else entry.edited.push(name);
+  }
+  for (const key of was.keys()) {
+    if (now.has(key)) continue;
+    const [page, name] = key.split("\u0000");
+    const entry = entryFor(page);
+    if (name.startsWith("hidden:")) entry.showed.push(name.slice(7));
+    else if (name === "order") entry.reordered = true;
+    else entry.edited.push(`${name} (back to the shipped words)`);
+  }
+  const pages = [...perPage]
+    .map(([page, entry]) => {
+      const parts: string[] = [];
+      if (entry.edited.length) parts.push(listed(entry.edited.sort()));
+      if (entry.hid.length) parts.push(`hid ${listed(entry.hid.sort())}`);
+      if (entry.showed.length) parts.push(`showed ${listed(entry.showed.sort())}`);
+      if (entry.reordered) parts.push("reordered the sections");
+      return `${page}: ${parts.join("; ")}`;
+    })
+    .sort();
+  const total = now.size;
+  if (!pages.length) return `Saved with nothing changed — ${total} override${total === 1 ? "" : "s"} in force.`;
+  return `${pages.join(". ")}. ${total} override${total === 1 ? "" : "s"} in force.`;
 }
 
 /**
@@ -285,6 +378,8 @@ export function restoreRequest(subject: VersionSubject, key: string, version: nu
       return { url: "/api/site-pages", body: { slug: key, restoreVersion: version } };
     case "site_navigation":
       return { url: "/api/site-navigation", body: { restoreVersion: version } };
+    case "site_content":
+      return { url: "/api/site-content", body: { restoreVersion: version } };
   }
 }
 

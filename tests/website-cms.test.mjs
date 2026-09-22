@@ -632,7 +632,8 @@ test("the console lists the screen because the screen has an API", async () => {
      `/api/site-navigation`.
      Re-pointed 10 → 11 for Website media (decision K), which arrived with
      `/api/cms-media` and its upload route. */
-  assert.equal(PLATFORM_SECTIONS.length, 11);
+  /* TWELVE since decision L added Website copy with `/api/site-content`. */
+  assert.equal(PLATFORM_SECTIONS.length, 12);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -663,12 +664,16 @@ test("the console lists the screen because the screen has an API", async () => {
    *
    * And a sixth: `media` (decision K), the same reason again — the website's own
    * files, in a bucket of their own, belonging to no workspace.
+   *
+   * And a seventh: `copy` (decision L) — the words on the pages that ship with
+   * the site. Same reason a third time, and the list is asserted rather than
+   * counted so that adding one is a deliberate act.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "backups", "leads", "media", "navigation", "pages"],
-    "only the six platform-owned surfaces answer to no capability",
+    ["applications", "backups", "copy", "leads", "media", "navigation", "pages"],
+    "only the seven platform-owned surfaces answer to no capability — Website copy joined them with decision L",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

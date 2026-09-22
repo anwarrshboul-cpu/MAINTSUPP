@@ -1,11 +1,29 @@
 import { organization, website, jsonLd } from "./_components/structured-data";
 import type { Metadata } from "next";
+import { Fragment, type ReactNode } from "react";
+import { readPublicSiteContent, type PublicSiteContent } from "../lib/site-content-public.ts";
+import type { HomeSectionKey } from "../lib/site-content.ts";
 
 /*
- * FOURTEEN SECTIONS, IN THIS ORDER, EACH EXACTLY ONCE.
+ * FOURTEEN SECTIONS, EACH EXACTLY ONCE — AND THE ORDER IS DATA NOW.
  *
- * Was eleven. Homepage V3 is a DELTA on the v2 order, not another rebuild:
- * every section that was here is still here, three are added, and one moved.
+ * Decision L moved the list itself to `HOME_SECTION_ORDER` in
+ * `app/lib/site-content.ts`, which is where the fourteen and their shipped
+ * sequence are declared and where the tests read them. This file holds the other
+ * half: which component draws each of them. The page renders
+ * `content.home.sections` — the shipped order unless MAINTSUPP staff have saved
+ * another, with any hidden section left out — so the argument below is still the
+ * default, and still what a visitor sees until someone deliberately changes it.
+ *
+ * Three sections cannot be moved or hidden, for reasons written beside them in
+ * the registry: the hero carries the H1, the contact panel is the only form that
+ * asks who you are, and Report a Job is the store manager's door whose `#report`
+ * anchor is a LOCKED navigation link. The eleven between them may be reordered,
+ * and hidden while nothing in the header or footer points at them.
+ *
+ * Was eleven sections. Homepage V3 is a DELTA on the v2 order, not another
+ * rebuild: every section that was here is still here, three are added, and one
+ * moved.
  *
  *   ADDED  WhatThisReplaces  — what the reader stops paying for and stops
  *                              doing; the buying question the symptom-level
@@ -13,8 +31,8 @@ import type { Metadata } from "next";
  *   ADDED  ContractorChoice  — "your contractors or ours", sitting between the
  *                              process and the price because that is where the
  *                              objection lands
- *   ADDED  Faq               — back on the homepage, sharing `content.ts` with
- *                              /faqs rather than copying it (see faq.tsx)
+ *   ADDED  Faq               — back on the homepage, sharing its questions with
+ *                              /faqs rather than copying them (see faq.tsx)
  *   MOVED  ReportJob         — from fourth to LAST, directly above the footer
  *
  * WHY REPORT A JOB IS LAST. It is not a conversion step in the sales argument
@@ -30,8 +48,7 @@ import type { Metadata } from "next";
  * problem, services, an early CTA band, how it works, portal, packages,
  * calculator, sectors, evidence, trust, FAQ and the final CTA. Four of those
  * described the same seven-stage process in four different shapes, and two more
- * asked for the same booking. The list below IS the contract — a test asserts
- * these fourteen and only these fourteen.
+ * asked for the same booking.
  *
  * WHAT WENT THEN, and why it is not simply hiding somewhere:
  *   proof       — stat tiles carrying numbers nobody could produce on request
@@ -66,61 +83,76 @@ import { Portal } from "./_sections/portal";
 import { Faq } from "./_sections/faq";
 import { FinalCta, TrustStrip } from "./_sections/final-cta";
 
-export const metadata: Metadata = {
-  title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
-  description:
-    "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio. Vetted UK contractor network, verified close-outs, per-store pricing.",
-  alternates: { canonical: "https://maintsupp.com/" },
-  openGraph: {
-    title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
-    description:
-      "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio.",
-    url: "https://maintsupp.com/",
-    siteName: "Maintsupp",
-    locale: "en_GB",
-    type: "website",
-  },
+/**
+ * The title and the description staff have saved, or the ones the site ships
+ * with (`SEO_COPY.home` in `_sections/copy.ts`) — resolved by the same read the
+ * page body uses, so the two cannot disagree.
+ *
+ * EVERYTHING ELSE HERE IS CODE AND STAYS CODE: the canonical (this page is
+ * `https://maintsupp.com/`, and four pages once told Google they were this one —
+ * see `tests/marketing-canonicals.test.mjs`), and the OpenGraph url, siteName,
+ * locale and type. A console that could edit those could take the site out of the
+ * index.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { home } = await readPublicSiteContent();
+  return {
+    title: home.seo.title,
+    description: home.seo.description,
+    alternates: { canonical: "https://maintsupp.com/" },
+    openGraph: {
+      title: home.seo.title,
+      /* The shorter line, which is what a shared link shows. */
+      description: home.seo.socialDescription,
+      url: "https://maintsupp.com/",
+      siteName: "Maintsupp",
+      locale: "en_GB",
+      type: "website",
+    },
+  };
+}
+
+/**
+ * WHICH COMPONENT DRAWS EACH SECTION. One entry per key in
+ * `HOME_SECTION_ORDER`, and TypeScript requires the record to be complete — so a
+ * section added to the registry cannot be forgotten here, and one removed from it
+ * cannot be left behind.
+ *
+ * `finalCta` is two components — a dark full-bleed band and the form beneath it —
+ * which is why there are fourteen sections and fifteen components. They are one
+ * entry because they are one decision: the band is the form's own heading.
+ */
+const SECTIONS: Record<HomeSectionKey, (content: PublicSiteContent) => ReactNode> = {
+  hero: ({ home, heroImage }) => <Hero copy={home.copy.hero} image={heroImage} />,
+  whoWeHelp: ({ home }) => <WhoWeHelp copy={home.copy.whoWeHelp} />,
+  services: ({ home }) => <Services copy={home.copy.services} />,
+  problem: ({ home }) => <Problem copy={home.copy.problem} />,
+  replaces: ({ home }) => <WhatThisReplaces copy={home.copy.replaces} />,
+  how: ({ home }) => <HowItWorks copy={home.copy.how} />,
+  yourContractors: ({ home }) => <ContractorChoice copy={home.copy.yourContractors} />,
+  pricing: ({ home }) => <Pricing copy={home.copy.pricing} />,
+  caseStudy: ({ home }) => <CaseStudy copy={home.copy.caseStudy} />,
+  founder: ({ home }) => <Founder copy={home.copy.founder} />,
+  portal: ({ home }) => <Portal copy={home.copy.portal} />,
+  /* The questions are the FAQ page's list, so the accordion here and the page at
+     /faqs cannot come to answer the same question differently. */
+  faq: ({ home, faqs }) => <Faq copy={home.copy.faq} items={faqs.questions} />,
+  finalCta: ({ home }) => (
+    <>
+      <TrustStrip />
+      <FinalCta copy={home.copy.finalCta} />
+    </>
+  ),
+  reportJob: ({ home }) => <ReportJob copy={home.copy.reportJob} />,
 };
 
-export default function HomePage() {
+export default async function HomePage() {
+  const content = await readPublicSiteContent();
   return (
     <main id="top">
-      <Hero />
-      <WhoWeHelp />
-      <Services />
-      <Problem />
-      {/* Straight after the problem, and before the process: the reader has
-          just seen what goes wrong, so this is the moment they will accept a
-          list of what stops being their job. */}
-      <WhatThisReplaces />
-      <HowItWorks />
-      {/* Between the process and the price. "Do I have to change my
-          contractors?" is the question a reader asks in exactly that gap, and
-          it used to be answered only in the eighth FAQ on another page. */}
-      <ContractorChoice />
-      <Pricing />
-      <CaseStudy />
-      <Founder />
-      <Portal />
-      {/* The questions, after every argument that raises them and before the
-          form that asks for a meeting — sharing `content.ts` with /faqs. */}
-      <Faq />
-      {/* The trust strip and the CTA panel are ONE section in two components,
-          because one is a dark full-bleed band and the other is the form
-          beneath it. */}
-      <TrustStrip />
-      <FinalCta />
-      {/* LAST, and directly above the footer — the layout renders SiteFooter
-          straight after {children} and nothing sits between the two. (Written
-          as a name rather than as JSX on purpose: the tests that assert this
-          page's section order read it by matching self-closing tags in this
-          file, and a component named inside a comment would be counted as one
-          of them.) It is the store manager's door rather than a step in the
-          sales argument — see the note at the top of this file. The #report
-          anchor travels with the section, so the utility bar, the header, the
-          hero's secondary button and the footer's "Report a Job" all still
-          land on it without any of them changing. */}
-      <ReportJob />
+      {content.home.sections.map((key) => (
+        <Fragment key={key}>{SECTIONS[key](content)}</Fragment>
+      ))}
 
       {/* The homepage owns the business and WebSite graph. FAQPage stays on
           /faqs, where the shared questions already have their canonical home. */}
