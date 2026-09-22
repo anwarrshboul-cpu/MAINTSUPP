@@ -15,7 +15,9 @@ import loginFormCss from "./login-form.css?url";
 // A sign-in page has nothing to offer a search engine and everything to lose
 // from being one: indexed login forms are what phishing kits clone.
 export const metadata: Metadata = {
-  title: "Sign in | MAINTSUPP",
+  /* The root layout's template adds " | MAINTSUPP"; spelling it here as well
+     made the tab read "Sign in | MAINTSUPP | MAINTSUPP". */
+  title: "Sign in",
   robots: { index: false, follow: false, nocache: true },
 };
 

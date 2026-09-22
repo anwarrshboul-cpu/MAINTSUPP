@@ -104,7 +104,6 @@ async function readConfig(name: NarrativeConfigKey): Promise<string> {
   if (typeof fromProcess === "string" && fromProcess.trim()) return fromProcess.trim();
 
   try {
-    // @ts-expect-error — Workers runtime module, resolved at run time only.
     const { env } = await import("cloudflare:workers");
     const bag = env as unknown as Record<string, unknown>;
     const value =

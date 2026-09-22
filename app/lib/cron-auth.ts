@@ -110,7 +110,6 @@ export async function resolveCronSecret(): Promise<string> {
       ?.CRON_SECRET;
   if (fromProcess) return fromProcess;
   try {
-    // @ts-expect-error — Workers runtime module, resolved at run time only.
     const { env } = await import("cloudflare:workers");
     const value = (env as unknown as Record<string, unknown>).CRON_SECRET;
     return typeof value === "string" ? value : "";

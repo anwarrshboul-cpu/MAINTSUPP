@@ -140,7 +140,7 @@ test("W2 the migration adds a column and an index and rewrites nothing", async (
 });
 
 test("W2 one function turns a scope into a predicate, and it handles NULL", async () => {
-  const module = await source("app/lib/register-scope.ts");
+  const moduleSource = await source("app/lib/register-scope.ts");
   /*
    * `x = NULL` is never true in either dialect. A hand-rolled `eq(column,
    * scope)` therefore compiles, runs, matches nothing, and reads an instance
@@ -148,35 +148,35 @@ test("W2 one function turns a scope into a predicate, and it handles NULL", asyn
    * one place allowed to make the choice.
    */
   assert.match(
-    codeOnly(module),
+    codeOnly(moduleSource),
     /export function registerScopeFilter\([\s\S]{0,400}?isNull\(column\)[\s\S]{0,200}?eq\(column, scope\)/,
     "registerScopeFilter must answer IS NULL for the canonical register and = key for an instance",
   );
   assert.match(
-    codeOnly(module),
+    codeOnly(moduleSource),
     /export const CANONICAL_REGISTER: RegisterScope = null;/,
     "the canonical register is NULL — see the module header for why a sentinel would need a backfill",
   );
 });
 
 test("W2 the scope is resolved from the session and the database, never from a string", async () => {
-  const module = codeOnly(await source("app/lib/register-scope.ts"));
+  const moduleSource = codeOnly(await source("app/lib/register-scope.ts"));
 
   /* The section is looked up inside the caller's own organisation... */
   assert.match(
-    module,
+    moduleSource,
     /\.from\(workspaceSections\)[\s\S]{0,400}?eq\(workspaceSections\.organisationId, organisationId\)/,
     "the section lookup must be organisation-scoped — the org comes from the session, not the request",
   );
   /* ...and the value handed back is the one the DATABASE returned for a board
      row in that organisation, not the string that arrived in the URL. */
   assert.match(
-    module,
+    moduleSource,
     /\.from\(boards\)[\s\S]{0,400}?eq\(boards\.organisationId, organisationId\)/,
     "the board must be read back inside the caller's organisation",
   );
   assert.match(
-    module,
+    moduleSource,
     /return \{ ok: true, scope: board\.key, sectionKey: section\.key \};/,
     "the scope must be `board.key` as the database returned it — a route string is a lookup key, never the scope",
   );
@@ -186,11 +186,11 @@ test("W2 the scope is resolved from the session and the database, never from a s
    * for boards: `boardIdFrom` used to answer every unknown key with the job
    * board. A section key that names nothing must refuse.
    */
-  assert.match(module, /if \(!section\) \{[\s\S]{0,200}?ok: false/, "an unknown section must refuse");
-  assert.match(module, /if \(section\.archivedAt\) \{[\s\S]{0,200}?ok: false/, "an archived section must refuse");
-  assert.match(module, /if \(!board\) \{[\s\S]{0,200}?ok: false/, "a section whose board is gone must refuse");
+  assert.match(moduleSource, /if \(!section\) \{[\s\S]{0,200}?ok: false/, "an unknown section must refuse");
+  assert.match(moduleSource, /if \(section\.archivedAt\) \{[\s\S]{0,200}?ok: false/, "an archived section must refuse");
+  assert.match(moduleSource, /if \(!board\) \{[\s\S]{0,200}?ok: false/, "a section whose board is gone must refuse");
   assert.match(
-    module,
+    moduleSource,
     /if \(section\.template !== register\)/,
     "a section built from a different template must refuse — a Jobs section has no Sites register",
   );
@@ -220,9 +220,9 @@ test("W2 the scope is resolved from the session and the database, never from a s
    * fails the moment resolution consults a name. `listRegisterInstances` is
    * pinned separately below: it may READ a label, and it may not FILTER on one.
    */
-  const resolution = module.slice(
-    module.indexOf("export async function resolveRegisterScope("),
-    module.indexOf("export function scopeRefusal("),
+  const resolution = moduleSource.slice(
+    moduleSource.indexOf("export async function resolveRegisterScope("),
+    moduleSource.indexOf("export function scopeRefusal("),
   );
   assert.ok(
     resolution.length > 0 && resolution.includes("workspaceSections"),
@@ -497,7 +497,7 @@ test("W2 the site resolver is scoped, so the same name in two registers is not a
 });
 
 test("W2 a job resolves its contractor inside one roster", async () => {
-  const module = codeOnly(await source("app/lib/contractor-reference.ts"));
+  const moduleSource = codeOnly(await source("app/lib/contractor-reference.ts"));
   /*
    * THE BLOCKER `SECTION_TEMPLATES` NAMES. The predicate was organisation-wide,
    * so a contractor added to an instance under a name the canonical roster
@@ -507,22 +507,22 @@ test("W2 a job resolves its contractor inside one roster", async () => {
    * with no code change and no error anywhere.
    */
   assert.match(
-    module,
+    moduleSource,
     /\.from\(contractors\)[\s\S]{0,400}?registerScopeFilter\(contractors\.boardId, scope\)/,
     "resolveContractorLink must search one roster",
   );
   assert.match(
-    module,
+    moduleSource,
     /scope: RegisterScope = CANONICAL_REGISTER,\s*\n\s*\): Promise<ContractorLink>/,
     "and default to the canonical roster, so a job on the job board links exactly as it did before",
   );
   /* The count-based guard the backfill in db/init.ts already states. */
-  assert.match(module, /\.limit\(2\);/, "two matches must still be distinguishable from one");
-  assert.match(module, /reason: rows\.length === 0 \? "unknown" : "ambiguous"/, "and still refuse to guess");
+  assert.match(moduleSource, /\.limit\(2\);/, "two matches must still be distinguishable from one");
+  assert.match(moduleSource, /reason: rows\.length === 0 \? "unknown" : "ambiguous"/, "and still refuse to guess");
 });
 
 test("W2 a contractor name is refused per register, not across the workspace", async () => {
-  const module = codeOnly(await source("app/lib/contractor-repository.ts"));
+  const moduleSource = codeOnly(await source("app/lib/contractor-repository.ts"));
   /*
    * The duplicate-name refusal exists because name is the join key for job
    * attribution. That argument is about ONE roster: once the resolver searches
@@ -531,12 +531,12 @@ test("W2 a contractor name is refused per register, not across the workspace", a
    * stopped being dangerous.
    */
   assert.match(
-    module,
+    moduleSource,
     /export async function contractorNameHolder\([\s\S]{0,900}?registerScopeFilter\(contractors\.boardId, scope\)/,
     "the name-collision check must be per register",
   );
   assert.match(
-    module,
+    moduleSource,
     /sql`lower\(trim\(\$\{contractors\.name\}\)\) = lower\(trim\(\$\{text\}\)\)`/,
     "folded by the DATABASE on both sides, as resolveContractorLink does it — JS and SQL disagree on non-ASCII names",
   );

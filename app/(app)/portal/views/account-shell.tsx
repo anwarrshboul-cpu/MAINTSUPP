@@ -217,7 +217,9 @@ export function AccountShell({ panel }: { panel: string }) {
         <Link className="account-topbar__brand" href="/dashboard" aria-label="MAINTSUPP dashboard">
           <BrandMark />
         </Link>
-        <Link className="account-topbar__back" href="/dashboard">
+        {/* Named on the link itself: on a phone the text below is hidden and only
+            the arrow shows, which on its own is a link called nothing. */}
+        <Link className="account-topbar__back" href="/dashboard" aria-label="Back to workspace">
           <Icon name="arrow" size={16} />
           <span>Back to workspace</span>
         </Link>

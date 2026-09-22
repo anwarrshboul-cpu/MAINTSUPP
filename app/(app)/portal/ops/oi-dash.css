@@ -214,7 +214,17 @@ body[data-theme] .ov-dash.oi-dash .oi-section__subtitle {
   font-size: 10px;
   font-weight: 600;
   line-height: 1.35;
+  /*
+   * The ink is the accent carried 30% of the way to the island's text colour.
+   * `--chart-*` is solved as a FILL (3:1 on the card, see deriveChartRung), and
+   * the pill then sits on a 10% wash of itself: the default danger red read
+   * 4.40:1 there and the muted pill 4.49:1, and a workspace colour solved to
+   * exactly 3:1 lands near 2.8:1. On this always-dark ground the mix only ever
+   * raises contrast — every default pill is 5.9:1 or better, and a 3:1 accent
+   * reaches 4.5:1 — while the pill keeps its hue.
+   */
   color: var(--oi-pill);
+  color: color-mix(in srgb, var(--oi-pill) 70%, var(--text-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

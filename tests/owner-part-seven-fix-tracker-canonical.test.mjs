@@ -142,17 +142,17 @@ test("a single comment longer than the whole cell is cut, and only then", () => 
 /* ------------------------------------------------------------------ */
 
 test("the column is a board cell, and deliberately NOT a system column", async () => {
-  const module = codeOnly(await source("app/lib/contractor-comments.ts"));
+  const moduleSource = codeOnly(await source("app/lib/contractor-comments.ts"));
   assert.equal(CONTRACTOR_COMMENTS_KEY, "contractorComments");
   assert.equal(CONTRACTOR_COMMENTS_TITLE, "Contractor Comments");
-  assert.match(module, /system: false/, "update_cell refuses a system column outright");
-  assert.match(module, /type: "long_text"/);
+  assert.match(moduleSource, /system: false/, "update_cell refuses a system column outright");
+  assert.match(moduleSource, /type: "long_text"/);
   // Written through the one cell writer, shared with the board's own editor and
   // the automation engine.
-  assert.match(module, /import \{ setBoardCell \} from "\.\/board-mutations"/);
+  assert.match(moduleSource, /import \{ setBoardCell \} from "\.\/board-mutations"/);
   // And onto the board the job is actually placed on, never the literal
   // "maintenance" — the same rule `pictureColumnsFor` follows.
-  assert.match(module, /boardKeyForRequest\(db, orgId, requestId\)/);
+  assert.match(moduleSource, /boardKeyForRequest\(db, orgId, requestId\)/);
 });
 
 test("`completion_note` is left alone — it is a value, not a log", async () => {
@@ -163,8 +163,8 @@ test("`completion_note` is left alone — it is a value, not a log", async () =>
   //   · the job-link route replaces it on purpose ("ONLY WHAT WAS SENT").
   const fields = codeOnly(await source("app/lib/request-fields.ts"));
   assert.doesNotMatch(fields, /completionNote/, "the field editor must still not expose it");
-  const module = codeOnly(await source("app/lib/contractor-comments.ts"));
-  assert.doesNotMatch(module, /completionNote/, "the log must not be written into that field");
+  const moduleSource = codeOnly(await source("app/lib/contractor-comments.ts"));
+  assert.doesNotMatch(moduleSource, /completionNote/, "the log must not be written into that field");
 });
 
 test("the seeder puts the column on the board before the first comment", async () => {

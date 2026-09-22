@@ -465,6 +465,34 @@ test("head returns null for a missing key and an object for a present one", asyn
   assert.equal(headers.get("Content-Type"), "application/pdf");
 });
 
+test("reads ask for uncompressed bytes, and that one header is deliberately unsigned", async () => {
+  /*
+   * Phase 10: a CDN in front of the Supabase endpoint compressed text/plain, the
+   * compressed HEAD carried no usable content-length, the size read as 0 and the
+   * multipart route refused every .txt over 900 KB at `complete`. `identity`
+   * asks for the stored bytes. It is the one header this module sends unsigned:
+   * a proxy may rewrite Accept-Encoding, and a signed header that arrives changed
+   * would fail every read with SignatureDoesNotMatch.
+   */
+  const { bucket, calls } = bucketWith([
+    { status: 200, headers: { "content-length": "1200000", etag: '"e"' } },
+    { status: 200, body: "x", headers: { "content-length": "1", etag: '"e"' } },
+  ]);
+  const headed = await bucket.head(KEY);
+  assert.equal(headed.size, 1200000);
+  await bucket.get(KEY);
+  for (const call of calls) {
+    assert.equal(call.headers["accept-encoding"], "identity", `${call.method} asks for identity`);
+    const signed = /SignedHeaders=([^,]+),/.exec(call.headers.authorization)[1].split(";");
+    assert.ok(!signed.includes("accept-encoding"), `${call.method} must not sign accept-encoding`);
+    for (const name of Object.keys(call.headers)) {
+      if (name === "authorization" || name === "accept-encoding") continue;
+      assert.ok(signed.includes(name), `${name} was sent but not signed`);
+    }
+  }
+  assert.deepEqual(calls.map((call) => call.method), ["HEAD", "GET"]);
+});
+
 test("a ranged get sends Range and reports the FULL size with the served span", async () => {
   const { bucket, calls } = bucketWith([
     {

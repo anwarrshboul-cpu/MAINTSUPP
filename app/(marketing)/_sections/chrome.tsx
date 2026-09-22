@@ -190,7 +190,11 @@ function LogoText() {
 
 export function UtilityBar() {
   return (
-    <div className="utility">
+    /* A landmark of its own, named: it sits above the header, outside every
+       other landmark, and the phone number and address in it were otherwise
+       content a screen reader's landmark list never reaches. Top level, so an
+       <aside> here is not the nested-complementary fault. */
+    <aside className="utility" aria-label="Contact and quick links">
       <div className="wrap utility__inner">
         <div className="utility__group utility__contact">
           {/*
@@ -225,7 +229,7 @@ export function UtilityBar() {
           </SectionLink>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -520,6 +524,11 @@ export function SiteHeader() {
 export function SiteFooter() {
   return (
     <footer className="ftr">
+      {/* The column headings below are <h3>s, which is right under a page's own
+          <h2>s and a skipped level on a page that has none (/contractors goes
+          h1 → h3). A hidden <h2> naming the footer makes the order valid on
+          every page without restyling a single heading. */}
+      <h2 className="vh">Site information</h2>
       <div className="wrap ftr__grid">
         <div className="ftr__brand">
           <Link className="logo logo--light" href="/" aria-label="MAINTSUPP home">
@@ -864,7 +873,9 @@ export function CookieNotice() {
   const choose = cookieStore.write;
 
   return (
-    <div className="cookie is-on" id="cookie">
+    /* A named region: the notice is fixed to the viewport outside every other
+       landmark, so without one its text is content a landmark list never reaches. */
+    <div className="cookie is-on" id="cookie" role="region" aria-label="Cookie notice">
       <div className="wrap cookie__inner">
         <p>
           <strong>Cookies.</strong> We use essential cookies only unless you accept analytics. No

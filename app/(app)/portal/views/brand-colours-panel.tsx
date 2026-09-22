@@ -273,7 +273,10 @@ export function BrandColoursPanel() {
                 </div>
               ) : (
                 <label className="brand-colour__swatch" htmlFor={`tt-${token.key}`}>
+                  {/* The swatch label wraps nothing but the picker, so it names
+                      nothing: the name comes from the token, as the font select's does. */}
                   <input
+                    aria-label={token.label}
                     id={`tt-${token.key}`}
                     type="color"
                     value={value}

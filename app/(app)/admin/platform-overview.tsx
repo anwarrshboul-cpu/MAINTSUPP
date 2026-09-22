@@ -124,7 +124,9 @@ export function PlatformOverview() {
           One is created the first time a client is onboarded.
         </AdminNotice>
       ) : (
-        <div className="platform-table-wrap">
+        /* A region that scrolls sideways on a phone must be reachable without a
+           pointer: focusable, and named so a screen reader says what it is. */
+        <div className="platform-table-wrap" tabIndex={0} role="region" aria-label="Client workspaces">
           <table className="platform-table">
             <thead>
               <tr>
