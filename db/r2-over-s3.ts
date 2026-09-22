@@ -760,8 +760,31 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
     canonicalPath: string;
     query?: QueryPairs;
     headers?: Record<string, string>;
+    /** Sent but NOT signed. Only `UNCOMPRESSED` below belongs here — see it. */
+    unsignedHeaders?: Record<string, string>;
     body?: Uint8Array;
   }
+
+  /**
+   * READS ASK FOR THE BYTES AS STORED, AND THAT REQUEST IS NOT SIGNED.
+   *
+   * The Supabase endpoint sits behind a CDN that compresses `text/plain` when
+   * the caller accepts gzip, and undici's `fetch` accepts it by default. A
+   * compressed HEAD answer carries no usable `content-length`, so `toObject`
+   * read the size as 0 — and the multipart route's `byteSize !==
+   * completed.head.size` check then refused every `.txt` over 900 KB at
+   * `complete`, after all of its bytes had been stored ("The completed file size
+   * could not be verified", measured on a Staging Preview: the same bytes
+   * declared as PDF passed). `GET /api/files/[id]` sets Content-Length from the
+   * same `.size`, so a compressed GET was the same fault waiting on a download.
+   *
+   * `identity` says "no transfer compression". It is sent unsigned on purpose:
+   * everything else this module sends is signed, but a proxy is entitled to
+   * rewrite `Accept-Encoding` on its way to the origin, and a signed header that
+   * arrives changed is a SignatureDoesNotMatch on every read in the product.
+   * Unsigned, the worst a rewrite can do is bring the compression back.
+   */
+  const UNCOMPRESSED = { "accept-encoding": "identity" } as const;
 
   async function send(input: SendInput): Promise<Response> {
     const query = input.query ?? [];
@@ -780,7 +803,7 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
     });
     return doFetch(urlFor(input.canonicalPath, query), {
       method: input.method,
-      headers: signed.headers,
+      headers: { ...signed.headers, ...(input.unsignedHeaders ?? {}) },
       ...(input.body ? { body: input.body as unknown as BodyInit } : {}),
     });
   }
@@ -893,7 +916,11 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
    */
   async function head(key: string): Promise<S3R2Object | null> {
     assertKey(key);
-    const response = await send({ method: "HEAD", canonicalPath: objectPath(key) });
+    const response = await send({
+      method: "HEAD",
+      canonicalPath: objectPath(key),
+      unsignedHeaders: UNCOMPRESSED,
+    });
     if (response.status === 404 || response.status === 403) return null;
     if (!response.ok) await fail("HEAD", response);
     return toObject(key, response.headers);
@@ -940,6 +967,7 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
       method: "GET",
       canonicalPath: objectPath(key),
       headers,
+      unsignedHeaders: UNCOMPRESSED,
     });
     if (response.status === 404 || response.status === 403) return null;
     // 416 is "that range does not exist", which R2 reports as a null get and
