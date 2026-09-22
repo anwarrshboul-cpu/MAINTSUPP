@@ -37,6 +37,7 @@ import { containsText, searchNeedle, SEARCH_MIN_LENGTH } from "../../lib/search-
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { GET as listDocuments } from "../files/route";
 import { memberSiteCondition } from "../../lib/member-site-scope";
+import { moduleOff } from "../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -197,7 +198,12 @@ export async function GET(request: Request) {
     const financeReader =
       ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"])
       /* The ledger is every site's: not a site-restricted member's (security review). */
-      && !scope.siteScope;
+      && !scope.siteScope
+      /* And not in a workspace that has switched the Invoice Tracker off: these
+         results link into a screen the switch closes, so search was a second
+         door into it (`module-guard.ts`, the module-switch batch). The group is
+         dropped rather than refused, as it already is for a reader below Admin. */
+      && !(await moduleOff(scope, "invoice-tracker"));
     if (financeReader) {
       const term = raw.trim().slice(0, 80);
       const invoicePage = await listInvoices(db, orgId, { search: term, limit: PER_GROUP });

@@ -17,6 +17,7 @@ import { auditActor, recordAudit } from "../../../lib/audit";
 import { databaseSafeFailure } from "../../../lib/database-failure";
 import { generatePlannedOccurrences } from "../../../lib/planned-generation";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,10 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* Planned's own operation inside a shared family: this is gated, the family
+       is not — see `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "calendar");
+    if (switchedOff) return switchedOff;
     const scope = guard.scope;
     const body = (await request.json().catch(() => ({}))) as { scheduleId?: unknown };
     const scheduleId =

@@ -20,6 +20,7 @@ import { memberships, teamMembers, teams, users } from "../../../../db/schema";
 import { auditActor, recordAudit } from "../../../lib/audit";
 import { requireCapability, resolvePermissions } from "../../../lib/permissions";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,10 @@ export async function POST(request: Request) {
     /* `teams.manage` — see app/api/teams/route.ts. */
     const guard = await scopedDbWithCapability(request, "teams.manage");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "team");
+    if (switchedOff) return switchedOff;
     const scope = guard.scope;
     const refusal = requireCapability(
       await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
@@ -228,6 +233,10 @@ export async function DELETE(request: Request) {
     /* `teams.manage` — see app/api/teams/route.ts. */
     const guard = await scopedDbWithCapability(request, "teams.manage");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "team");
+    if (switchedOff) return switchedOff;
     const scope = guard.scope;
     const refusal = requireCapability(
       await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),

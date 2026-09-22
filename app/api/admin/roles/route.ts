@@ -50,6 +50,7 @@ import {
   recordAudit,
   type AdminContext,
 } from "../admin-context";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 function matrixPayload(context: AdminContext, overrides: RoleOverrides) {
   const organisation =
@@ -126,6 +127,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const context = await adminContext(request, url.searchParams.get("organisationId"));
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-roles");
+    if (switchedOff) return switchedOff;
 
     // Reading the matrix is reading the workspace's security posture, so it is
     // gated on the same capability as changing it.
@@ -156,6 +161,10 @@ export async function PUT(request: Request) {
 
     const context = await adminContext(request, body.organisationId ?? null);
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-roles");
+    if (switchedOff) return switchedOff;
 
     const denied = requireCapability(context.subject, "roles.edit");
     if (denied) return denied;

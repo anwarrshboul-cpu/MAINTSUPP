@@ -48,6 +48,7 @@ import {
   normaliseKind,
   parseComplianceTemplate,
 } from "../../../lib/compliance-vocabulary";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "compliance");
+    if (switchedOff) return switchedOff;
     const { db, orgId } = guard.scope;
 
     const template = await readComplianceTemplate(db, orgId);
@@ -97,6 +102,10 @@ export async function PUT(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "settings.edit");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "compliance");
+    if (switchedOff) return switchedOff;
     const { db, orgId, actor } = guard.scope;
 
     let payload: unknown;

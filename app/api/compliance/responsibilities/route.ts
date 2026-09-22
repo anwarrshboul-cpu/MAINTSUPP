@@ -75,6 +75,7 @@ import {
   type ComplianceRow,
 } from "../../../lib/compliance-view";
 import { chunkIds } from "../../../lib/sql-batching";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -170,6 +171,10 @@ export async function GET(request: Request) {
        permission than reading the register itself. */
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "compliance");
+    if (switchedOff) return switchedOff;
     const { db, orgId, siteScope } = guard.scope;
 
     const url = new URL(request.url);
@@ -285,6 +290,10 @@ export async function POST(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "compliance");
+    if (switchedOff) return switchedOff;
     const { actor, db, orgId, siteScope } = guard.scope;
 
     const body = (await request.json().catch(() => null)) as

@@ -78,6 +78,7 @@ import {
   trimmed,
   type AdminContext,
 } from "../admin-context";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 /* ------------------------------------------------------------------ */
 /* Reading                                                             */
@@ -481,6 +482,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const context = await adminContext(request, url.searchParams.get("organisationId"));
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-users");
+    if (switchedOff) return switchedOff;
 
     // Gate one. A client's built-in defaults do not include `users.view`, so
     // this is where a client's GET stops — with a 403, before any row is read.
@@ -643,6 +648,10 @@ export async function POST(request: Request) {
 
     const context = await adminContext(request, body.organisationId ?? null);
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-users");
+    if (switchedOff) return switchedOff;
 
     const denied = requireCapability(context.subject, "users.invite");
     if (denied) return denied;
@@ -850,6 +859,10 @@ export async function DELETE(request: Request) {
       url.searchParams.get("organisationId"),
     );
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-users");
+    if (switchedOff) return switchedOff;
 
     const denied = requireCapability(context.subject, "users.invite");
     if (denied) return denied;
@@ -1046,6 +1059,10 @@ export async function PATCH(request: Request) {
 
     const context = await adminContext(request, body.organisationId ?? null);
     if (isRefusal(context)) return context;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal({ ...context, orgId: context.targetOrganisationId }, "admin-users");
+    if (switchedOff) return switchedOff;
 
     const userId = trimmed(body.userId, 120);
     const action = trimmed(body.action, 40);

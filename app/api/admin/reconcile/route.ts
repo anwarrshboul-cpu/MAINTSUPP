@@ -41,6 +41,7 @@ import { assertPurgeAllowed } from "../../../lib/seed/guards";
 import { SEED_ORGANISATION_ID, purgeEnvironment } from "../../../lib/seed/loader";
 import { reconcileSeedData } from "../../../lib/seed/reconcile";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "settings.edit");
     if (guard.denied) return guard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "reconcile");
+    if (switchedOff) return switchedOff;
     const { db } = guard.scope;
 
     const decision = assertPurgeAllowed(await purgeEnvironment(db));
