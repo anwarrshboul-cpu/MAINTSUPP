@@ -55,11 +55,10 @@ const INLINE_SAFE_TYPES = new Set([
 /**
  * The bucket, resolved once for both handlers in this file.
  *
- * Each `await import("cloudflare:workers")` and each `R2Bucket` annotation is
- * its own unresolved-type error while the Workers types are absent, so a
- * second copy of this pair silently moved the project's 20-error baseline to
- * 22 — and that baseline is what tells the next person whether they broke
- * something. One accessor, two callers, no drift.
+ * One accessor, two callers, no drift. (While the Workers types were absent,
+ * each copy of this pair was its own unresolved-type error; a second copy once
+ * moved the tsc baseline from 20 to 22. They are declared in
+ * `cloudflare-env.d.ts` now.)
  */
 async function bucket() {
   const { env } = await import("cloudflare:workers");

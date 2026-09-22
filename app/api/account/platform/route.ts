@@ -38,13 +38,11 @@ function environmentValue(key: string) {
 /**
  * True when the Worker really has the named binding attached.
  *
- * `cloudflare:workers` is a runtime module with no local type declarations, so
- * `tsc` cannot resolve it — the same unresolved import the file routes carry.
- * Suppressed here rather than added to the project's error count.
+ * `cloudflare:workers` is a Workers runtime module; its types are declared in
+ * `cloudflare-env.d.ts`, from the objects that stand behind it.
  */
 async function hasBinding(key: string) {
   try {
-    // @ts-expect-error — Workers runtime module, resolved at run time only.
     const { env } = await import("cloudflare:workers");
     return Boolean((env as unknown as Record<string, unknown>)[key]);
   } catch {

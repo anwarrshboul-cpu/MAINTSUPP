@@ -227,10 +227,7 @@ export async function platformVars(): Promise<Record<string, string | undefined>
 
   let fromBindings: Record<string, string | undefined> = {};
   try {
-    /* Suppressed rather than added to the project's tsc count, the way
-       `hasBinding` in app/api/account/platform/route.ts does it: this is a
-       Workers runtime module with no local type declarations. */
-    // @ts-expect-error — Workers runtime module, resolved at run time only.
+    /* A Workers runtime module; its types are declared in cloudflare-env.d.ts. */
     const { env } = await import("cloudflare:workers");
     const bag = env as unknown as Record<string, unknown>;
     for (const key of GUARD_VARIABLES) {
@@ -761,7 +758,6 @@ async function bucketOrNull(): Promise<{
   list: (options?: unknown) => Promise<{ objects?: Array<{ key: string }> }>;
 } | null> {
   try {
-    // @ts-expect-error — Workers runtime module, resolved at run time only.
     const { env } = await import("cloudflare:workers");
     const runtime = env as unknown as { BUCKET?: unknown };
     return (runtime.BUCKET as never) ?? null;
