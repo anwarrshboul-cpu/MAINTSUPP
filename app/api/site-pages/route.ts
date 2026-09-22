@@ -110,6 +110,16 @@ async function platformScope(request: Request) {
   return scope;
 }
 
+/** The first free `<slug>-copy`, `-copy-2`, … that is still a valid address. */
+function copySlugFor(base: string, taken: Set<string>): string | null {
+  const stem = base.slice(0, 70).replace(/-+$/, "");
+  for (let n = 1; n <= 50; n += 1) {
+    const candidate = n === 1 ? `${stem}-copy` : `${stem}-copy-${n}`;
+    if (!taken.has(candidate) && cleanSlug(candidate) === candidate) return candidate;
+  }
+  return null;
+}
+
 function text(value: unknown, max: number): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -151,6 +161,8 @@ export async function PUT(request: Request) {
       published?: unknown;
       blocks?: unknown;
       restoreVersion?: unknown;
+      original?: unknown;
+      duplicate?: unknown;
     } | null;
     if (!payload) {
       return Response.json({ error: "Send a page object." }, { status: 400 });
@@ -177,6 +189,34 @@ export async function PUT(request: Request) {
       payload.metaDescription = snapshot.metaDescription;
       payload.published = snapshot.published;
       payload.blocks = snapshot.blocks;
+    }
+
+    /*
+     * DUPLICATE (§6, §77 item 10) — a copy of a page as it is SAVED: the same
+     * blocks and search text, as a new unpublished draft at the first free
+     * `<slug>-copy` address, with "(copy)" on its title. From here on it is an
+     * ordinary new page: every rule below runs on it, through the create path.
+     */
+    let duplicatedFrom: string | null = null;
+    if (typeof payload.duplicate === "string") {
+      const sourceSlug = cleanSlug(payload.duplicate);
+      const everyPage = await listPages(scope.db);
+      const source = sourceSlug ? everyPage.find((page) => page.slug === sourceSlug) : undefined;
+      if (!source) {
+        return Response.json({ error: "There is no page at that address to duplicate." }, { status: 404 });
+      }
+      const copy = copySlugFor(source.slug, new Set(everyPage.map((page) => page.slug)));
+      if (!copy) {
+        return Response.json({ error: "There is no free address for another copy. Rename or delete earlier copies first." }, { status: 409 });
+      }
+      duplicatedFrom = source.slug;
+      payload.slug = copy;
+      payload.original = null;
+      payload.title = `${source.title.slice(0, 173)} (copy)`;
+      payload.metaTitle = source.metaTitle;
+      payload.metaDescription = source.metaDescription;
+      payload.published = false;
+      payload.blocks = source.blocks.map((block) => ({ kind: block.kind, body: block.body }));
     }
 
     const slug = cleanSlug(payload.slug);
@@ -250,12 +290,46 @@ export async function PUT(request: Request) {
       return Response.json({ error: `This page: ${brokenRule}.` }, { status: 400 });
     }
 
-    const before = (await listPages(scope.db)).find((page) => page.slug === slug) ?? null;
+    /*
+     * WHICH PAGE THIS SAVE IS FOR. The console says: `original` is the address the
+     * editor opened, or null for a new page. That is what makes an address edit a
+     * MOVE — the page at the old address takes the new one, and the old address
+     * stops resolving — and what stops a new page landing on an existing address,
+     * which used to overwrite the other page's content without a word. A caller
+     * that states no intent (a restore, an older client) keeps upsert-by-address.
+     */
+    const pages = await listPages(scope.db);
+    const intent = "original" in payload ? payload.original : undefined;
+    let fromSlug = slug;
+    if (intent === null && pages.some((page) => page.slug === slug)) {
+      return Response.json(
+        { error: `A page already lives at /p/${slug}. Open it from the list to edit it, or choose another address.` },
+        { status: 409 },
+      );
+    }
+    if (typeof intent === "string") {
+      const opened = cleanSlug(intent);
+      if (!opened || !pages.some((page) => page.slug === opened)) {
+        return Response.json(
+          { error: "That page no longer exists. It may have been moved or deleted meanwhile; reload the list." },
+          { status: 404 },
+        );
+      }
+      if (opened !== slug && pages.some((page) => page.slug === slug)) {
+        return Response.json({ error: `/p/${slug} is already another page's address.` }, { status: 409 });
+      }
+      fromSlug = opened;
+    }
+    const renaming = fromSlug !== slug;
+
+    const before = pages.find((page) => page.slug === fromSlug) ?? null;
     const versionTarget: VersionTarget = { organisationId: null, subject: "site_page", key: slug };
+    const fromTarget: VersionTarget = { ...versionTarget, key: fromSlug };
     const versionActor = { email: scope.identityEmail, userId: scope.session?.user.id ?? null };
-    /* §38b — an existing page's state before history's first write, as version 1. */
-    if (before) await ensureConfigBaseline(scope.db, versionTarget, pageSnapshot(before), versionActor);
-    const result = await writePage(scope.db, input, scope.identityEmail.toLowerCase());
+    /* §38b — an existing page's state before history's first write, as version 1,
+       under the address it had. */
+    if (before) await ensureConfigBaseline(scope.db, fromTarget, pageSnapshot(before), versionActor);
+    const result = await writePage(scope.db, input, scope.identityEmail.toLowerCase(), fromSlug);
     if (!result.ok) {
       return Response.json({ error: result.reason }, { status: 503 });
     }
@@ -264,9 +338,15 @@ export async function PUT(request: Request) {
          restore, brought back after its deletion. Its latest version is then the
          deletion marker, which carries the page as it was, so comparing with it
          would record an undelete as "Saved with no change". */
-      const previous = before ? await latestSnapshot(scope.db, versionTarget) : null;
+      const previous = before ? await latestSnapshot(scope.db, fromTarget) : null;
       const after = pageSnapshot(input);
-      const summary = summariseChange("site_page", previous && !("absent" in (previous as object)) ? previous : null, after);
+      const changed = summariseChange("site_page", previous && !("absent" in (previous as object)) ? previous : null, after);
+      /* A move is said as a move, and a copy says where it came from. */
+      const summary = renaming
+        ? `Renamed from /p/${fromSlug} — ${changed.startsWith("Saved with no change") ? pageShape(after) : changed}`
+        : duplicatedFrom
+          ? `Duplicated from /p/${duplicatedFrom} — ${pageShape(after)}`
+          : changed;
       const recorded = await recordConfigVersion(scope.db, versionTarget, {
         snapshot: after,
         summary: !restoring
@@ -290,6 +370,20 @@ export async function PUT(request: Request) {
           request,
         });
       }
+      /*
+       * The OLD address's history is closed, not deleted and not rewritten: its
+       * versions stay where they are, and this marker says where the page went.
+       * It is a `renamed` entry rather than a `deleted` one, so "Deleted pages"
+       * does not offer to bring back a page that simply moved.
+       */
+      if (renaming && before) {
+        await recordConfigVersion(scope.db, fromTarget, {
+          snapshot: pageSnapshot(before),
+          kind: "renamed",
+          summary: `Moved to /p/${slug}. Its history continues there; nothing here was removed.`,
+          actor: versionActor,
+        });
+      }
     }
 
     /*
@@ -302,18 +396,28 @@ export async function PUT(request: Request) {
       db: scope.db,
       organisationId: scope.orgId,
       actor: auditActor(scope),
-      action: before
-        ? input.published
-          ? "site_page.published"
-          : "site_page.updated"
-        : "site_page.created",
+      action: renaming
+        ? "site_page.renamed"
+        : duplicatedFrom
+          ? "site_page.duplicated"
+          : before
+            ? input.published
+              ? "site_page.published"
+              : "site_page.updated"
+            : "site_page.created",
       entityType: "site_page",
       entityId: slug,
-      summary: `${before ? "Updated" : "Created"} the website page /p/${slug}${
-        input.published ? " and published it." : " as a draft."
-      }`,
+      summary: renaming
+        ? `Moved the website page /p/${fromSlug} to /p/${slug}; the old address no longer resolves.`
+        : duplicatedFrom
+          ? `Duplicated the website page /p/${duplicatedFrom} as the draft /p/${slug}.`
+          : `${before ? "Updated" : "Created"} the website page /p/${slug}${
+              input.published ? " and published it." : " as a draft."
+            }`,
       detail: {
         slug,
+        ...(renaming ? { from: fromSlug } : {}),
+        ...(duplicatedFrom ? { duplicatedFrom } : {}),
         title: input.title,
         published: input.published,
         blocks: blocks.map((block) => block.kind),
@@ -324,6 +428,8 @@ export async function PUT(request: Request) {
 
     return Response.json({
       canEdit: true,
+      /* The address this save landed at — a copy's is chosen by the server. */
+      saved: slug,
       pages: await listPages(scope.db),
       catalogue: BLOCK_CATALOGUE,
       omissions: CMS_OMISSIONS,

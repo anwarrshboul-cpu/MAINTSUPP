@@ -53,6 +53,7 @@ import { fetchNavigation, forgetNavigation } from "../navigation-store";
 import type { SidebarNavEntry } from "../sidebar-nav";
 import "./nav-icons-panel.css";
 import { VersionHistory } from "./version-history";
+import { useUnsavedChanges } from "../../../lib/use-unsaved-changes";
 
 export function NavIconsPanel({ catalogue }: { catalogue: SidebarNavEntry[] }) {
   const [workspace, setWorkspace] = useState<NavArrangementItem[] | null>(null);
@@ -124,6 +125,14 @@ export function NavIconsPanel({ catalogue }: { catalogue: SidebarNavEntry[] }) {
     for (const entry of catalogue) map.set(entry.key, entry.icon);
     return map;
   }, [catalogue]);
+
+  /* §69 — leaving with icons chosen but not saved asks first. Worked out here,
+     before the early returns, so the hook runs on every render. */
+  const unsaved = Object.entries(draft).some(([key, value]) => {
+    const item = resolved?.flat.find((row) => row.key === key);
+    return value !== (isIconName(item?.icon) ? (item.icon as string) : "");
+  });
+  useUnsavedChanges(unsaved);
 
   if (withheld) return null;
 

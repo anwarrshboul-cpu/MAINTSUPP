@@ -133,6 +133,7 @@ export const CMS_OMISSIONS: readonly string[] = [
   "There is no image block yet. Images need an upload path, and /api/files is portal-only — it brokers a private bucket behind a session, which a public page has none of.",
   "The existing marketing pages are untouched. The homepage and the five legal pages stay exactly as they are, by owner decision, until a later phase promotes their sections into blocks.",
   "There is no draft preview URL. A page is either published and public, or a draft only the console can see.",
+  "Changing a page's address moves it, and the old address stops resolving: there are no redirects yet, so a link anyone saved to the old address will 404.",
   "A page cannot carry a price, a VAT qualifier, or any of the six phrases the brief forbids. Those rules are enforced on the site's source text by three test files, which cannot see a database row — so they are enforced here instead, on the way in. See CONTENT_RULES for each rule and its reason.",
   "Every saved version of a page is kept and can be restored, including a deleted page — but a page brought back after deletion is a new row: its published date starts again from the restore, and anything that pointed at the old row id rather than the address is not reconnected.",
 ];

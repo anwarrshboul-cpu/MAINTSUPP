@@ -20,7 +20,7 @@ import "./version-history.css";
 
 type VersionRow = {
   version: number;
-  kind: "baseline" | "saved" | "restored" | "deleted";
+  kind: "baseline" | "saved" | "restored" | "deleted" | "renamed";
   summary: string;
   restoredFromVersion: number | null;
   actorEmail: string | null;
@@ -133,6 +133,7 @@ export function VersionHistory({
                   <div>
                     <strong>Version {row.version}</strong>
                     {row.kind === "baseline" && <span className="version-history__badge">Baseline</span>}
+                    {row.kind === "renamed" && <span className="version-history__badge">Moved</span>}
                     {row.restoredFromVersion && <span className="version-history__badge">Restored from v{row.restoredFromVersion}</span>}
                     {row.current && <span className="version-history__badge version-history__badge--current">Current</span>}
                     <small>
@@ -141,7 +142,7 @@ export function VersionHistory({
                     </small>
                     <span className="version-history__summary">{row.summary}</span>
                   </div>
-                  {!row.current && row.kind !== "deleted" && (
+                  {!row.current && row.kind !== "deleted" && row.kind !== "renamed" && (
                     <button type="button" className="secondary-button" disabled={busy !== null} onClick={() => void restore(row)}>
                       {busy === row.version ? "Restoring…" : "Restore"}
                     </button>

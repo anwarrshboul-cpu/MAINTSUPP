@@ -50,6 +50,7 @@ import {
 import "./site-pages.css";
 import { VersionHistory } from "../portal/views/version-history";
 import { formatShortDateTime } from "../../lib/format-date";
+import { useUnsavedChanges } from "../../lib/use-unsaved-changes";
 
 /* The server's shapes. Mirrored, not imported: `app/lib/cms-blocks.ts` is a server
    module and these are what crosses the wire. */
@@ -125,6 +126,10 @@ function draftOf(page: Page | null): Draft {
   };
 }
 
+/** What a draft says, without the local block keys — two equal drafts serialise the same. */
+const serialiseDraft = (draft: Draft) =>
+  JSON.stringify({ ...draft, blocks: draft.blocks.map((block) => ({ kind: block.kind, body: block.body })) });
+
 const asLines = (value: unknown): string =>
   Array.isArray(value) ? value.filter((entry) => typeof entry === "string").join("\n") : "";
 
@@ -155,8 +160,18 @@ function hintFor(rule: FieldRule): string {
 export function SitePagesView() {
   const { data, loading, denied, error, reload } = useAdminResource<Payload>("/api/site-pages");
   const [draft, setDraft] = useState<Draft | null>(null);
+  /* The draft as it was opened, so "unsaved" means "different from that". */
+  const [opened, setOpened] = useState("");
   const [flash, setFlash] = useState<{ ok: boolean; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const open = (page: Page | null) => {
+    const next = draftOf(page);
+    setDraft(next);
+    setOpened(serialiseDraft(next));
+  };
+  const dirty = draft !== null && serialiseDraft(draft) !== opened;
+  const confirmLeave = useUnsavedChanges(dirty);
 
   const catalogue = useMemo(() => data?.catalogue ?? [], [data]);
   const definitionOf = (kind: string) => catalogue.find((entry) => entry.kind === kind) ?? null;
@@ -189,6 +204,10 @@ export function SitePagesView() {
     if (!draft) return;
     setSaving(true);
     const result = await adminWrite("/api/site-pages", "PUT", {
+      /* Which page this is: the address it was opened at, or null for a new one.
+         The server moves the page when the address changed, and refuses a new
+         page on an address another page holds. */
+      original: draft.original,
       slug: draft.slug,
       title: draft.title,
       metaTitle: draft.metaTitle || null,
@@ -197,11 +216,25 @@ export function SitePagesView() {
       blocks: draft.blocks.map((block) => ({ kind: block.kind, body: block.body })),
     });
     setSaving(false);
-    setFlash({ ok: result.ok, message: result.message });
+    const moved = result.ok && draft.original && draft.original !== draft.slug;
+    setFlash({
+      ok: result.ok,
+      message: moved ? `Moved to /p/${draft.slug}. The old address /p/${draft.original} no longer resolves.` : result.message,
+    });
     if (result.ok) {
       setDraft(null);
       await reload();
     }
+  };
+
+  const duplicate = async (slug: string) => {
+    const result = await adminWrite("/api/site-pages", "PUT", { duplicate: slug });
+    const copy = typeof result.payload?.saved === "string" ? result.payload.saved : null;
+    setFlash({
+      ok: result.ok,
+      message: result.ok && copy ? `Duplicated /p/${slug} as /p/${copy}, a draft.` : result.message,
+    });
+    if (result.ok) await reload();
   };
 
   const remove = async (slug: string) => {
@@ -249,7 +282,9 @@ export function SitePagesView() {
           patchBlock={patchBlock}
           moveBlock={moveBlock}
           onSave={save}
-          onCancel={() => setDraft(null)}
+          onCancel={() => {
+            if (confirmLeave()) setDraft(null);
+          }}
           onDelete={draft.original ? () => remove(draft.original as string) : null}
           saving={saving}
         />
@@ -274,7 +309,7 @@ export function SitePagesView() {
           <div className="admin-toolbar">
             <strong>Website pages</strong>
             <span className="admin-toolbar__spacer" />
-            <button className="primary-button" type="button" onClick={() => setDraft(draftOf(null))}>
+            <button className="primary-button" type="button" onClick={() => open(null)}>
               <Icon name="plus" size={16} /> New page
             </button>
           </div>
@@ -326,8 +361,16 @@ export function SitePagesView() {
                       </small>
                     </td>
                     <td>
-                      <button className="secondary-button admin-mini" type="button" onClick={() => setDraft(draftOf(page))}>
+                      <button className="secondary-button admin-mini" type="button" onClick={() => open(page)}>
                         Edit
+                      </button>{" "}
+                      <button
+                        className="secondary-button admin-mini"
+                        type="button"
+                        onClick={() => void duplicate(page.slug)}
+                        aria-label={`Duplicate /p/${page.slug}`}
+                      >
+                        Duplicate
                       </button>
                     </td>
                   </tr>
@@ -454,8 +497,8 @@ function Editor({
             value={draft.slug}
           />
           <small>
-            Lowercase letters, digits and single hyphens. The page is served at /p/ plus this. Changing it on a
-            published page changes its address, and the old one stops resolving.
+            Lowercase letters, digits and single hyphens. The page is served at /p/ plus this. Changing it moves
+            the page when you save: the old address stops resolving, and there are no redirects yet.
           </small>
         </label>
 

@@ -49,7 +49,9 @@ export function versionSubject(subject: unknown, key: unknown): { subject: Versi
   return { subject: subject as VersionSubject, key };
 }
 
-export type ChangeKind = "baseline" | "saved" | "restored" | "deleted";
+/* `renamed` closes an address's history when its page MOVED to another one (§6):
+   the page lives on at the new address, so this is not a deletion to undo. */
+export type ChangeKind = "baseline" | "saved" | "restored" | "deleted" | "renamed";
 
 /** JSON with every object's keys sorted, so two equal states always serialise — and hash — the same. */
 export function canonicalJson(value: unknown): string {

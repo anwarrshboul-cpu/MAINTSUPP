@@ -305,7 +305,10 @@ async function saveLayout(request: Request) {
   return Response.json({ ok: true, surface, items, scope: asWorkspaceDefault ? "workspace" : "user" });
 }
 
-/** Drops the caller's own arrangement, falling back to the workspace default. */
+/**
+ * Drops the caller's own arrangement, falling back to the workspace default —
+ * or, with `?scope=workspace`, removes the workspace default itself.
+ */
 export async function DELETE(request: Request) {
   try {
     return await resetLayout(request);
@@ -316,8 +319,11 @@ export async function DELETE(request: Request) {
 
 async function resetLayout(request: Request) {
   await ensureDatabase();
-  const { db, orgId, session } = await scopedDb(request);
-  const surface = surfaceFrom(new URL(request.url).searchParams.get("surface"));
+  const scope = await scopedDb(request);
+  const { db, orgId, session } = scope;
+  const url = new URL(request.url);
+  const surface = surfaceFrom(url.searchParams.get("surface"));
+  if (url.searchParams.get("scope") === "workspace") return removeWorkspaceDefault(request, scope, surface);
   const userId = session?.user.id ?? null;
   if (!userId) {
     return Response.json({ error: "Sign in first." }, { status: 401 });
@@ -334,4 +340,76 @@ async function resetLayout(request: Request) {
     );
 
   return Response.json({ ok: true, surface });
+}
+
+/**
+ * §77 item 17 — REMOVE THE WORKSPACE DEFAULT, so everyone without their own
+ * arrangement is back on the built-in order. It could only be replaced before.
+ *
+ * The same rule as saving one (`settings.edit`), checked here and not by hiding a
+ * button. Recorded like every change to it (§38): the default as it was becomes
+ * version 1 if history has not started, then a `deleted` version marks the
+ * removal — so "restore the version before it" puts the default back exactly,
+ * and nothing in the history is removed.
+ */
+async function removeWorkspaceDefault(
+  request: Request,
+  scope: Awaited<ReturnType<typeof scopedDb>>,
+  surface: string,
+) {
+  const { db, orgId, session, actor } = scope;
+  const subject = await resolvePermissions(db, orgId, actor.role);
+  if (!can(subject, "settings.edit")) {
+    return Response.json(
+      {
+        error: "Your role cannot change the workspace default dashboard.",
+        capability: "settings.edit",
+        denied: true,
+      },
+      { status: 403 },
+    );
+  }
+  const [existing] = await db
+    .select({ id: dashboardLayouts.id, items: dashboardLayouts.items })
+    .from(dashboardLayouts)
+    .where(
+      and(
+        eq(dashboardLayouts.organisationId, orgId),
+        eq(dashboardLayouts.surface, surface),
+        isNull(dashboardLayouts.userId),
+      ),
+    )
+    .limit(1);
+  if (!existing) {
+    return Response.json({ error: "This workspace has no default layout to remove." }, { status: 404 });
+  }
+
+  const versionTarget: VersionTarget = { organisationId: orgId, subject: "dashboard", key: surface };
+  const versionActor = { email: actor.email, userId: session?.user.id ?? null };
+  let stored: unknown[] | null = null;
+  try {
+    stored = JSON.parse(existing.items) as unknown[];
+  } catch {
+    stored = null;
+  }
+  await ensureConfigBaseline(db, versionTarget, dashboardSnapshot(surface, stored), versionActor);
+  await db.delete(dashboardLayouts).where(eq(dashboardLayouts.id, existing.id));
+  const recorded = await recordConfigVersion(db, versionTarget, {
+    snapshot: dashboardSnapshot(surface, null),
+    kind: "deleted",
+    summary: `Removed the workspace default ${surface} layout; the built-in order applies. Restore the version before this one to bring it back.`,
+    actor: versionActor,
+  });
+  await recordAudit({
+    db,
+    organisationId: orgId,
+    actor: auditActor(scope),
+    action: "dashboard.default_removed",
+    entityType: "dashboard_layout",
+    entityId: surface,
+    summary: `Removed the workspace default ${surface} dashboard layout.`,
+    detail: { surface, version: recorded },
+    request,
+  });
+  return Response.json({ ok: true, surface, scope: "workspace", removed: true });
 }
