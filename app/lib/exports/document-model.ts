@@ -184,6 +184,35 @@ export interface ReportDocument {
   sections: DocSection[];
 }
 
+/**
+ * WHAT A DOCUMENT IS DRESSED IN — never what it says.
+ *
+ * The workspace's own logo on the cover, and nothing else. It is handed to the
+ * renderers BESIDE the payload, never inside it: the payload is the figures a
+ * document states and the thing a finalised document freezes, and a logo is
+ * neither — replacing it must not look like an issued invoice changed. It
+ * carries no figure and no text, so a renderer given it still cannot say
+ * anything the other two do not; the workbook, being data, ignores it.
+ *
+ * The logo is the JPEG copy the browser drew on white for exactly this use
+ * (`app/lib/organisation-logo.ts`): a PDF and a Word file embed a JPEG natively
+ * and cannot embed a WebP at all. `null` prints the cover without one.
+ */
+export interface DocumentBranding {
+  logo: { jpeg: Uint8Array; width: number; height: number; components: 1 | 3 } | null;
+}
+
+export const NO_BRANDING: DocumentBranding = { logo: null };
+
+/** The cover logo's box, in points, and the size inside it — aspect kept. */
+export function coverLogoSize(
+  logo: { width: number; height: number },
+  box: { width: number; height: number },
+): { width: number; height: number } {
+  const scale = Math.min(box.width / logo.width, box.height / logo.height, 1);
+  return { width: logo.width * scale, height: logo.height * scale };
+}
+
 /* ── Cell constructors ───────────────────────────────────────────────────── */
 
 const EMPTY = "—";

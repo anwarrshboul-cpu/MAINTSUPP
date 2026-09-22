@@ -32,6 +32,7 @@ import { readModuleOverrides } from "../../lib/portal-module-repository.ts";
 import { type WorkspaceRole } from "../../lib/workspace-actor";
 import { isWorkspaceRole } from "../../lib/roles";
 import { memberSiteCondition } from "../../lib/member-site-scope";
+import { organisationLogoUrl } from "../../lib/organisation-logo";
 
 function clean(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -138,8 +139,19 @@ async function contextPayload(request: Request) {
         .where(inArray(clientCompanies.id, companyIds))
     : [];
   const companyNames = new Map(companyRows.map((row) => [row.id, row.name]));
+  /*
+   * THE WORKSPACE LOGO — the brokered address, or null for the default mark.
+   *
+   * `organisations.logo_url` is an old column nothing writes; the row is spread
+   * below, so it is overwritten here rather than trusted. Only the CURRENT
+   * workspace's logo is given: `/api/branding/logo/image` serves the caller's
+   * current workspace and no other, so an address for any other entry would
+   * draw the wrong mark.
+   */
+  const logoUrl = await organisationLogoUrl(context.db, context.orgId);
   const visibleOrganisations = visibleOrganisationRows.map((organisation) => ({
     ...organisation,
+    logoUrl: organisation.id === context.orgId ? logoUrl : null,
     companyName: organisation.clientCompanyId
       ? (companyNames.get(organisation.clientCompanyId) ?? null)
       : null,
@@ -196,6 +208,7 @@ async function contextPayload(request: Request) {
     actor: context.actor,
     currentOrganisation: {
       ...context.organisation,
+      logoUrl,
       companyName: currentCompany?.name ?? null,
     },
     organisations: visibleOrganisations,

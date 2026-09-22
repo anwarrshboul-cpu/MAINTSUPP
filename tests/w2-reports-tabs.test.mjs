@@ -518,12 +518,22 @@ test("the export route holds data.export and records who took a copy", async () 
  * to be on all three — a renderer that took it while the others did not would
  * be exactly the drift this test exists to catch — and requires the ONE render
  * call in the route to pass the same kind the filename was built from.
+ *
+ * RE-POINTED A SECOND TIME, for the workspace logo (owner decision M). The
+ * signature gained `branding: DocumentBranding`, and it is not a question
+ * either: it is the cover's picture — no figure, no text — the same value for
+ * all three, read by the route from the workspace's own stored copy and never
+ * from the caller. It travels BESIDE the payload so a finalised snapshot is
+ * unchanged. The pin still requires one signature for all three and one render
+ * call; it now also requires that the branding comes from the workspace
+ * (`documentBranding(scope)`) and that `DocumentBranding` carries nothing but
+ * the logo, so it cannot become a side door for content.
  */
 test("all three formats go through one renderer table and get nothing but the payload", async () => {
   const source = await read(EXPORT_ROUTE);
   assert.match(
     source,
-    /const RENDERERS: Record<\s*ExportFormat,\s*\{\s*render: \(payload: CombinedReportPayload, kind: DocumentKind\) => Uint8Array;\s*contentType: string;\s*\}\s*> = \{/,
+    /const RENDERERS: Record<\s*ExportFormat,\s*\{\s*render: \(payload: CombinedReportPayload, kind: DocumentKind, branding: DocumentBranding\) => Uint8Array;\s*contentType: string;\s*\}\s*> = \{/,
     "the signature is the contract's central rule: a renderer cannot ask a different question",
   );
   assert.match(source, /docx: \{ render: renderDocx/);
@@ -536,7 +546,15 @@ test("all three formats go through one renderer table and get nothing but the pa
     1,
     "one render call, so the kind on the file and the kind in the name cannot differ",
   );
-  assert.match(code, /renderer\.render\(payload, kind\)/);
+  assert.match(code, /renderer\.render\(payload, kind, branding\)/);
+  assert.match(code, /const branding = await documentBranding\(scope\);/, "the branding is the workspace's, never the caller's");
+  const model = await read("app/lib/exports/document-model.ts");
+  const branding = model.slice(model.indexOf("export interface DocumentBranding {"));
+  assert.match(
+    branding.slice(0, branding.indexOf("}\n") + 2),
+    /^export interface DocumentBranding \{\s*logo: \{ jpeg: Uint8Array; width: number; height: number; components: 1 \| 3 \} \| null;\s*\}/,
+    "the branding carries the cover's picture and nothing else",
+  );
 });
 
 /*

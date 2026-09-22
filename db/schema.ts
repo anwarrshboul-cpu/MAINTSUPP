@@ -2255,6 +2255,29 @@ export const uploadSessions = sqliteTable(
   ],
 );
 
+/**
+ * The workspace logo — one row per workspace naming a private object in the
+ * bucket. Served only through `/api/branding/logo/image`; the object key never
+ * leaves the server. See `ensureOrganisationLogos` in `db/init.ts`.
+ */
+export const organisationLogos = sqliteTable("organisation_logos", {
+  organisationId: text("organisation_id")
+    .primaryKey()
+    .references(() => organisations.id),
+  logoId: text("logo_id").notNull(),
+  objectKey: text("object_key").notNull(),
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  width: integer("width").notNull(),
+  height: integer("height").notNull(),
+  originalName: text("original_name").notNull(),
+  /** The reports' JPEG copy — NULL until the browser has stored one for THIS logo. */
+  printWidth: integer("print_width"),
+  printHeight: integer("print_height"),
+  uploadedByEmail: text("uploaded_by_email"),
+  updatedAt: text("updated_at").notNull(),
+});
+
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(
   "job_access_tokens",

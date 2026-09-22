@@ -13,6 +13,7 @@ import { ensureDatabase } from "../../../../db/init";
 import { automationRuns, boardAutomations } from "../../../../db/schema";
 import { resolveBoardId } from "../../../lib/automations/store";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { boardStructureRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
+    /* Every rule's runs, on every site's jobs (titles and ids in the summaries):
+       automations are the board's structure (security review). */
+    const structure = boardStructureRefusal(guard.scope.siteScope);
+    if (structure) return structure;
     const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const boardId = await resolveBoardId(

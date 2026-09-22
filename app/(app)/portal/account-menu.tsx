@@ -34,6 +34,7 @@ import {
 import { CHIP_INK_LIGHT, chipInk } from "./chip-ink";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
+import { WORKSPACE_LOGO_EVENT, WorkspaceMark } from "./workspace-mark";
 
 /** The working statuses `/api/account` will persist to `users.working_status`. */
 const WORKING_STATUS_LABELS: Record<string, string> = {
@@ -78,6 +79,8 @@ export type AccountSnapshot = {
     primaryColour: string;
     status: string;
     createdAt: string;
+    /** The workspace's own logo, brokered; null draws nothing extra. */
+    logoUrl?: string | null;
   };
   workspaces: Array<{
     id: string;
@@ -187,6 +190,13 @@ export function AccountMenu({
     },
     [onNotify],
   );
+
+  /* A changed workspace logo is re-read on the next open, not after a reload. */
+  useEffect(() => {
+    const forget = () => setFetched(null);
+    window.addEventListener(WORKSPACE_LOGO_EVENT, forget);
+    return () => window.removeEventListener(WORKSPACE_LOGO_EVENT, forget);
+  }, []);
 
   /*
    * Loaded on first open rather than on mount: the payload runs four COUNT
@@ -778,9 +788,17 @@ export function AccountMenu({
               layer host, where a <header> would be a second page banner
               beside the top bar (axe: landmark-no-duplicate-banner). */}
           <div className="account-menu__header">
-            <div className="account-menu__workspace">
-              <strong>{snapshot?.workspace.name ?? "Workspace"}</strong>
-              <span>{displayEmail}</span>
+            {/* The workspace's own logo before its name, when it has one. */}
+            <div className="account-menu__identity">
+              <WorkspaceMark
+                logoUrl={snapshot?.workspace.logoUrl}
+                className="account-menu__workspace-mark"
+                fallback={null}
+              />
+              <div className="account-menu__workspace">
+                <strong>{snapshot?.workspace.name ?? "Workspace"}</strong>
+                <span>{displayEmail}</span>
+              </div>
             </div>
             {/*
               Tab-reachable but deliberately outside the arrow ring: the pill is

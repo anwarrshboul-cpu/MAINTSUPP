@@ -72,6 +72,7 @@ import {
   scopedDbWithCapability,
   type ScopedDatabase,
 } from "../../../lib/tenant-db";
+import { everySiteRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -280,6 +281,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guarded = await scopedDbWithCapability(request, "board.view");
     if (guarded.denied) return guarded.denied;
+    /* Every site's spend, by contractor name: not a site-restricted member's
+       (security review) — see `everySiteRefusal`. */
+    const everySite = everySiteRefusal(guarded.scope.siteScope, "contractor linking");
+    if (everySite) return everySite;
     const scope = guarded.scope;
 
     const [unlinked, register, aliasRows, ignored, namedJobs, subject] = await Promise.all([
