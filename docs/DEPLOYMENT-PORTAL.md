@@ -57,13 +57,16 @@ separate act, and it always has been.
   the file — so the 4.5 MB request cap no longer limits uploads. No read,
   list or delete URL ever reaches a browser. Two provider settings decide the
   largest file: the `job-media` bucket's *File size limit* AND the project's
-  global *Upload file size limit* (Dashboard → Storage → Settings). The app
-  allows 90 MB videos and 25 MB other files, so both must be ≥ 100 MB.
-  Measured 2026-09-22: the Production bucket is 100 MiB (private); the Staging
-  bucket was raised 50 → 100 MiB, but the Staging PROJECT caps uploads at
-  50 MB (a part crossing 50 MiB is refused with 413), so videos over 50 MB
-  need the project limit raised (a plan setting). The Supabase S3 endpoint
-  answers CORS preflights for PUT from any origin; nothing to configure.
+  global *Upload file size limit* (Dashboard → Storage → Settings).
+  **Policy (owner decision, 2026-09-22): videos up to 50 MB, other files up
+  to 25 MB** — `app/lib/upload-policy.ts`, read by the browser helper and both
+  routes. The current plan's project ceiling is 50 MB (a part crossing 50 MiB
+  is refused with 413) and the plan is deliberately NOT being upgraded, so
+  50 MB is the product's truthful maximum; the app refuses anything larger at
+  `start`, before a byte moves. Measured 2026-09-22: both `job-media` buckets
+  are 100 MiB (private), above the app's limit. A video of exactly 50 MiB was
+  uploaded end to end on Staging. The Supabase S3 endpoint answers CORS
+  preflights for PUT from any origin; nothing to configure.
 - **Auth**: fully custom (PBKDF2 210k + hashed session tokens in the DB — no
   Supabase Auth, no GoTrue, no redirect URLs to configure). Sign-in
   throttling is DB-backed, so it works across serverless instances. Cookies

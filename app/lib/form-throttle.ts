@@ -40,7 +40,7 @@ export const FORM_SUBMISSIONS: PublicThrottle = {
 /*
  * `/api/report-job` — the home page's anonymous "report a fault" door. Every
  * report mints a thirty-minute upload token, and since uploads over 900 KB go
- * straight into the bucket that token is worth up to 90 MB of storage. Ten
+ * straight into the bucket that token is worth up to 50 MB of storage. Ten
  * reports per address per ten minutes is far above a shop's real need.
  */
 export const REPORT_JOB_SUBMISSIONS: PublicThrottle = {

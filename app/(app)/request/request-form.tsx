@@ -313,7 +313,7 @@ export function RequestForm() {
                     : "Add photos, videos or documents"}
                 </strong>
                 <small>
-                  Files up to 25 MB; videos up to 90 MB each. Large videos upload in parts.
+                  Files up to 25 MB; videos up to 50 MB each. Large videos upload in parts.
                 </small>
               </label>
 
