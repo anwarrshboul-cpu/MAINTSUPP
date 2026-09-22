@@ -51,7 +51,10 @@ test("Report a Job moved down, and its anchor moved with it", async () => {
   /* The footer is the layout's, so "above the footer" is a statement about
      being last in <main> — there is nothing else in the layout between them. */
   const layout = await read("app/(marketing)/layout.tsx");
-  assert.match(layout, /\{children\}\s*\n\s*<SiteFooter \/>/, "nothing sits between the page and the footer");
+  /* RE-POINTED (decision J): the footer now takes the navigation the layout
+     read, as a prop. The claim is unchanged — nothing sits between the page and
+     the footer. */
+  assert.match(layout, /\{children\}\s*\n\s*<SiteFooter navigation=\{navigation\} \/>/, "nothing sits between the page and the footer");
 
   /* The anchor lives on the section, so moving the component moves the target —
      nothing in the nav or the hero needed editing, and nothing should have. */
@@ -590,12 +593,19 @@ test("the SVG path leak is fixed where it was produced", async () => {
 
 test("the footer renames the portal link and adds the contractor route, nav untouched", async () => {
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
-  /* RE-POINTED at `SectionLink`, which renders these footer entries now so
-     that a section hash resolves against whichever marketing page the footer
-     is drawn on. The label and the destination are unchanged. */
-  assert.match(chrome, /<li><SectionLink href="#portal">Client portal<\/SectionLink><\/li>/);
-  assert.ok(!chrome.includes("The software"), "the old label is gone");
-  assert.match(chrome, /<li><Link href="\/contractors">Join our contractor network<\/Link><\/li>/);
+  /*
+   * RE-POINTED (decision J): the footer's entries are data that platform staff
+   * edit, and the footer AS SHIPPED — the fallback when nothing is stored — is
+   * `FOOTER_DEFAULTS` in `app/lib/site-navigation.ts`. The label and the
+   * destination of each entry are unchanged, and the chrome still renders every
+   * footer entry through `SectionLink` (asserted here too), so a section hash
+   * still resolves against whichever page the footer is drawn on.
+   */
+  const navigation = await read("app/lib/site-navigation.ts");
+  assert.match(navigation, /\{ id: "ftr-client-portal", href: "#portal", label: "Client portal" \}/);
+  assert.ok(!chrome.includes("The software") && !navigation.includes("The software"), "the old label is gone");
+  assert.match(navigation, /\{ id: "ftr-join", href: "\/contractors", label: "Join our contractor network" \}/);
+  assert.match(chrome, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/, "every footer entry renders through SectionLink");
   /*
    * RE-POINTED: the top nav now carries Contractors DELIBERATELY.
    *
@@ -610,7 +620,9 @@ test("the footer renames the portal link and adds the contractor route, nav unto
    * that one entry. The nav is rendered from the list in two places, so a
    * second NAV entry would make it five.
    */
-  const navList = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
+  /* RE-POINTED (decision J): the shared nav list moved to
+     `app/lib/site-navigation.ts` with the rest of the shipped navigation. */
+  const navList = navigation.slice(navigation.indexOf("const NAV = ["), navigation.indexOf("] as const;"));
   assert.equal(
     (navList.match(/\/contractors/g) ?? []).length,
     1,
@@ -625,9 +637,20 @@ test("the footer renames the portal link and adds the contractor route, nav unto
    * Three real ones: the entry in the shared list, and the footer link. The two
    * renders reference `{href}`, not the literal.
    */
+  /*
+   * RE-POINTED (decision J). Both typed copies moved out of the chrome, which
+   * now renders data and carries no destination of its own for these links —
+   * so the chrome has NONE, and the shipped navigation has exactly the two: the
+   * shared nav entry and the footer link. Counted inside those two lists only:
+   * the file also lists /contractors among the destinations an editor may
+   * choose (`SITE_ROUTES`), which is an allowlist, not a third link.
+   */
   const chromeCode = chrome.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  assert.equal((chromeCode.match(/\/contractors/g) ?? []).length, 0, "the chrome types no copy of its own");
+  const shipped = navigation.slice(navigation.indexOf("const NAV = ["), navigation.indexOf("export const FOOTER_GROUP_IDS"));
+  const shippedCode = shipped.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.equal(
-    (chromeCode.match(/\/contractors/g) ?? []).length,
+    (shippedCode.match(/\/contractors/g) ?? []).length,
     2,
     "the shared nav entry and the footer link — no third typed copy",
   );

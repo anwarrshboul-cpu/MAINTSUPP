@@ -226,7 +226,13 @@ test("the API: redirects stay behind the platform gate, are validated, and follo
 
 test("the migration is additive: four guarded columns, one guarded table, text states", async () => {
   const init = await read("db/init.ts");
-  const stage = init.slice(init.indexOf("async function ensureSitePageLifecycle"), init.indexOf("async function ensureThemeTokens"));
+  /* RE-POINTED (decision J): this sliced up to `ensureThemeTokens`, the function
+     that happened to follow. `ensureSiteNavigation` now sits between the two, so
+     the slice swept in another stage's comment ("a rename") and failed on it.
+     Bounded by this function's own closing brace at column zero instead — the
+     same assertion, about exactly this stage and nothing after it. */
+  const stageStart = init.indexOf("async function ensureSitePageLifecycle");
+  const stage = init.slice(stageStart, init.indexOf("\n}\n", stageStart) + 2);
   assert.match(init, /await ensureSitePageLifecycle\(d1\);/);
   assert.match(stage, /addColumns\(d1, "site_pages", \[/);
   assert.match(stage, /\["robots", "TEXT NOT NULL DEFAULT 'index'"\]/, "a state is TEXT, never a boolean");
@@ -263,7 +269,9 @@ async function database() {
   }
   sqlite.exec(init.match(/"(CREATE UNIQUE INDEX IF NOT EXISTS site_pages_slug_idx[^"]+)"/)[1]);
   /* The new stage, exactly as written: its columns and its table. */
-  const stage = init.slice(init.indexOf("async function ensureSitePageLifecycle"), init.indexOf("async function ensureThemeTokens"));
+  /* RE-POINTED (decision J), as above: bounded by this stage's own closing brace. */
+  const stageStart = init.indexOf("async function ensureSitePageLifecycle");
+  const stage = init.slice(stageStart, init.indexOf("\n}\n", stageStart) + 2);
   for (const [, column, definition] of stage.matchAll(/\["(\w+)", "([^"]+)"\]/g)) {
     sqlite.exec(`ALTER TABLE site_pages ADD COLUMN ${column} ${definition}`);
   }

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { readPublicNavigation } from "../lib/site-navigation-public";
 import { Analytics } from "./_sections/analytics";
 import {
   CookieNotice,
@@ -20,8 +21,17 @@ import marketingCss from "./marketing.css?url";
  * `.m-root` survives only to supply the handful of custom properties the legal
  * pages still use. It sets no colour, font or spacing of its own — see the
  * comment above the rule in marketing.css.
+ *
+ * THE NAVIGATION IS READ HERE, ONCE PER RENDER, AND NEVER COSTS A PAGE ITS
+ * LIFE (decision J). `readPublicNavigation` answers from a per-instance cache
+ * that is re-read at most every thirty seconds, waits at most a moment for the
+ * database, and falls back to the last navigation it had — or the built-in one
+ * — when the database cannot answer. Hidden links and links to website pages
+ * that are not live are removed on the server, so they never reach the page or
+ * its payload. See `app/lib/site-navigation-public.ts`.
  */
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default async function MarketingLayout({ children }: { children: ReactNode }) {
+  const navigation = await readPublicNavigation();
   return (
     <div className="m-root">
       <link rel="stylesheet" href={marketingCss} />
@@ -39,9 +49,9 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       />
       <ScrollFurniture />
       <UtilityBar />
-      <SiteHeader />
+      <SiteHeader navigation={navigation} />
       {children}
-      <SiteFooter />
+      <SiteFooter navigation={navigation} />
       <CookieNotice />
       <RevealObserver />
       <Analytics />

@@ -83,6 +83,7 @@ const PROTECTED_PATHS = [
   "/admin/roles",
   "/admin/audit",
   "/admin/pages",
+  "/admin/navigation",
   "/admin/leads",
   "/admin/applications",
   "/admin/backups",

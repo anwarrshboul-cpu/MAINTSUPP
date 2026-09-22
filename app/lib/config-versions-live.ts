@@ -13,11 +13,13 @@ import type { getDb } from "../../db";
 import { dashboardLayouts, navigationLayouts } from "../../db/schema";
 import { sanitiseArrangement, sanitiseLocked } from "../api/navigation/layout";
 import { listPages } from "./cms-repository";
+import { readStoredNavigation } from "./site-navigation-repository";
 import {
   dashboardSnapshot,
   modulesSnapshot,
   navigationSnapshot,
   pageSnapshot,
+  siteNavigationSnapshot,
   themeSnapshot,
   type VersionSubject,
 } from "./config-versions-model";
@@ -39,6 +41,11 @@ export async function liveSnapshot(db: Database, organisationId: string | null, 
   if (subject === "site_page") {
     const page = (await listPages(db)).find((entry) => entry.slug === key);
     return page ? pageSnapshot(page) : { absent: true };
+  }
+  /* Decision J — installation-wide: the stored navigation, or "no row" (built-in). */
+  if (subject === "site_navigation") {
+    const stored = await readStoredNavigation(db);
+    return siteNavigationSnapshot(stored.stored ? stored.navigation : null);
   }
   if (organisationId === null) return { absent: true };
   if (subject === "theme") return themeSnapshot(await readThemeOverrides(db, organisationId));
