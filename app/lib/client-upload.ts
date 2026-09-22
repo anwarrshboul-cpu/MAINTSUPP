@@ -5,6 +5,7 @@ import type {
   AttachmentRecord,
   MaintenanceRequest,
 } from "./types";
+import { md5Hex } from "./md5";
 
 /*
  * Above this, upload in parts. 900 KB, not the 4 MB it used to be.
@@ -504,7 +505,12 @@ async function multipartUpload(options: UploadOptions & UploadProgress) {
          * Straight to the bucket. Each attempt asks for a FRESH URL, so an
          * attempt after an expired one (403) or a dropped connection (0) is a
          * clean retry; a refusal of any other kind is final and says why.
+         *
+         * The MD5 of exactly these bytes is declared at `complete`, where the
+         * route compares it with what the bucket says it stored — see the note
+         * there on why a part's size alone is not proof of its contents.
          */
+        const digest = md5Hex(new Uint8Array(await chunk.arrayBuffer()));
         let status = 0;
         for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
           const signed = await readApi<SignedPartResponse>(
@@ -542,8 +548,9 @@ async function multipartUpload(options: UploadOptions & UploadProgress) {
             status || 503,
           );
         }
-        // The route lists the parts from the bucket itself at `complete`.
-        parts.push({ partNumber: index + 1, etag: "" });
+        // The route lists the parts from the bucket itself at `complete`, and
+        // checks each one's stored MD5 against this declaration.
+        parts.push({ partNumber: index + 1, etag: digest });
         sent += chunk.size;
         report(0);
         continue;

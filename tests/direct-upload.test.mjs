@@ -133,6 +133,40 @@ test("ListParts also reads Supabase Storage's `<Parts>` shape, and ignores the m
   ]);
 });
 
+test("MD5 matches RFC 1321's suite and node:crypto, including the padding edges", async () => {
+  const { md5Hex } = await import("../app/lib/md5.ts");
+  const { createHash, randomBytes } = await import("node:crypto");
+  const rfc = {
+    "": "d41d8cd98f00b204e9800998ecf8427e",
+    a: "0cc175b9c0f1b6a831c399e269772661",
+    abc: "900150983cd24fb0d6963f7d28e17f72",
+    "message digest": "f96b697d7cb7938d525a2f31aaf161d0",
+    abcdefghijklmnopqrstuvwxyz: "c3fcd3d76192e4007dfb496cca67e13b",
+    "12345678901234567890123456789012345678901234567890123456789012345678901234567890": "57edf4a22be3c955ac49da2e2107b67a",
+  };
+  for (const [input, want] of Object.entries(rfc)) assert.equal(md5Hex(new TextEncoder().encode(input)), want, JSON.stringify(input));
+  for (const size of [55, 56, 63, 64, 65, 5 * MiB + 7]) {
+    const bytes = randomBytes(size);
+    assert.equal(md5Hex(new Uint8Array(bytes)), createHash("md5").update(bytes).digest("hex"), `${size} bytes`);
+  }
+});
+
+test("a direct part is accepted only if the bucket stored the bytes the browser sent", async () => {
+  /* Measured on Supabase Storage: a part URL honoured an unsigned x-amz-copy-source
+     and stored ANOTHER object's bytes. The stored part's ETag (its MD5) must equal
+     the MD5 the browser declares for what it sent — a copy cannot. */
+  const route = code(await read("app/api/files/multipart/route.ts"));
+  const complete = route.slice(route.indexOf('action === "complete"'));
+  assert.ok(
+    complete.indexOf("declared.get(part.partNumber) === part.etag.toLowerCase()") > 0 &&
+      complete.indexOf("declared.get(part.partNumber) === part.etag.toLowerCase()") < complete.indexOf("multipart.complete(parts)"),
+    "the contents are proven before anything is assembled",
+  );
+  const client = code(await read("app/lib/client-upload.ts"));
+  assert.match(client, /const digest = md5Hex\(new Uint8Array\(await chunk\.arrayBuffer\(\)\)\);/);
+  assert.match(client, /parts\.push\(\{ partNumber: index \+ 1, etag: digest \}\);/);
+});
+
 /* ------------------------------------------------------------------ */
 /* File signatures                                                      */
 /* ------------------------------------------------------------------ */

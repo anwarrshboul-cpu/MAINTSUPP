@@ -897,6 +897,24 @@ export async function POST(request: Request) {
          * through `PUT` below, where each was checked against the same plan.
          */
         const direct = session.transport === "direct" ? directTransport(multipart) : null;
+        /* What the browser says each part is: its etag on the proxied path, and
+           on the direct path the MD5 it computed of the bytes it sent. */
+        const claimed = Array.isArray(payload.parts)
+          ? payload.parts
+              .map((part) => {
+                const value = part as Record<string, unknown>;
+                return {
+                  partNumber: Number(value.partNumber),
+                  etag: String(value.etag ?? "").trim().toLowerCase(),
+                };
+              })
+              .filter(
+                (part) =>
+                  Number.isInteger(part.partNumber) &&
+                  part.partNumber > 0 &&
+                  part.etag.length > 0,
+              )
+          : [];
         let parts: Array<{ partNumber: number; etag: string }>;
         if (direct) {
           const listed = await direct.listParts();
@@ -912,24 +930,30 @@ export async function POST(request: Request) {
               { status: 400 },
             );
           }
+          /*
+           * WHAT EACH PART HOLDS, not only that it exists. The bucket's ETag for a
+           * part is the MD5 of the bytes it stored, and the browser declares the
+           * MD5 of the bytes it SENT. Measured on Supabase Storage: a part URL
+           * honoured an unsigned `x-amz-copy-source` header and filled the part
+           * with ANOTHER object's bytes. Such a part carries the source's MD5,
+           * which nobody can declare without already holding the source — so a
+           * copied part never gets past this line, whoever's object it names.
+           */
+          const declared = new Map(claimed.map((part) => [part.partNumber, part.etag]));
+          if (!listed.every((part) => declared.get(part.partNumber) === part.etag.toLowerCase())) {
+            console.error("[/api/files/multipart] part contents do not match what was sent", {
+              planned: plan.partCount,
+              declared: declared.size,
+            });
+            await multipart.abort().catch(() => undefined);
+            return Response.json(
+              { error: "The file's parts do not match what was sent. Start the upload again." },
+              { status: 400 },
+            );
+          }
           parts = listed.map(({ partNumber, etag }) => ({ partNumber, etag }));
         } else {
-          parts = Array.isArray(payload.parts)
-            ? payload.parts
-                .map((part) => {
-                  const value = part as Record<string, unknown>;
-                  return {
-                    partNumber: Number(value.partNumber),
-                    etag: String(value.etag ?? ""),
-                  };
-                })
-                .filter(
-                  (part) =>
-                    Number.isInteger(part.partNumber) &&
-                    part.partNumber > 0 &&
-                    part.etag.length > 0,
-                )
-            : [];
+          parts = claimed;
           if (!parts.length || parts.length > 100 || parts.length !== plan.partCount) {
             return Response.json(
               { error: "The uploaded file parts are incomplete." },

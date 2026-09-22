@@ -47,8 +47,23 @@ separate act, and it always has been.
   (`db/r2-over-s3.ts`). Selected by setting all four `S3_*` variables; with
   any missing the app silently falls back to per-instance `/tmp` — uploads
   appear to work and then vanish. **The bucket must be PRIVATE**: the app
-  brokers all access through `/api/files` with its own authorization; a public
+  brokers every READ through `/api/files` with its own authorization; a public
   bucket turns object keys into bearer credentials.
+- **Direct uploads** (files over 900 KB): the bytes go from the browser
+  straight into the private bucket, part by part, on short-lived
+  **upload-only** URLs the app signs one part at a time (`presignPart` in
+  `db/r2-over-s3.ts`; the session rules are in `app/lib/upload-sessions.ts`).
+  Vercel functions carry only metadata, authorisation and `complete` — never
+  the file — so the 4.5 MB request cap no longer limits uploads. No read,
+  list or delete URL ever reaches a browser. Two provider settings decide the
+  largest file: the `job-media` bucket's *File size limit* AND the project's
+  global *Upload file size limit* (Dashboard → Storage → Settings). The app
+  allows 90 MB videos and 25 MB other files, so both must be ≥ 100 MB.
+  Measured 2026-09-22: the Production bucket is 100 MiB (private); the Staging
+  bucket was raised 50 → 100 MiB, but the Staging PROJECT caps uploads at
+  50 MB (a part crossing 50 MiB is refused with 413), so videos over 50 MB
+  need the project limit raised (a plan setting). The Supabase S3 endpoint
+  answers CORS preflights for PUT from any origin; nothing to configure.
 - **Auth**: fully custom (PBKDF2 210k + hashed session tokens in the DB — no
   Supabase Auth, no GoTrue, no redirect URLs to configure). Sign-in
   throttling is DB-backed, so it works across serverless instances. Cookies
