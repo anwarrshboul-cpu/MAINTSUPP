@@ -141,6 +141,24 @@ test("a download changes nothing, and the file opens correctly in Excel", async 
   assert.match(helper, /\\uFEFF/, "the BOM is the helper's, so Excel does not mangle an accented company name");
 });
 
+test("the list scrolls in its own strip rather than pushing the page sideways", async () => {
+  /*
+   * Found by this batch's QA, and pre-existing: at 390 the enquiry table is 377px
+   * inside a 354px column with `overflow-x: visible`, so the whole page scrolled
+   * sideways — but only once the filter had rows, which is why Production never
+   * showed it (it has no open enquiries) and why no earlier QA caught it. It is the
+   * same failure the recycle bin had, and the reason `.platform-table-wrap` exists
+   * on the other console screens.
+   */
+  const view = await read("app/(app)/admin/leads-view.tsx");
+  const css = await read("app/(app)/admin/leads.css");
+  assert.match(view, /<div className="leads-admin__scroll">\s*<table className="admin-table leads-admin__list">/);
+  assert.match(css, /\.leads-admin__scroll \{\s*overflow-x: auto;/);
+  /* And no new breakpoint: the strip needs none, and only 640/767/768/1024/1280
+     are permitted (`tests/stage-*`). */
+  assert.deepEqual([...css.matchAll(/@media[^{]*?(\d{3,4})px/g)].map((match) => match[1]).filter((width) => !["640", "767", "768", "1024", "1280"].includes(width)), []);
+});
+
 /* ── Live: the wire, when a dev server is answering ───────────────────────── */
 
 const BASE_URL = process.env.MAINTSUPP_BASE_URL ?? "http://localhost:5173";
@@ -180,8 +198,14 @@ test("live: platform staff download the enquiries, and an invented filter is ref
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /text\/csv/);
   assert.match(response.headers.get("content-disposition") ?? "", /attachment; filename="maintsupp-enquiries-all-\d{4}-\d{2}-\d{2}\.csv"/);
-  const body = await response.text();
-  assert.ok(body.startsWith("﻿"), "the BOM is there");
+  /* The BOM is checked in the BYTES, deliberately. `Response.text()` performs a
+     UTF-8 decode, which by specification DROPS a leading byte order mark — so
+     asserting on the decoded string says the BOM is missing when it is present,
+     which is what this test claimed on its first run against a Preview. Excel
+     reads bytes, so bytes are what matter. */
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert.deepEqual([...bytes.slice(0, 3)], [0xef, 0xbb, 0xbf], "the BOM is there, in the bytes");
+  const body = new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
   assert.match(body.split("\r\n")[0], /^﻿Received,Status,Name,Company,Email,Phone,Sites,Services,Regions,Challenge,Notified,Notify attempts,Filed under,Workspace id,Enquiry id$/);
 
   const inbox = await (await fetch(`${BASE_URL}/api/leads`, { headers: { cookie } })).json();

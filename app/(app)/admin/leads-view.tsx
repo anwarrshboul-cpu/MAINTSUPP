@@ -204,6 +204,14 @@ export function LeadsInboxView() {
             : "No enquiry matches that filter."}
         </AdminNotice>
       ) : (
+        /* The list is wider than a phone once there are rows in it, so it gets its
+           own scroll strip — measured at 390: the table is 377px inside a 354px
+           column and WAS pushing the whole page sideways, which is the same failure
+           the recycle bin had (`recycle-bin-section.tsx`) and the reason
+           `.platform-table-wrap` exists on the other console screens. It shows
+           only when the filter has rows, which is why Production never showed it:
+           it has no open enquiries. Found by this batch's QA against Staging. */
+        <div className="leads-admin__scroll">
         <table className="admin-table leads-admin__list">
           <thead>
             <tr>
@@ -266,6 +274,7 @@ export function LeadsInboxView() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {expanded
