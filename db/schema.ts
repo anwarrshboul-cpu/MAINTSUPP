@@ -4414,8 +4414,32 @@ export const sitePages = sqliteTable(
     updatedByEmail: text("updated_by_email"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    /** The publishing window, ISO text; a published page is live only inside it. */
+    publishAt: text("publish_at"),
+    unpublishAt: text("unpublish_at"),
+    /** 'index' | 'noindex' — TEXT, never a boolean (see `ensureSitePageLifecycle`). */
+    robots: text("robots").notNull().default("index"),
+    /** A same-site canonical override, or null for the page's own address. */
+    canonicalUrl: text("canonical_url"),
   },
   (table) => [uniqueIndex("site_pages_slug_idx").on(table.slug)],
+);
+
+/**
+ * Old website addresses and where they now lead. See `ensureSitePageLifecycle`
+ * in `db/init.ts` and `app/lib/cms-seo.ts`.
+ */
+export const siteRedirects = sqliteTable(
+  "site_redirects",
+  {
+    id: text("id").primaryKey(),
+    fromPath: text("from_path").notNull(),
+    toTarget: text("to_target").notNull(),
+    kind: text("kind").notNull().default("manual"),
+    createdByEmail: text("created_by_email"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("site_redirects_from_idx").on(table.fromPath)],
 );
 
 export const siteBlocks = sqliteTable(

@@ -25,8 +25,9 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import type { getDb } from "../../db";
-import { siteBlocks, sitePages } from "../../db/schema";
+import { siteBlocks, sitePages, siteRedirects } from "../../db/schema";
 import { readBlockBody, type BlockBody } from "./cms-blocks.ts";
+import { pageIsLive, pageState, resolveRedirect } from "./cms-seo.ts";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -47,8 +48,39 @@ export type CmsPage = {
   publishedAt: string | null;
   updatedByEmail: string | null;
   updatedAt: string;
+  /* The publishing window, indexing and canonical — see `app/lib/cms-seo.ts`. */
+  publishAt: string | null;
+  unpublishAt: string | null;
+  robots: "index" | "noindex";
+  canonicalUrl: string | null;
+  /* Where the page stands NOW: draft, scheduled, live or ended. Read-time. */
+  state: "draft" | "scheduled" | "live" | "ended";
   blocks: CmsBlock[];
 };
+
+type PageRow = typeof sitePages.$inferSelect;
+
+/** One row as the product speaks of it, with its state decided at `now`. */
+function toPage(page: PageRow, blocks: CmsBlock[], now = Date.now()): CmsPage {
+  const published = page.published === 1;
+  const span = { publishAt: page.publishAt ?? null, unpublishAt: page.unpublishAt ?? null };
+  return {
+    id: page.id,
+    slug: page.slug,
+    title: page.title,
+    metaTitle: page.metaTitle ?? null,
+    metaDescription: page.metaDescription ?? null,
+    published,
+    publishedAt: page.publishedAt ?? null,
+    updatedByEmail: page.updatedByEmail ?? null,
+    updatedAt: page.updatedAt,
+    ...span,
+    robots: page.robots === "noindex" ? "noindex" : "index",
+    canonicalUrl: page.canonicalUrl ?? null,
+    state: pageState({ published, ...span }, now),
+    blocks,
+  };
+}
 
 /** Rows the catalogue still understands, in order. See `readBlockBody`. */
 async function blocksOf(db: Database, pageId: string): Promise<CmsBlock[]> {
@@ -89,6 +121,7 @@ async function blocksOf(db: Database, pageId: string): Promise<CmsBlock[]> {
 export async function readPublishedPage(
   db: Database,
   slug: string,
+  now: number = Date.now(),
 ): Promise<CmsPage | null> {
   try {
     const rows = await db
@@ -98,18 +131,11 @@ export async function readPublishedPage(
       .limit(1);
     const page = rows[0];
     if (!page) return null;
-    return {
-      id: page.id,
-      slug: page.slug,
-      title: page.title,
-      metaTitle: page.metaTitle ?? null,
-      metaDescription: page.metaDescription ?? null,
-      published: true,
-      publishedAt: page.publishedAt ?? null,
-      updatedByEmail: page.updatedByEmail ?? null,
-      updatedAt: page.updatedAt,
-      blocks: await blocksOf(db, page.id),
-    };
+    /* Published is not enough: the page must be inside its publishing window
+       NOW. Outside it, it is the same "not here" as a draft. */
+    const read = toPage(page, [], now);
+    if (!pageIsLive(read, now)) return null;
+    return { ...read, blocks: await blocksOf(db, page.id) };
   } catch (error) {
     // See the header: null becomes a 404, which is a better public answer than 500.
     console.error("[cms] could not read the published page", error);
@@ -121,20 +147,10 @@ export async function readPublishedPage(
 export async function listPages(db: Database): Promise<CmsPage[]> {
   try {
     const rows = await db.select().from(sitePages);
+    const now = Date.now();
     const out: CmsPage[] = [];
     for (const page of rows) {
-      out.push({
-        id: page.id,
-        slug: page.slug,
-        title: page.title,
-        metaTitle: page.metaTitle ?? null,
-        metaDescription: page.metaDescription ?? null,
-        published: page.published === 1,
-        publishedAt: page.publishedAt ?? null,
-        updatedByEmail: page.updatedByEmail ?? null,
-        updatedAt: page.updatedAt,
-        blocks: await blocksOf(db, page.id),
-      });
+      out.push(toPage(page, await blocksOf(db, page.id), now));
     }
     out.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     return out;
@@ -151,6 +167,12 @@ export type PageInput = {
   metaDescription: string | null;
   published: boolean;
   blocks: Array<{ kind: string; body: BlockBody }>;
+  /* Optional, so a restore of a version recorded before these existed still
+     writes: absent means no window, indexed, and the page's own address. */
+  publishAt?: string | null;
+  unpublishAt?: string | null;
+  robots?: "index" | "noindex";
+  canonicalUrl?: string | null;
 };
 
 /**
@@ -203,6 +225,7 @@ export async function writePage(
           publishedAt,
           updatedByEmail: actorEmail,
           updatedAt: now,
+          ...lifecycleColumns(input),
         })
         .where(eq(sitePages.id, id));
     } else {
@@ -217,6 +240,7 @@ export async function writePage(
         updatedByEmail: actorEmail,
         createdAt: now,
         updatedAt: now,
+        ...lifecycleColumns(input),
       });
     }
 
@@ -239,6 +263,127 @@ export async function writePage(
     console.error("[cms] could not write the page", error);
     return { ok: false, reason: "That page could not be saved." };
   }
+}
+
+function lifecycleColumns(input: PageInput) {
+  return {
+    publishAt: input.publishAt ?? null,
+    unpublishAt: input.unpublishAt ?? null,
+    robots: input.robots === "noindex" ? "noindex" : "index",
+    canonicalUrl: input.canonicalUrl ?? null,
+  };
+}
+
+/**
+ * ANY page by slug, draft or scheduled included — for a platform-staff
+ * PREVIEW only. The public route never calls this without that check.
+ */
+export async function readPageForPreview(db: Database, slug: string): Promise<CmsPage | null> {
+  try {
+    const rows = await db.select().from(sitePages).where(eq(sitePages.slug, slug)).limit(1);
+    const page = rows[0];
+    return page ? toPage(page, await blocksOf(db, page.id)) : null;
+  } catch (error) {
+    console.error("[cms] could not read the page for preview", error);
+    return null;
+  }
+}
+
+/**
+ * Every page without its blocks — what `/sitemap-pages.xml` needs, and no
+ * more. A failed read is an empty list: the sitemap then lists no CMS pages,
+ * which a crawler reads as "nothing new", never as "these pages are gone".
+ */
+export async function listPagesForSitemap(db: Database): Promise<CmsPage[]> {
+  try {
+    const now = Date.now();
+    return (await db.select().from(sitePages)).map((page) => toPage(page, [], now));
+  } catch (error) {
+    console.error("[cms] could not list the pages for the sitemap", error);
+    return [];
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Redirects                                                           */
+/* ------------------------------------------------------------------ */
+
+export type CmsRedirect = {
+  from: string;
+  to: string;
+  kind: "moved" | "manual";
+  createdByEmail: string | null;
+  createdAt: string;
+};
+
+/** Every redirect, newest first. The table holds a handful of rows. */
+export async function listRedirects(db: Database): Promise<CmsRedirect[]> {
+  try {
+    const rows = await db.select().from(siteRedirects);
+    return rows
+      .map((row) => ({
+        from: row.fromPath,
+        to: row.toTarget,
+        kind: row.kind === "moved" ? ("moved" as const) : ("manual" as const),
+        createdByEmail: row.createdByEmail ?? null,
+        createdAt: row.createdAt,
+      }))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  } catch (error) {
+    console.error("[cms] could not list the redirects", error);
+    return [];
+  }
+}
+
+/** The redirects as a lookup, for `resolveRedirect` / `planRedirect`. */
+export async function redirectMap(db: Database): Promise<Map<string, string>> {
+  return new Map((await listRedirects(db)).map((row) => [row.from, row.to]));
+}
+
+/**
+ * Where an old CMS address leads now, or null. A failed read is "no redirect":
+ * the route then answers 404, as it would for any address that is not a page.
+ */
+export async function redirectTargetFor(db: Database, slug: string): Promise<string | null> {
+  try {
+    return resolveRedirect(await redirectMap(db), `/p/${slug}`);
+  } catch (error) {
+    console.error("[cms] could not resolve a redirect", error);
+    return null;
+  }
+}
+
+/**
+ * Store `from → target` (the caller has already planned and collapsed it),
+ * replacing any redirect from the same address, and re-point every redirect
+ * that led TO `from` so no chain is left behind.
+ */
+export async function saveRedirect(
+  db: Database,
+  from: string,
+  target: string,
+  kind: "moved" | "manual",
+  actorEmail: string,
+): Promise<void> {
+  await db.delete(siteRedirects).where(eq(siteRedirects.fromPath, from));
+  await db.insert(siteRedirects).values({
+    id: `rd_${crypto.randomUUID().replace(/-/g, "")}`,
+    fromPath: from,
+    toTarget: target,
+    kind,
+    createdByEmail: actorEmail,
+    createdAt: new Date().toISOString(),
+  });
+  await db.update(siteRedirects).set({ toTarget: target }).where(eq(siteRedirects.toTarget, from));
+}
+
+/** Remove the redirect from one address. True when there was one. */
+export async function deleteRedirect(db: Database, from: string): Promise<boolean> {
+  const rows = await db
+    .delete(siteRedirects)
+    .where(eq(siteRedirects.fromPath, from))
+    .returning({ id: siteRedirects.id });
+  return rows.length > 0;
 }
 
 /**
