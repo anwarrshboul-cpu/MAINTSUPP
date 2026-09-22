@@ -51,6 +51,7 @@ import { ensureDatabase } from "../../../../db/init";
 import { calendarEvents } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { databaseSafeFailure } from "../../../lib/database-failure";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
 
 /**
  * The capability a manual calendar item is written under.
@@ -269,6 +270,9 @@ export async function GET(request: Request) {
     const withDeleted = url.searchParams.get("deleted") === "include";
 
     const conditions = [eq(calendarEvents.organisationId, orgId)];
+    /* A restricted member sees only events at their sites (`memberSiteCondition`). */
+    const confined = memberSiteCondition(calendarEvents.siteId, viewGuard.scope.siteScope);
+    if (confined) conditions.push(confined);
     if (!withDeleted) conditions.push(isNull(calendarEvents.deletedAt));
     if (!withArchived) conditions.push(eq(calendarEvents.archived, false));
 

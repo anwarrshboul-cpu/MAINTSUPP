@@ -163,9 +163,10 @@ function invalid(message: string): never {
  * `undefined` is drizzle's "no condition", which `and()` drops — so an
  * unrestricted member gets the whole workspace and a restricted one gets an
  * `IN` list. A restriction that is present but EMPTY cannot happen:
- * `parseSiteScope` returns null rather than `[]` for exactly that reason, and
- * an `inArray` with no values is a SQL error in one dialect and "everything" in
- * the other.
+ * `parseSiteScope` never returns `[]` — a restriction naming no usable site
+ * comes back as `[SITE_OUTSIDE_SCOPE]`, which matches nothing — for exactly that
+ * reason, and an `inArray` with no values is a SQL error in one dialect and
+ * "everything" in the other.
  */
 function siteFilter(siteScope: string[] | null) {
   return siteScope && siteScope.length ? inArray(units.siteId, siteScope) : undefined;

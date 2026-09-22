@@ -93,7 +93,10 @@ test("#8 on Vercel a caller-written cf-connecting-ip is ignored", async () => {
  *   links      c-linked -> s-in,     c-elsewhere -> s-out
  */
 async function loadOutsideSiteScope() {
-  const source = await read("app/api/files/[id]/route.ts");
+  /* RE-POINTED (site-scope reads, 2026-09-22): the rule moved, body unchanged,
+     from `app/api/files/[id]/route.ts` to `app/api/files/documents.ts` so the
+     two upload doors ask it too — one rule, not a second copy. */
+  const source = await read("app/api/files/documents.ts");
   const table = (name, ...cols) =>
     Object.fromEntries([["__name", name], ...cols.map((col) => [col, `${name}.${col}`])]);
   const units = table("units", "id", "siteId", "organisationId");

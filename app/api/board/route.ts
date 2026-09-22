@@ -106,6 +106,7 @@ import {
   itemMovedEvent,
   requestFieldEvents,
 } from "../../lib/automations";
+import { confineBoardPayload } from "../../lib/board-site-scope";
 
 /*
  * Which board a request is for.
@@ -1801,9 +1802,16 @@ export async function GET(request: Request) {
      * anything hitting the URL by hand — gets exactly what it got before.
      */
     const compact = new URL(request.url).searchParams.get("compact") === "1";
-    const payload = await boardPayload(db, orgId, await boardIdFrom(request, db, orgId), {
-      requests: !compact,
-    });
+    /* Confined to the member's sites — see `confineBoardPayload`. An
+       unrestricted member (every member today) gets the payload untouched. */
+    const payload = await confineBoardPayload(
+      db,
+      orgId,
+      await boardPayload(db, orgId, await boardIdFrom(request, db, orgId), {
+        requests: !compact,
+      }),
+      guard.scope.siteScope,
+    );
     return Response.json(compact ? compactBoard(payload) : payload);
   } catch (error) {
     /* A board this organisation does not have is a bad REQUEST, not an outage.

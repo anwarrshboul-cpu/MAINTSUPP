@@ -29,6 +29,8 @@ import {
   resolveSiteId,
   restorePredecessor,
   standDownPredecessor,
+  UPLOAD_OUTSIDE_SCOPE,
+  uploadOutsideSiteScope,
 } from "../documents";
 import {
   pendingReview,
@@ -447,6 +449,19 @@ async function authorizeUpload(
     jobToken: scopedToken,
   });
   if (authority.denied) return { response: authority.denied } as const;
+
+  /*
+   * THE MEMBER'S SITES — the direct route's check, on every action, against the
+   * key's anchors (supplied plus inherited). See `uploadOutsideSiteScope`.
+   */
+  if (
+    authority.via === "capability" &&
+    (await uploadOutsideSiteScope(db, orgId, scope.siteScope, keyAnchors, replacesId))
+  ) {
+    return {
+      response: Response.json({ error: UPLOAD_OUTSIDE_SCOPE }, { status: 404 }),
+    } as const;
+  }
 
   return {
     actor,
