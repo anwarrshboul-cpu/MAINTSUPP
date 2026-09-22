@@ -20,6 +20,7 @@ import {
   AccountStats,
   AccountStatus,
 } from "./account-ui";
+import { AccountApiTokensCard } from "./account-api-tokens";
 
 type PlatformPayload = {
   developers: {
@@ -88,7 +89,7 @@ function usePlatform() {
   return { data, error };
 }
 
-export function AccountDevelopersPanel() {
+export function AccountDevelopersPanel({ onNotify }: { onNotify?: (message: string) => void } = {}) {
   const { data, error } = usePlatform();
 
   return (
@@ -96,7 +97,7 @@ export function AccountDevelopersPanel() {
       <AccountHeading
         eyebrow="Account"
         title="Developers"
-        lede="Credentials, webhooks and the endpoints this workspace exposes. Everything below is read from the running Worker."
+        lede="Credentials, webhooks and the endpoints this workspace exposes. Everything below is read from the running server."
       />
 
       {error && <AccountError message={error} />}
@@ -130,6 +131,9 @@ export function AccountDevelopersPanel() {
           )}
         </AccountCard>
       ))}
+
+      {/* §35 — issue and revoke API tokens; renders only for integrations.manage. */}
+      {data && <AccountApiTokensCard onNotify={onNotify} />}
 
       {data && (
         <AccountCard
@@ -167,7 +171,7 @@ export function AccountDevelopersPanel() {
       {data && (
         <AccountCard
           title="Externally reachable endpoints"
-          description="The only two routes that answer without a workspace session."
+          description="The routes that answer without a workspace session, and what each accepts instead."
         >
           <div className="account-table-wrap">
             <table className="account-table">
@@ -279,8 +283,9 @@ export function AccountIntegrationsPanel() {
         <AccountCard tone="notice" title="Adding a connector">
           <p className="account-note">
             There is no plug-in system: a connector is code in this repository plus
-            a binding or a key on the Worker. Nothing can be installed from this
-            screen, which is why there is no install button on it.
+            a key set on the deployment. Nothing can be installed from this screen,
+            which is why there is no install button on it. Another system can read
+            this workspace today with an API token (Developers).
           </p>
         </AccountCard>
       )}

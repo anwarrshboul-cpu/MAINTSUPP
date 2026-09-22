@@ -2094,6 +2094,36 @@ export const notificationCooldowns = sqliteTable(
 );
 
 
+/**
+ * §35 — API tokens for a workspace. Only the SHA-256 of a token is stored; the
+ * prefix (`mst_<12 hex>`) is what a person sees again. `scopes` is a JSON list
+ * of read scopes (`app/lib/integrations/api-tokens.ts`), re-checked against the
+ * creator's CURRENT permissions on every request. Times are ISO text, compared
+ * in code, never in SQL — the two databases disagree about timestamps.
+ */
+export const apiTokens = sqliteTable(
+  "api_tokens",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    name: text("name").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    scopes: text("scopes").notNull().default("[]"),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdByEmail: text("created_by_email").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    lastUsedAt: text("last_used_at"),
+    revokedAt: text("revoked_at"),
+    revokedByEmail: text("revoked_by_email"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("api_tokens_hash_idx").on(table.tokenHash),
+    index("api_tokens_organisation_idx").on(table.organisationId, table.revokedAt),
+  ],
+);
+
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(
   "job_access_tokens",

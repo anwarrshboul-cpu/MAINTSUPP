@@ -57,6 +57,15 @@ const PUBLIC_ROUTES = new Set([
   "app/api/forms/[token]/route.ts",
   "app/api/forms/[token]/submit/route.ts",
   /*
+   * §35 — the read-only API. A caller here is a MACHINE holding an API token,
+   * never a browser session: `scopedDbWithApiToken` reads only the bearer
+   * header and answers 401 with the token's own reason. "Your session has
+   * ended, sign in" would be advice about a session no caller of these has, so
+   * they are on this footing rather than implementing the sign-out branch.
+   */
+  "app/api/v1/jobs/route.ts",
+  "app/api/v1/sites/route.ts",
+  /*
    * The two schedulers. Added 2026-09-06, and `retention` had been failing this
    * test since the day it was written — the list was never extended when the
    * first session-less route arrived, so this is a correction rather than an

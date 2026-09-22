@@ -199,6 +199,19 @@ export const CAPABILITY_CATALOGUE = [
     group: "Administration",
     description: "Change SLAs, alerting and workspace-wide preferences.",
   },
+  /*
+   * §35 — API tokens (and, next, outbound webhooks). A token acts on this
+   * workspace's data from outside the browser, so issuing one is administration:
+   * open to Owner and Admin by default, above a Manager's ceiling, closed to a
+   * client unless a Super Admin opens it. A token never carries more than its
+   * creator currently holds — see `effectiveTokenScopes`.
+   */
+  {
+    key: "integrations.manage",
+    label: "Manage integrations",
+    group: "Administration",
+    description: "Issue and revoke API tokens and manage outbound integrations for this workspace.",
+  },
   {
     key: "clients.view_all",
     label: "See every client workspace",
@@ -336,6 +349,8 @@ const ROLE_CEILINGS: Partial<Record<WorkspaceRole, ReadonlySet<Capability>>> = {
     "data.import",
     "audit.read",
     "billing.manage",
+    /* §35 — issuing credentials is administration, like the rows above. */
+    "integrations.manage",
   ]),
 };
 
@@ -398,6 +413,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "teams.manage",
     "audit.read",
     "settings.edit",
+    "integrations.manage",
     "navigation.personalise",
   ],
   /*
@@ -423,6 +439,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "teams.manage",
     "audit.read",
     "settings.edit",
+    "integrations.manage",
     "navigation.personalise",
   ],
   manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],

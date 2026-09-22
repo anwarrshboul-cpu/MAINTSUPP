@@ -165,7 +165,7 @@ export function AccountShell({ panel }: { panel: string }) {
       case "notifications":
         return <AccountNotificationsPanel onNotify={notify} />;
       case "developers":
-        return <AccountDevelopersPanel />;
+        return <AccountDevelopersPanel onNotify={notify} />;
       case "workspaces":
         return <AccountWorkspacesPanel snapshot={snapshot} onNotify={notify} />;
       case "trash":

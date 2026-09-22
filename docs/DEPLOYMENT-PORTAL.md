@@ -74,6 +74,8 @@ database and bucket, never production.
 | `S3_REGION` | server | optional | Prod | Defaults `eu-west-2` |
 | `MAINTSUPP_OWNER_PASSWORD` | server | REQUIRED in Prod | Prod | Owner seed (≥12 chars). Missing ⇒ owner sign-in fails closed (by design) |
 | `PG_D1_POOL` etc. | server | optional | — | Pool/diagnostics knobs, see `db/node-pg-d1.ts` |
+| `MAINTSUPP_SECRETS_KEY` | server | optional — **deliberately NOT set** (owner decision Q2, 2026-09-21) | — | base64 of exactly 32 random bytes (`openssl rand -base64 32`). Seals credentials the product must reuse (webhook signing secrets, Slack/Zapier URLs) with AES-256-GCM — `app/lib/secret-box.ts`. Absent ⇒ those features report "not configured" and store nothing; there is no plaintext fallback. Losing it makes every sealed credential unreadable (re-enter them). API tokens do not need it: they are hashed, never stored. |
+| `MAINTSUPP_SECRETS_KEY_PREVIOUS` | server | optional | — | The key being rotated out. Used to OPEN only, so sealed credentials survive a rotation. |
 
 Never configure: any `NEXT_PUBLIC_*` secret, a Supabase `service_role` key
 (the portal does not use one anywhere), or real secrets in Preview that
