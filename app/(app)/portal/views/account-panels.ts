@@ -25,6 +25,8 @@ export type AccountPanelDefinition = {
 
 export const ACCOUNT_PANELS: readonly AccountPanelDefinition[] = [
   { key: "", label: "My profile", icon: "user", group: "Account", monday: "My profile" },
+  /* §33 — monday keeps these under the profile as "Notification settings". */
+  { key: "notifications", label: "Notifications", icon: "bell", group: "Account", monday: "Notification settings" },
   { key: "developers", label: "Developers", icon: "tool", group: "Account", monday: "Developers" },
   { key: "workspaces", label: "Workspaces", icon: "building", group: "Account", monday: "Spaces" },
   { key: "trash", label: "Trash", icon: "close", group: "Account", monday: "Trash" },

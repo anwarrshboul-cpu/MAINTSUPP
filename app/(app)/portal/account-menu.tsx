@@ -519,6 +519,15 @@ export function AccountMenu({
         icon: "user",
         href: "/dashboard/account",
       },
+      /* §33 — a person's own email switches. monday keeps them under the
+         profile as "Notification settings"; here they are one click away. */
+      {
+        key: "notifications",
+        monday: "Notification settings",
+        label: "Notifications",
+        icon: "bell",
+        href: "/dashboard/account/notifications",
+      },
       {
         key: "import",
         monday: "Import data",

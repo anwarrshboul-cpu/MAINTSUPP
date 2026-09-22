@@ -313,7 +313,17 @@ export async function executeAction(
       text: message.replaceAll("{name}", item?.title ?? ""),
     });
     if (result.status === "sent") return { summary: `emailed ${to}` };
-    if (result.status === "skipped") return { summary: `email to ${to} not sent`, skipped: result.error ?? "Email delivery is not configured." };
+    /*
+     * §33 — every outcome but a real send or a real failure is a SKIP, with the
+     * reason the send gave: no provider, test inbox (sink), log mode, the
+     * recipient switched automation emails off, or a duplicate inside ten
+     * minutes. A sink redirect used to come back `sent` and read "emailed x";
+     * log mode used to THROW and record the rule as failed although nothing
+     * was wrong with it.
+     */
+    if (result.status === "skipped" || result.status === "redirected" || result.status === "suppressed") {
+      return { summary: `email to ${to} not delivered`, skipped: result.error ?? "Email delivery is not configured." };
+    }
     throw new Error(result.error ?? "The email could not be sent.");
   }
 

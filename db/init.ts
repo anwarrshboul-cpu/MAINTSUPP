@@ -374,6 +374,10 @@ async function applyMigrations(d1: D1DatabaseLike) {
   /* §32 — scheduled report emails. Two guarded tables; no seed. */
   await ensureReportSchedules(d1);
 
+  /* §33 — a person's email switches and the duplicate-email guard. Two guarded
+     tables; no seed (no row means "on"). See `ensureNotificationPreferences`. */
+  await ensureNotificationPreferences(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6267,6 +6271,40 @@ async function ensureReportSchedules(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE UNIQUE INDEX IF NOT EXISTS report_dispatches_once_idx ON report_dispatches(schedule_id, occurrence)",
+    ),
+  ]);
+}
+
+/**
+ * §33 — WHICH EMAILS A PERSON HAS SWITCHED OFF, AND WHEN AN IDENTICAL EMAIL
+ * LAST WENT. Two new tables, no seed: an empty `notification_preferences` means
+ * everybody receives what they received before. `last_at` is BIGINT for the
+ * reason `sign_in_failures` spells out above — epoch milliseconds overflow a
+ * Postgres `integer`, and the write that overflows is the one a guard swallows.
+ */
+async function ensureNotificationPreferences(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS notification_preferences (
+         id TEXT PRIMARY KEY,
+         user_id TEXT NOT NULL REFERENCES users(id),
+         topic TEXT NOT NULL,
+         state TEXT NOT NULL DEFAULT 'on',
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS notification_preferences_user_topic_idx ON notification_preferences(user_id, topic)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS notification_cooldowns (
+         key TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL,
+         last_at BIGINT NOT NULL DEFAULT 0
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS notification_cooldowns_last_idx ON notification_cooldowns(last_at)",
     ),
   ]);
 }

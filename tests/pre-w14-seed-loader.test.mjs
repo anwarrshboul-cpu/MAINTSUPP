@@ -404,6 +404,8 @@ test("the purge deletes children before parents, or Postgres refuses it", async 
       /* The three-level batch: both reference `users`, so both go first. */
       "client_company_members",
       "platform_admins",
+      /* §33: a person's email switches reference `users(id)`. */
+      "notification_preferences",
       "users",
     ],
     "the delete order is a dependency order, not a list somebody tidied alphabetically",

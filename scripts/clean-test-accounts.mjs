@@ -101,7 +101,12 @@ if (!process.argv.includes("--yes")) {
 
 db.exec("BEGIN");
 try {
-  for (const table of ["team_members", "sessions", "memberships"]) {
+  /* notification_preferences (§33) references users(id) as well — deleted only
+     where the table exists, so an older local database is not refused. */
+  const hasPreferences = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'notification_preferences'")
+    .get();
+  for (const table of ["team_members", "sessions", "memberships", ...(hasPreferences ? ["notification_preferences"] : [])]) {
     db.prepare(`DELETE FROM ${table} WHERE user_id IN (${holes})`).run(...ids);
   }
   // Invitations reference the accepting user, and are keyed by email too.

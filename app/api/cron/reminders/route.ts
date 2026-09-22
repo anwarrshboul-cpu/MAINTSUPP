@@ -371,8 +371,10 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
         /*
          * THE LEDGER MUST NOT SAY "sent" WHEN NOTHING LEFT THE BUILDING.
          *
-         * `sendNotification` answers `suppressed` in sink/log mode and
-         * `skipped` when no provider is configured, and an earlier version of
+         * `sendNotification` answers `suppressed` in log mode (and, since §33,
+         * for a recipient who switched reminders off or a duplicate inside ten
+         * minutes), `redirected` in sink mode, and `skipped` when no provider is
+         * configured, and an earlier version of
          * this loop collapsed all three into a boolean and wrote "sent". On
          * Preview that produced fifteen dispatch rows marked sent beside a
          * hundred and seventeen log rows marked suppressed — two ledgers
@@ -413,7 +415,14 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
           });
           if (result.logId) logIds.push(result.logId);
           if (result.status === "sent") delivered += 1;
-          else if (result.status === "suppressed" || result.status === "skipped") suppressed += 1;
+          /* `redirected` is sink mode: the test inbox has it, the recipient does
+             not — undelivered, not failed (§33, owner decision Q1). */
+          else if (
+            result.status === "suppressed" ||
+            result.status === "skipped" ||
+            result.status === "redirected"
+          )
+            suppressed += 1;
           else failed += 1;
         }
 

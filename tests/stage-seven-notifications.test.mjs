@@ -32,9 +32,15 @@ test("a delivery failure never loses the record", async () => {
     "the sender must document that it cannot throw",
   );
   // Every path through sendNotification returns a SendResult rather than raising.
-  const send = notifications.slice(notifications.indexOf("export async function sendNotification"));
-  assert.match(send.slice(0, 3000), /catch \(cause\)/);
-  assert.match(send.slice(0, 3000), /return \{ ok: false/);
+  /* RE-POINTED (§33): the window was the first 3,000 characters of the
+     function, a stand-in for "inside sendNotification". The recipient's own
+     switch and the duplicate guard now come first and pushed the catch past
+     it, so the slice is the function itself — from its declaration to the next
+     export — which is what the stand-in meant. Both assertions are unchanged. */
+  const start = notifications.indexOf("export async function sendNotification");
+  const send = notifications.slice(start, notifications.indexOf("\nexport ", start + 10));
+  assert.match(send, /catch \(cause\)/);
+  assert.match(send, /return \{ ok: false/);
 
   const leads = await read("app/api/leads/route.ts");
   const insertAt = leads.indexOf("db.insert(leads)");

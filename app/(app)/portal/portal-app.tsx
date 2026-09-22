@@ -220,6 +220,7 @@ import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
+import { WorkspaceEmailPanel } from "./views/workspace-email-panel";
 import { GlobalSearch } from "./global-search";
 import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
@@ -6791,7 +6792,6 @@ function SettingsView({
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
-  const [alerts, setAlerts] = useState({ ...settings.alerts });
   const [slas, setSlas] = useState<WorkspaceSettings["slas"]>({ ...settings.slas });
   const [evidenceCategories, setEvidenceCategories] = useState<string[]>(
     settings.completionEvidenceCategories ?? [],
@@ -6803,7 +6803,6 @@ function SettingsView({
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setAlerts({ ...settings.alerts });
       setSlas({ ...settings.slas });
       setEvidenceCategories(settings.completionEvidenceCategories ?? []);
       setWarningWindow(configuredWindow(settings.compliancePolicy));
@@ -6822,7 +6821,6 @@ function SettingsView({
        */
       await onSave({
         ...settings,
-        alerts,
         slas,
         completionEvidenceCategories: evidenceCategories,
         /* Sent as typed; the server refuses a value outside 7–365 rather than
@@ -6846,8 +6844,8 @@ function SettingsView({
           </span>
           <h1>Settings</h1>
           <p>
-            Configure service targets, notification rules and workspace
-            preferences.
+            Configure service targets and workspace preferences, and see what
+            this workspace emails.
           </p>
         </div>
         <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
@@ -6881,52 +6879,11 @@ function SettingsView({
           declaration by source position, so it is read from here and never moved. */}
       <NavIconsPanel catalogue={navCatalogue} />
 
-      <section className="panel settings-card">
-        <div className="settings-card__heading">
-          <span>
-            <Icon name="bell" size={19} />
-          </span>
-          <div>
-            <h2>Notifications</h2>
-            <p>Choose the events that should trigger an email update.</p>
-          </div>
-        </div>
-        {[
-          {
-            key: "urgent" as const,
-            label: "Urgent maintenance requests",
-            detail: "Notify operations as soon as a priority issue is raised.",
-          },
-          {
-            key: "compliance" as const,
-            label: "Compliance expiry alerts",
-            detail: "Send reminders 90, 30 and 7 days before expiry.",
-          },
-          {
-            key: "daily" as const,
-            label: "Daily operations digest",
-            detail: "Receive a weekday summary at 08:00.",
-          },
-        ].map((setting) => (
-          <label className="setting-row" key={setting.key}>
-            <span>
-              <strong>{setting.label}</strong>
-              <small>{setting.detail}</small>
-            </span>
-            <input
-              type="checkbox"
-              checked={alerts[setting.key]}
-              onChange={(event) =>
-                setAlerts((current) => ({
-                  ...current,
-                  [setting.key]: event.target.checked,
-                }))
-              }
-            />
-            <i aria-hidden="true" />
-          </label>
-        ))}
-      </section>
+      {/* §33 — what this workspace emails and to whom, in place of three
+          switches nothing read. See views/workspace-email-panel.tsx for why they
+          were removed rather than wired; a person's own switches are in
+          Account → Notifications. */}
+      <WorkspaceEmailPanel />
 
       <section className="panel settings-card">
         <div className="settings-card__heading">

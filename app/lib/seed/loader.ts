@@ -82,6 +82,7 @@ import {
   reminderRules,
   reminderTokens,
   sessions,
+  notificationPreferences,
   siteAliases,
   siteGroupMembers,
   sites,
@@ -740,6 +741,11 @@ async function deleteSeedRows(db: Db): Promise<SeedTableCount[]> {
   );
   await record("platform_admins", () =>
     db.delete(platformAdmins).where(sql`user_id in ${seededUsers}`),
+  );
+  /* §33 — a person's email switches reference `users(id)`; a seeded account
+     that had toggled one would otherwise stop the purge on Postgres. */
+  await record("notification_preferences", () =>
+    db.delete(notificationPreferences).where(sql`user_id in ${seededUsers}`),
   );
   await record("users", () =>
     db.delete(users).where(or(sql`is_seed = ${1}`, like(users.id, prefix))),

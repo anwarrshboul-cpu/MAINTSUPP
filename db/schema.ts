@@ -2056,6 +2056,43 @@ export const notificationLog = sqliteTable(
   ],
 );
 
+/**
+ * §33 — the email topics a person has switched off. One row per account and
+ * topic; NO ROW MEANS ON, so the table starts empty and nobody stops receiving
+ * anything because it exists. Per person, not per workspace: it is their inbox.
+ * See `app/lib/notification-preferences.ts` for which emails a topic covers.
+ *
+ * `state` is TEXT ('on' | 'off') rather than a boolean, because
+ * `db/sqlite-to-postgres.ts` converts booleans by bare column name and a new
+ * boolean column is a new way for the two databases to disagree.
+ */
+export const notificationPreferences = sqliteTable(
+  "notification_preferences",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id),
+    topic: text("topic").notNull(),
+    state: text("state").notNull().default("on"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("notification_preferences_user_topic_idx").on(table.userId, table.topic)],
+);
+
+/**
+ * §33 — the storm guard's memory: when an identical email last went, keyed by a
+ * hash of what makes two emails the same (no address is stored). `last_at` is
+ * epoch milliseconds in a BIGINT — see `claimSendSlot` for why not a timestamp.
+ */
+export const notificationCooldowns = sqliteTable(
+  "notification_cooldowns",
+  {
+    key: text("key").primaryKey(),
+    organisationId: text("organisation_id").notNull(),
+    lastAt: integer("last_at").notNull().default(0),
+  },
+  (table) => [index("notification_cooldowns_last_idx").on(table.lastAt)],
+);
+
 
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(

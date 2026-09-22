@@ -19,7 +19,7 @@ import {
   maintenanceRequests,
   notificationLog,
 } from "../../../../db/schema";
-import { notificationTargets } from "../../../lib/notifications";
+import { emailDeliveryStatus, notificationTargets } from "../../../lib/notifications";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import { can, resolvePermissions } from "../../../lib/permissions";
 
@@ -260,9 +260,11 @@ export async function GET(request: Request) {
             name: "Resend email delivery",
             category: "Notifications",
             configured: emailKey,
-            detail: emailKey
-              ? "RESEND_API_KEY is set; notifications are delivered and logged."
-              : "RESEND_API_KEY is not set. Notifications are recorded as skipped and can be replayed once a key is configured.",
+            /* §33: "delivered" only when it is — a key with EMAIL_MODE at sink
+               or log reaches the test inbox or nobody. */
+            detail: !emailKey
+              ? "RESEND_API_KEY is not set. Notifications are recorded as skipped and can be replayed once a key is configured."
+              : (emailDeliveryStatus().reason ?? "RESEND_API_KEY is set and EMAIL_MODE is live; notifications are delivered and logged."),
           },
           {
             key: "sms",
