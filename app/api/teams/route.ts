@@ -24,6 +24,7 @@ import { memberships, teamMembers, teams, users } from "../../../db/schema";
 import { auditActor, changeDetail, recordAudit } from "../../lib/audit";
 import { can, requireCapability, resolvePermissions } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
+import { moduleRefusal } from "../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -182,6 +183,10 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(scope, "team");
+    if (switchedOff) return switchedOff;
     const [list, people, subject] = await Promise.all([
       loadTeams(scope.db, scope.orgId),
       loadPeople(scope.db, scope.orgId),
@@ -250,6 +255,8 @@ export async function POST(request: Request) {
      Reading the teams is not gated: a rota is meant to be legible. */
     const guard = await scopedDbWithCapability(request, "teams.manage");
     if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "team");
+    if (switchedOff) return switchedOff;
     const scope = guard.scope;
     const refusal = requireCapability(
       await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
@@ -322,6 +329,8 @@ export async function PATCH(request: Request) {
      Reading the teams is not gated: a rota is meant to be legible. */
     const guard = await scopedDbWithCapability(request, "teams.manage");
     if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "team");
+    if (switchedOff) return switchedOff;
     const scope = guard.scope;
     const refusal = requireCapability(
       await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),

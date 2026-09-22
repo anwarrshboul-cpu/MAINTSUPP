@@ -32,6 +32,7 @@ import { ROLE_RANK } from "../roles";
 import { anonymousRefusal, busyRefusal, scopedDbWithCapability, type ScopedDatabase } from "../tenant-db";
 import { ensureDatabase } from "../../../db/init";
 import { everySiteRefusal } from "../job-site-scope";
+import { moduleRefusal } from "../module-guard";
 
 /** Every distinct thing a caller can ask the invoice tracker to do. */
 export type FinanceOperation =
@@ -147,6 +148,13 @@ export async function guardFinance(
       ),
     };
   }
+
+  /* And the workspace's own switch: the Invoice Tracker can be turned off for a
+     workspace that does not use it, and then this ledger is not available to it
+     at all — see `app/lib/module-guard.ts`. Last, so a refusal about the switch
+     never stands in for a refusal about authority. */
+  const switchedOff = await moduleRefusal(guard.scope, "invoice-tracker");
+  if (switchedOff) return { denied: switchedOff };
 
   return guard;
 }

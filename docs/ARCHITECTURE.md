@@ -46,7 +46,7 @@ the single source of truth — change the rule there, not a copy of it.
 | System | Rules | API | Notes |
 | --- | --- | --- | --- |
 | Theme tokens (brand colours, fonts, chart colours) | `app/lib/theme-tokens.ts` | `/api/theme` | Per workspace. |
-| Portal modules (switch sections on/off) | `app/lib/portal-modules.ts` | `/api/portal-modules` | |
+| Portal modules (switch sections on/off) | `app/lib/portal-modules.ts`, `app/lib/module-guard.ts` | `/api/portal-modules` | A switched-off module is refused at the API too, not only hidden. Which routes, and which are deliberately left open (the bin, the board's calendar view, the Overview's figures, the crons), is the map in `tests/module-api-enforcement.test.mjs`. |
 | Sidebar layout (order, icons, locks) | — | `/api/navigation` | Workspace default + personal layers. |
 | Dashboard layouts | — | `/api/dashboard-layout` | Workspace default (removable) + personal. |
 | Version history for all of the above | `app/lib/config-versions*.ts` | `/api/versions` | Append-only; a restore is a new version. |

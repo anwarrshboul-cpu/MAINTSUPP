@@ -53,6 +53,7 @@ import { buildKindResolver, templateKinds } from "../../../lib/compliance-vocabu
 import { DUTY_HOLDER_UNCONFIRMED } from "../../../lib/compliance-duty-holder";
 import { chunkIds } from "../../../lib/sql-batching";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +111,10 @@ export async function POST(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* Compliance's own setup operation. The shared compliance READS stay open
+       for the Overview — see `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(guard.scope, "compliance");
+    if (switchedOff) return switchedOff;
     const { db, orgId, actor, siteScope } = guard.scope;
 
     let payload: Record<string, unknown>;

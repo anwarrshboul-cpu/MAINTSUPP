@@ -15,6 +15,7 @@ import { REPORT_PERIOD_PRESETS } from "./contract";
 import { visibleStatusesFor } from "./access";
 import { dateOnly, resolveReportPeriod } from "./period";
 import { everySiteRefusal } from "../job-site-scope";
+import { moduleRefusal } from "../module-guard";
 
 /**
  * Today, as a UTC calendar date.
@@ -58,7 +59,14 @@ export async function guard(
      site-restricted member (security review). The dashboards' metrics are
      confined instead, in `/api/reports/metrics`. */
   const everySite = everySiteRefusal(guarded.scope.siteScope, "a report document");
-  return everySite ? { denied: everySite } : guarded;
+  if (everySite) return { denied: everySite };
+  /* And the workspace's own switch — every report-document route passes through
+     here, so this is the one place it belongs. `/api/reports/metrics` does NOT:
+     it is the Overview's figures as well as the Reports dashboard's, and it
+     guards itself. See `app/lib/module-guard.ts`. */
+  const switchedOff = await moduleRefusal(guarded.scope, "reports");
+  if (switchedOff) return { denied: switchedOff };
+  return guarded;
 }
 
 /**
