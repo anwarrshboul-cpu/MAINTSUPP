@@ -977,7 +977,9 @@ fieldset.field:focus{outline:none}
   border:0;border-radius:var(--r-sm);font-size:.9rem;font-weight:600;color:var(--navy);cursor:pointer;text-align:left;
   touch-action:manipulation}
 .upload__item:hover{background:var(--cloud);color:var(--teal-text)}
-.upload__item:focus-visible{outline:none;background:var(--cloud);box-shadow:inset 0 0 0 2px var(--amber)}
+/* The keyboard ring, not a 2px inset line (2.90:1 against the row, under WCAG 1.4.11's 3:1): the same
+   3px amber-strong ring, drawn inside, that `.faq__q` uses for a row in a box that clips. */
+.upload__item:focus-visible{outline:3px solid var(--amber-strong);outline-offset:-3px;background:var(--cloud)}
 .upload__item .ic{color:var(--steel)}
 .upload__cancel{display:none}
 @media (max-width:760px){

@@ -284,31 +284,38 @@ const OUTLINE_INVENTORY = [
       ".contractor-profile__link select": '.contractor-profile__link :is(input[type="search"], select):focus-visible',
     } },
 
+  // Third pass (§47): the stand-ins #88 measured under WCAG 1.4.11's 3:1 in a
+  // theme. Each keeps its stand-in and now carries the ring as well.
+  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__plan:hover, .account-menu__plan:focus-visible", kind: "ring",
+    why: "its stand-in (the border going solid brand) measured 2.74 / 1.57",
+    rings: { ".account-menu__plan:hover": ":root .account-menu__plan:focus-visible", ".account-menu__plan:focus-visible": ":root .account-menu__plan:focus-visible" } },
+  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__item:hover, .account-menu__item:focus-visible", kind: "ring",
+    why: "its stand-in (full ink on a tint) measured 1.64 / 2.37",
+    rings: { ".account-menu__item:hover": ":root .account-menu__item:focus-visible", ".account-menu__item:focus-visible": ":root .account-menu__item:focus-visible" } },
+  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__status-list button:hover, .account-menu__status-list button:focus-visible", kind: "ring",
+    why: "its stand-in (full ink on a tint) measured 1.64 / 2.37",
+    rings: { ".account-menu__status-list button:hover": ":root .account-menu__status-list button:focus-visible", ".account-menu__status-list button:focus-visible": ":root .account-menu__status-list button:focus-visible" } },
+  { file: "app/(app)/portal/assignee-cell.css", selector: ".assignee-search input", kind: "ring",
+    why: "its stand-in (the field's border) measured 3.98 / 2.24",
+    rings: { ".assignee-search input": ".assignee-search:has(input:focus-visible)" } },
+  { file: "app/(app)/portal/global-search.css", selector: ".global-search__field input", kind: "ring",
+    why: "its stand-in (the field's border) measured 3.30 / 1.70",
+    rings: { ".global-search__field input": ".global-search__field:has(input:focus-visible)" } },
+  { file: "app/(app)/portal/update-thread.css", selector: ".update-composer textarea", kind: "ring",
+    why: "its stand-in (its border) measured 4.96 / 2.65",
+    rings: { ".update-composer textarea": ":root .update-composer textarea:focus-visible" } },
+  { file: "app/globals.css", selector: ".live-board-search input", kind: "ring",
+    why: "its stand-in (a 2px brand ring on the field) measured 6.47 / 2.59",
+    rings: { ".live-board-search input": ".portal-shell .live-board-search:has(input:focus-visible)" } },
   // ── substitute: a real indicator of another kind ─────────────────────────
-  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__plan:hover, .account-menu__plan:focus-visible", kind: "substitute", weak: true,
-    why: "the border goes solid brand, 2.74 / 1.57", by: { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__plan:focus-visible", has: /border-color: var\(--brand-primary\)/ } },
-  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__item:hover, .account-menu__item:focus-visible", kind: "substitute", weak: true,
-    why: "the text goes to full ink on a tint, 1.64 / 2.37", by: { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__item:focus-visible", has: /color: var\(--ink\)/ } },
-  { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__status-list button:hover, .account-menu__status-list button:focus-visible", kind: "substitute", weak: true,
-    why: "the text goes to full ink on a tint, 1.64 / 2.37", by: { file: "app/(app)/portal/account-menu.css", selector: ".account-menu__status-list button:focus-visible", has: /color: var\(--ink\)/ } },
-  { file: "app/(app)/portal/assignee-cell.css", selector: ".assignee-search input", kind: "substitute", weak: true,
-    why: "the field's border, 3.98 / 2.24", by: { file: "app/(app)/portal/assignee-cell.css", selector: ".assignee-search:focus-within", has: /border-color/ } },
-  { file: "app/(app)/portal/board-actions/board-actions.css", selector: ".auto-builder__heading:hover, .auto-builder__heading:focus-visible", kind: "substitute", weak: true,
-    why: "the text goes to the accent, 1.71 / 2.75", by: { file: "app/(app)/portal/board-actions/board-actions.css", selector: ".auto-builder__heading:focus-visible", has: /color: var\(--accent-fg/ } },
   { file: "app/(app)/portal/cells/board-date-picker.css", selector: ".board-date-popover .mobile-board-calendar__days > button:focus-visible", kind: "substitute",
     why: "the ring moves to the day's disc", by: { file: "app/(app)/portal/cells/board-date-picker.css", selector: ".board-date-popover .mobile-board-calendar__days > button:focus-visible > span", has: /outline: 2px solid var\(--focus-ring\)/ } },
-  { file: "app/(app)/portal/global-search.css", selector: ".global-search__field input", kind: "substitute", weak: true,
-    why: "the field's border, 3.30 / 1.70", by: { file: "app/(app)/portal/global-search.css", selector: ".global-search__field:focus-within", has: /border-color/ } },
   { file: "app/(app)/portal/reminder-rows.css", selector: ".recipient-picker__input", kind: "substitute",
     why: "the field's border, 5.74 / 3.72", by: { file: "app/(app)/portal/reminder-rows.css", selector: ".recipient-picker__field:focus-within", has: /border-color: var\(--accent-fg\)/ } },
-  { file: "app/(app)/portal/update-thread.css", selector: ".update-composer textarea", kind: "substitute", weak: true,
-    why: "its border, 4.96 / 2.65", by: { file: "app/(app)/portal/update-thread.css", selector: ".update-composer textarea:focus", has: /border-color/ } },
   { file: "app/(app)/portal/views/store-compliance-tracker.css", selector: ".store-compliance__search input, .store-compliance__filter select", kind: "substitute",
     why: "the field's border, 7.15 / 4.40", by: { file: "app/(app)/portal/views/store-compliance-tracker.css", selector: ".store-compliance__search:focus-within", has: /border-color/ } },
   { file: "app/(marketing)/marketing.css", selector: ".field :is(input,select,textarea):focus", kind: "substitute",
     why: "its border, 3.70 (the public site has one theme)", by: { file: "app/(marketing)/marketing.css", selector: ".field :is(input,select,textarea):focus", has: /border-color:var\(--steel\)/ } },
-  { file: "app/(marketing)/marketing.css", selector: ".upload__item:focus-visible", kind: "substitute", weak: true,
-    why: "an inset 2px ring, 2.90", by: { file: "app/(marketing)/marketing.css", selector: ".upload__item:focus-visible", has: /box-shadow:inset 0 0 0 2px/ } },
   { file: "app/brand-overrides.css", selector: ".analytics-toolbar select, .analytics-toolbar input", kind: "substitute",
     why: "a 2px ring, 7.63 / 5.07", by: { file: "app/brand-overrides.css", selector: ".analytics-toolbar select:focus-visible", has: /outline: 2px solid/ } },
   { file: "app/brand-overrides.css", selector: ".section-header__actions > .analytics-period :is(select, input), .section-header__controls > .analytics-period :is(select, input)", kind: "substitute",
@@ -317,8 +324,6 @@ const OUTLINE_INVENTORY = [
     why: "the global ring itself, 9.33 / 3.46: this rule ties it at (0,1,0) and comes earlier in the same file (asserted below)", by: { file: "app/globals.css", selector: ":focus-visible", has: /outline: 3px solid var\(--focus-ring\)/ } },
   { file: "app/globals.css", selector: ".search-field input", kind: "substitute",
     why: "a 3px ring on the field, 9.33 / 5.67", by: { file: "app/brand-overrides.css", selector: ".search-field:focus-within", has: /outline: 3px solid/ } },
-  { file: "app/globals.css", selector: ".live-board-search input", kind: "substitute", weak: true,
-    why: "a 2px brand ring on the field, 6.47 / 2.59", by: { file: "app/brand-overrides.css", selector: ".portal-shell .live-board-search:focus-within", has: /box-shadow: 0 0 0 2px/ } },
   { file: "app/globals.css", selector: ".live-board-tool select", kind: "substitute",
     why: "#85's ring, 9.33 / 3.46", by: { file: "app/brand-overrides.css", selector: ".live-board-tool select:focus-visible", has: /outline: 3px solid var\(--focus-ring\)/ } },
   { file: "app/globals.css", selector: ".sheet-column--move select", kind: "substitute",
@@ -487,6 +492,20 @@ test("every rule that takes the outline away is answered: a ring, a named substi
   // And the ring has a colour in both themes.
   assert.match(globals, /:root \{[^}]*--focus-ring: #[0-9a-f]{6};/, "light theme");
   assert.match(globals, /body\[data-theme="dark"\] \{[^}]*--focus-ring: #[0-9a-f]{6};/, "dark theme");
+});
+
+test("two faint stand-ins carry the 3px ring in their own stylesheets", async () => {
+  /* Outside brand-overrides.css, so outside the inventory's ring check — and,
+     taking the outline no longer, both rules have left the inventory above.
+     The public upload menu: the marketing layout loads no portal stylesheet.
+     The automation builder's headings: brand-overrides.css may not carry
+     automation styles (ui-batch-board-actions). */
+  const marketing = await read("app/(marketing)/marketing.css");
+  assert.match(marketing, /\.upload__item:focus-visible\{outline:3px solid var\(--amber-strong\);outline-offset:-3px;/);
+  assert.doesNotMatch(marketing, /\.upload__item:focus-visible\{outline:none/);
+  const actions = (await read("app/(app)/portal/board-actions/board-actions.css")).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.match(actions, /\n\.auto-builder__heading:focus-visible \{\s*outline: 3px solid var\(--focus-ring\);\s*outline-offset: -3px;\s*\}/);
+  assert.doesNotMatch(actions, /\.auto-builder__heading:focus-visible \{[^}]*outline: none/);
 });
 
 test("no table header is empty — an Actions column says so", async () => {
