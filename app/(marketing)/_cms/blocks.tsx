@@ -37,7 +37,11 @@
  * displays.
  */
 
+import type { RenderableMedia } from "../../lib/cms-media-repository.ts";
 import type { CmsBlock } from "../../lib/cms-repository.ts";
+
+/** The assets a page's blocks name, resolved by the page on the server. */
+export type MediaLookup = ReadonlyMap<string, RenderableMedia>;
 
 function asText(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
@@ -174,13 +178,71 @@ function Questions({ body }: { body: CmsBlock["body"] }) {
 }
 
 /**
+ * An image from the website media library (decision K).
+ *
+ * Drawn from the web-sized copy when the library has one, with the file's own
+ * width and height so the page reserves its space and does not jump as it loads.
+ * Lazy, because a CMS page is a stack and most of it starts below the fold. The
+ * alt text is the block's own when it has one, the library's otherwise — the
+ * save route refuses an image with neither. An asset that is no longer in the
+ * library draws NOTHING, never a broken-image glyph.
+ */
+function MediaImage({ body, media }: { body: CmsBlock["body"]; media: MediaLookup }) {
+  const asset = typeof body.mediaId === "string" ? media.get(body.mediaId) : undefined;
+  if (!asset || asset.kind !== "image") return null;
+  const alt = asText(body.alt) ?? asset.alt ?? "";
+  const caption = asText(body.caption);
+  return (
+    <figure className="cms-block cms-media">
+      {/* eslint-disable-next-line @next/next/no-img-element -- a media library file from
+          this app's own immutable `/media/...` route, already web-sized; this Node build
+          has no `next/image` optimiser. */}
+      <img
+        src={asset.src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        {...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {})}
+      />
+      {caption ? <figcaption>{caption}</figcaption> : null}
+    </figure>
+  );
+}
+
+/**
+ * A video from the library, in the browser's own player. `preload="metadata"`
+ * so a visitor downloads nothing until they press play; the public route answers
+ * byte ranges, so it seeks. Named for a screen reader by its caption, or its
+ * library title.
+ */
+function MediaVideo({ body, media }: { body: CmsBlock["body"]; media: MediaLookup }) {
+  const asset = typeof body.mediaId === "string" ? media.get(body.mediaId) : undefined;
+  if (!asset || asset.kind !== "video") return null;
+  const caption = asText(body.caption);
+  return (
+    <figure className="cms-block cms-media">
+      <video
+        controls
+        preload="metadata"
+        playsInline
+        aria-label={caption ?? asset.title}
+        {...(asset.width && asset.height ? { width: asset.width, height: asset.height } : {})}
+      >
+        <source src={asset.src} type={asset.contentType} />
+      </video>
+      {caption ? <figcaption>{caption}</figcaption> : null}
+    </figure>
+  );
+}
+
+/**
  * One block, dispatched by kind.
  *
  * An unknown kind renders NOTHING rather than a placeholder or an error. A row
  * whose kind this build no longer knows is history, not a fault, and a visitor is
  * not the person who needs to be told about it.
  */
-export function CmsBlockView({ block }: { block: CmsBlock }) {
+export function CmsBlockView({ block, media }: { block: CmsBlock; media: MediaLookup }) {
   switch (block.kind) {
     case "heading":
       return <Heading body={block.body} />;
@@ -192,16 +254,20 @@ export function CmsBlockView({ block }: { block: CmsBlock }) {
       return <Cta body={block.body} />;
     case "faq":
       return <Questions body={block.body} />;
+    case "image":
+      return <MediaImage body={block.body} media={media} />;
+    case "video":
+      return <MediaVideo body={block.body} media={media} />;
     default:
       return null;
   }
 }
 
-export function CmsBlocks({ blocks }: { blocks: readonly CmsBlock[] }) {
+export function CmsBlocks({ blocks, media = new Map() }: { blocks: readonly CmsBlock[]; media?: MediaLookup }) {
   return (
     <>
       {blocks.map((block) => (
-        <CmsBlockView block={block} key={block.id} />
+        <CmsBlockView block={block} key={block.id} media={media} />
       ))}
     </>
   );

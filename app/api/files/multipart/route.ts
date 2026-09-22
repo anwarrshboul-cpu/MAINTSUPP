@@ -821,6 +821,22 @@ export async function POST(request: Request) {
       objectKey: key,
       uploadId,
     });
+    /*
+     * A DOCUMENTS SESSION — stated here rather than left to be deduced.
+     *
+     * `upload_sessions` is shared with the website's media library (decision K),
+     * which marks its own sessions `target = 'cms-media'` and finishes them
+     * through `/api/cms-media/upload`. One of those cannot reach this line today:
+     * its object key is under `cms/`, and `validUploadKey` above refuses anything
+     * that is not this workspace's own attachment key. So this closes no hole —
+     * it puts the invariant WHERE IT IS RELIED ON, because the storage handle in
+     * this function is the documents bucket and feeding a website session's parts
+     * into it would write the bytes to the wrong bucket. A later change to either
+     * key shape must not be able to make that true in silence.
+     */
+    if (session && session.target && session.target !== "documents") {
+      return Response.json({ error: "The upload session is invalid." }, { status: 404 });
+    }
 
     if (action === "abort") {
       if (!session || session.uploader !== uploader) {
@@ -923,6 +939,15 @@ export async function POST(request: Request) {
                 const value = part as Record<string, unknown>;
                 return {
                   partNumber: Number(value.partNumber),
+                  /*
+                   * EXACTLY as sent. A proxied part's etag is the storage
+                   * driver's own opaque token, handed straight back to it at
+                   * assembly, and Miniflare's R2 tokens are case-sensitive:
+                   * lower-casing them made every local upload over 900 KB fail
+                   * `complete` with "one or more of the specified parts could
+                   * not be found" (measured, decision K). The direct path's MD5
+                   * comparison below lower-cases both sides itself.
+                   */
                   etag: String(value.etag ?? "").trim(),
                 };
               })

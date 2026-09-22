@@ -53,5 +53,6 @@ interface Fetcher {
 type R2Bucket = Omit<import("./db/node-r2").LocalR2Bucket, "localDir">;
 
 declare module "cloudflare:workers" {
-  export const env: { DB?: D1Database; BUCKET?: R2Bucket; [binding: string]: unknown };
+  /* `CMS_BUCKET` — the website's media library (decision K), a separate bucket. */
+  export const env: { DB?: D1Database; BUCKET?: R2Bucket; CMS_BUCKET?: R2Bucket; [binding: string]: unknown };
 }

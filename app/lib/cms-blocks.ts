@@ -40,14 +40,18 @@
  *      rather than by a blocklist.
  */
 
-export type BlockKind = "heading" | "richText" | "bullets" | "cta" | "faq";
+export type BlockKind = "heading" | "richText" | "bullets" | "cta" | "faq" | "image" | "video";
 
 /** One field's rules. `lines` is a list of strings; `pairs` is a list of two. */
 type FieldRule =
   | { kind: "text"; max: number; required?: boolean }
   | { kind: "href"; required?: boolean }
   | { kind: "lines"; max: number; maxItems: number; required?: boolean }
-  | { kind: "pairs"; max: number; maxItems: number; required?: boolean };
+  | { kind: "pairs"; max: number; maxItems: number; required?: boolean }
+  /* Decision K — an asset from the website media library, by id. Which asset,
+     and whether it is the kind `accept` names, is checked by the page's save
+     route against the library; the shape is checked here. */
+  | { kind: "media"; accept: "image" | "video"; required?: boolean };
 
 export type BlockDefinition = {
   kind: BlockKind;
@@ -58,12 +62,12 @@ export type BlockDefinition = {
 };
 
 /**
- * The five, chosen because each one earns a distinct renderer.
+ * The seven, chosen because each one earns a distinct renderer.
  *
- * A sixth that merely restyled one of these would be a template, not a block, and
+ * A block that merely restyled one of these would be a template, not a block, and
  * a catalogue that grows by restyling is how a block library stops meaning
- * anything. `image` is deliberately absent from the first slice — see
- * `CMS_OMISSIONS`.
+ * anything. `image` and `video` arrived with the media library (decision K): each
+ * names an asset by id and draws it with its own element.
  */
 export const BLOCK_CATALOGUE: readonly BlockDefinition[] = [
   {
@@ -113,6 +117,27 @@ export const BLOCK_CATALOGUE: readonly BlockDefinition[] = [
       pairs: { kind: "pairs", max: 900, maxItems: 30, required: true },
     },
   },
+  {
+    kind: "image",
+    label: "Image",
+    description: "An image from the media library, with an optional caption.",
+    fields: {
+      mediaId: { kind: "media", accept: "image", required: true },
+      /* What a screen reader says for THIS use of the image. Empty means the
+         library's own alt text; a page cannot be saved with neither. */
+      alt: { kind: "text", max: 300 },
+      caption: { kind: "text", max: 300 },
+    },
+  },
+  {
+    kind: "video",
+    label: "Video",
+    description: "A video from the media library, played in the page, with an optional caption.",
+    fields: {
+      mediaId: { kind: "media", accept: "video", required: true },
+      caption: { kind: "text", max: 300 },
+    },
+  },
 ] as const;
 
 export const BLOCK_KINDS: readonly string[] = BLOCK_CATALOGUE.map((b) => b.kind);
@@ -130,7 +155,7 @@ export function blockDefinition(kind: string): BlockDefinition | null {
  */
 export const CMS_OMISSIONS: readonly string[] = [
   "A published page is listed in /sitemap-pages.xml, not in sitemap.xml. That file is a committed artifact whose per-page lastmod comes from git history, so pages written here have their own sitemap, read live, and robots.txt names both. A page marked noindex, outside its publishing window, or whose canonical names another address is left out.",
-  "There is no image block yet. Images need an upload path, and /api/files is portal-only — it brokers a private bucket behind a session, which a public page has none of.",
+  "Images and video come from the website media library (Website media in this console), never from a workspace's files. Every image on a page needs alt text — on the block, or on the image in the library. A video has no subtitles track yet; say what matters in the caption or on the page.",
   "The existing marketing pages are untouched. The homepage and the five legal pages stay exactly as they are, by owner decision, until a later phase promotes their sections into blocks.",
   "A preview (/p/<address>?preview=1) works only for signed-in MAINTSUPP platform staff. There is no shareable preview link: anyone else asking for one gets exactly what the public gets — the live page, or a 404.",
   "Moving a page leaves a permanent (308) redirect at the old address, and more can be added by hand — but only from a /p/ address, and only to another /p/ address or a page on maintsupp.com. The built-in marketing pages cannot be redirected from here. Deleting a page leaves any redirect to it in place, so a page brought back gets its old links back; remove the redirect if it should not.",
@@ -266,6 +291,11 @@ export function cleanHref(value: unknown): string | null {
   return null;
 }
 
+/** A media library id. Its shape only: which asset it is, is the save route's check. */
+export function isMediaIdValue(value: unknown): value is string {
+  return typeof value === "string" && /^med_[a-f0-9]{32}$/.test(value);
+}
+
 function lines(value: unknown, max: number, maxItems: number): string[] | null {
   if (!Array.isArray(value)) return null;
   const out: string[] = [];
@@ -321,6 +351,7 @@ export function validateBlock(kind: unknown, body: unknown): BlockValidation {
     else if (rule.kind === "href") value = cleanHref(source[name]);
     else if (rule.kind === "lines") value = lines(source[name], rule.max, rule.maxItems);
     else if (rule.kind === "pairs") value = pairs(source[name], rule.max, rule.maxItems);
+    else if (rule.kind === "media") value = isMediaIdValue(source[name]) ? source[name] : null;
 
     if (value === null) {
       if (rule.required) {
@@ -329,7 +360,9 @@ export function validateBlock(kind: unknown, body: unknown): BlockValidation {
           reason:
             rule.kind === "href"
               ? `${definition.label}: ${name} must be a path beginning "/" or an https:// address.`
-              : `${definition.label}: ${name} is required.`,
+              : rule.kind === "media"
+                ? `${definition.label}: choose ${rule.accept === "image" ? "an image" : "a video"} from the media library.`
+                : `${definition.label}: ${name} is required.`,
         };
       }
       continue;
