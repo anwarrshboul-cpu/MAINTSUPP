@@ -15,6 +15,7 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { jobStatusHistory } from "../../db/schema";
 import type { getDb } from "../../db";
+import { emitJobEvents } from "./integrations/webhooks";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -80,6 +81,23 @@ export async function recordJobStatusChanges(
   const changes = input.changes.filter((change) => change.from !== change.to);
   if (!changes.length) return 0;
   const stamp = new Date().toISOString();
+  const recorded = await writeHistory(db, input, changes, stamp);
+  /*
+   * §35b — the same transitions, to any outbound webhook that asked for them.
+   * Here, once, because this is the one function every door that creates or
+   * moves a job calls. `emitJobEvents` never throws, and it runs whether or not
+   * the history write succeeded: the job moved either way.
+   */
+  await emitJobEvents(db, { organisationId: input.organisationId, source: input.source, changes });
+  return recorded;
+}
+
+async function writeHistory(
+  db: Database,
+  input: { organisationId: string; actorEmail: string | null | undefined; source: string },
+  changes: StatusChange[],
+  stamp: string,
+): Promise<number> {
   try {
     for (let index = 0; index < changes.length; index += 50) {
       await db.insert(jobStatusHistory).values(

@@ -2124,6 +2124,72 @@ export const apiTokens = sqliteTable(
   ],
 );
 
+/**
+ * §35b — where a workspace's events are sent. `url_sealed` and `secret_sealed`
+ * are secret-box envelopes (`app/lib/secret-box.ts`): a Zapier or Slack hook
+ * URL is itself a credential, so it is never stored in the clear — only its
+ * host and a four-character hint are. States are TEXT (`on` | `paused` |
+ * `disabled` | `deleted`), never booleans; times the retry logic compares are
+ * epoch milliseconds in BIGINT columns.
+ */
+export const webhookEndpoints = sqliteTable(
+  "webhook_endpoints",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    kind: text("kind").notNull().default("webhook"),
+    name: text("name").notNull(),
+    urlHost: text("url_host").notNull(),
+    urlHint: text("url_hint").notNull(),
+    urlSealed: text("url_sealed").notNull(),
+    secretSealed: text("secret_sealed"),
+    secretHint: text("secret_hint"),
+    events: text("events").notNull().default("[]"),
+    state: text("state").notNull().default("on"),
+    stateReason: text("state_reason"),
+    consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+    createdByUserId: text("created_by_user_id").notNull(),
+    createdByEmail: text("created_by_email").notNull(),
+    lastOutcome: text("last_outcome"),
+    lastDeliveredAt: text("last_delivered_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("webhook_endpoints_organisation_idx").on(table.organisationId, table.state)],
+);
+
+/**
+ * §35b — one row per event per endpoint: the exact signed payload, and what
+ * happened when it was sent. UNIQUE (endpoint, event) is the idempotency key —
+ * the same event is never queued twice for one receiver.
+ */
+export const webhookDeliveries = sqliteTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    endpointId: text("endpoint_id").notNull().references(() => webhookEndpoints.id),
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payload: text("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: integer("next_attempt_at").notNull().default(0),
+    claimedUntil: integer("claimed_until").notNull().default(0),
+    lastAttemptAt: text("last_attempt_at"),
+    responseStatus: integer("response_status"),
+    responseExcerpt: text("response_excerpt"),
+    error: text("error"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("webhook_deliveries_once_idx").on(table.endpointId, table.eventId),
+    index("webhook_deliveries_due_idx").on(table.status, table.nextAttemptAt),
+    index("webhook_deliveries_log_idx").on(table.organisationId, table.endpointId, table.createdAt),
+  ],
+);
+
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(
   "job_access_tokens",

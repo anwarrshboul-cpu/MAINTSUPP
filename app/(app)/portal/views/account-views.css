@@ -957,3 +957,11 @@
   margin: 0;
   padding: 0;
 }
+
+/* §35b — Developers → Webhooks: the row's buttons wrap instead of widening the table. */
+.account-webhook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 220px;
+}
