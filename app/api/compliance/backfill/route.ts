@@ -52,6 +52,7 @@ import { readComplianceTemplate } from "../../../lib/compliance-template-store";
 import { buildKindResolver, templateKinds } from "../../../lib/compliance-vocabulary";
 import { DUTY_HOLDER_UNCONFIRMED } from "../../../lib/compliance-duty-holder";
 import { chunkIds } from "../../../lib/sql-batching";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +110,7 @@ export async function POST(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
 
     let payload: Record<string, unknown>;
     try {
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
     }
 
     if (payload.action === "revert") {
-      return revert(db, orgId, actor.email, payload);
+      return revert(db, orgId, actor.email, payload, siteScope);
     }
 
     /*
@@ -146,10 +147,15 @@ export async function POST(request: Request) {
       ? new Set(payload.siteIds.filter((id): id is string => typeof id === "string"))
       : null;
 
-    const siteRows = (await db
+    /* A restricted member's batch covers their stores and no others — the
+       preview included, which names every store it would touch. */
+    const allowed = memberSiteSet(siteScope);
+    const siteRows = ((await db
       .select({ id: sites.id, name: sites.name })
       .from(sites)
-      .where(eq(sites.organisationId, orgId))) as Array<{ id: string; name: string }>;
+      .where(eq(sites.organisationId, orgId))) as Array<{ id: string; name: string }>).filter((row) =>
+      withinMemberScope(allowed, row.id),
+    );
     const targets = requested
       ? siteRows.filter((row) => requested.has(row.id))
       : siteRows;
@@ -315,6 +321,7 @@ async function revert(
   orgId: string,
   actorEmail: string,
   payload: Record<string, unknown>,
+  siteScope: string[] | null,
 ) {
   const batchId = typeof payload.batchId === "string" ? payload.batchId.trim() : "";
   if (!batchId) return Response.json({ error: "A batch id is required." }, { status: 400 });
@@ -349,6 +356,22 @@ async function revert(
     );
   }
   if (!ids.length) return Response.json({ batchId, removed: 0, kept: 0, keptRows: [] });
+
+  /* A batch that created rows at a store outside a restricted member's sites
+     is not theirs to undo — answered as a batch that is not there, like any
+     record they cannot see. Unrestricted callers are not asked. */
+  if (siteScope) {
+    const allowed = memberSiteSet(siteScope);
+    for (const chunk of chunkIds(ids)) {
+      const rows = await db
+        .select({ siteId: complianceDocuments.siteId })
+        .from(complianceDocuments)
+        .where(and(eq(complianceDocuments.organisationId, orgId), inArray(complianceDocuments.id, chunk)));
+      if (rows.some((row) => !withinMemberScope(allowed, row.siteId))) {
+        return Response.json({ error: "That batch was not found." }, { status: 404 });
+      }
+    }
+  }
 
   /*
    * WHICH OF THOSE ROWS ARE STILL THE EMPTY PLACEHOLDERS THIS BATCH CREATED.

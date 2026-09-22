@@ -54,6 +54,8 @@ import {
   unassignedSiteId,
 } from "../../../lib/site-reference";
 import { SQL_VARIABLE_CHUNK, chunkIds } from "../../../lib/sql-batching";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
+import { siteOutsideMemberScope, siteRequired } from "../../../lib/job-site-scope";
 import {
   anonymousRefusal,
   busyRefusal,
@@ -186,11 +188,25 @@ export async function POST(request: Request) {
         .select({ id: sites.id, name: sites.name })
         .from(sites)
         .where(and(eq(sites.organisationId, scope.orgId), eq(sites.id, asked as string)));
-      if (!site) return badRequest("That site does not belong to this workspace.");
+      /* ...and, for a restricted member, one of THEIR stores: another is
+         answered as a store this workspace does not have. */
+      if (!site || siteOutsideMemberScope(scope.siteScope, site.id)) {
+        return badRequest("That site does not belong to this workspace.");
+      }
       siteName = site.name;
+    } else if (scope.siteScope) {
+      /* Clearing the store takes the jobs out of the member's sight. */
+      return siteRequired();
     }
 
-    const owned = await verifyJobs(scope, requestIds);
+    /* A restricted member's jobs at other stores — and the jobs with no store,
+       which they are never shown — are dropped and reported like foreign ids.
+       Filtered here rather than in `verifyJobs`' SQL, whose chunks already
+       spend their bound variables on ids. */
+    const allowed = memberSiteSet(scope.siteScope);
+    const owned = (await verifyJobs(scope, requestIds)).filter((row) =>
+      withinMemberScope(allowed, row.siteId),
+    );
     const ownedIds = new Set(owned.map((row) => row.id));
     const rejected = requestIds.filter((id) => !ownedIds.has(id));
     /* Already where they are going. Counted, reported, and not written: an

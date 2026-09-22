@@ -37,6 +37,7 @@ import {
   findRegisterColumnByKey,
   registerEntityExists,
 } from "../../../lib/register-columns";
+import { siteOutsideMemberScope } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +108,12 @@ export async function PATCH(request: Request) {
         { error: register === "sites" ? "Site not found." : "Contractor not found." },
         { status: 404 },
       );
+    }
+    /* A store outside the member's sites is not found either: `GET
+       /api/registers` never sends them its values. The contractors register
+       is not a site's, and is left as the read leaves it. */
+    if (register === "sites" && siteOutsideMemberScope(scope.siteScope, entityId)) {
+      return Response.json({ error: "Site not found." }, { status: 404 });
     }
 
     const raw = body.value;

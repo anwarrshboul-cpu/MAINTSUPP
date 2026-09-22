@@ -4,6 +4,7 @@ import { maintenanceGroupItems, maintenanceGroups } from "../../../../db/schema"
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { RETENTION_DAYS, sendGroupToBin } from "../../../lib/recycle-bin";
 import { resolveBoard } from "../../../lib/board-registry";
+import { anyJobOutsideMemberScope, beyondMemberScope } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -222,7 +223,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor, identityEmail } = guard.scope;
+    const { db, orgId, actor, identityEmail, siteScope } = guard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 64);
     const moveTo = text(url.searchParams.get("moveTo"), 64);
@@ -241,6 +242,18 @@ export async function DELETE(request: Request) {
         ),
       );
     if (!existing) return bad("Group not found.", 404);
+
+    /* Deleting a group re-files every job in it — other stores' jobs too.
+       `PATCH /api/board`'s delete_group asks the same question. */
+    if (siteScope) {
+      const held = await db
+        .select({ requestId: maintenanceGroupItems.requestId })
+        .from(maintenanceGroupItems)
+        .where(and(eq(maintenanceGroupItems.organisationId, orgId), eq(maintenanceGroupItems.groupId, id)));
+      if (await anyJobOutsideMemberScope(db, orgId, siteScope, held.map((row) => row.requestId))) {
+        return beyondMemberScope("this group still holds jobs at other sites");
+      }
+    }
 
     const items = await countItems(db, orgId, id);
 

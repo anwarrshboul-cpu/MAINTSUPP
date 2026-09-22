@@ -66,6 +66,13 @@ import { isUnassignedSite, unassignedSiteId } from "../../../lib/site-reference"
  * cross-tenant checks on site, group and parent, and the duplicate intent.
  */
 import { createSubmission, resolveSubmissionSite } from "../../../lib/submission-service";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
+import {
+  jobWithinMemberScope,
+  jobsWithinMemberScope,
+  siteOutsideMemberScope,
+  siteRequired,
+} from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -130,7 +137,7 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const board = await resolveBoard(db, orgId, url.searchParams.get("board") ?? undefined);
     const includeArchived = url.searchParams.get("archived") === "true";
@@ -203,6 +210,11 @@ export async function GET(request: Request) {
       ),
     ];
     if (!includeArchived) conditions.push(eq(maintenanceRequests.archived, false));
+    /* The member's sites only — in SQL, before the page is cut, as
+       `/api/maintenance` does. #83 confined `/api/board` and missed this read,
+       which the kanban, calendar, chart and gallery views are built on. */
+    const confined = memberSiteCondition(maintenanceRequests.siteId, siteScope);
+    if (confined) conditions.push(confined);
 
     const rows = await db
       .select()
@@ -289,7 +301,7 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
     // `?? {}` because a body of literal `null` PARSES — the catch never fires,
     // and every `body.x` below would throw straight into the 503 catch.
     const body = (await request.json().catch(() => null)) ?? {};
@@ -310,7 +322,11 @@ export async function POST(request: Request) {
             isNull(maintenanceRequests.deletedAt),
           ),
         );
-      if (!source) return bad("Item not found.", 404);
+      /* A copy lands at the source's store, so another store's job is one
+         this member cannot copy — and is answered as a missing one. */
+      if (!source || !(await jobWithinMemberScope(db, orgId, siteScope, sourceId))) {
+        return bad("Item not found.", 404);
+      }
 
       const id = newId("req");
       const reference = await nextReference(db, orgId, board.id);
@@ -412,7 +428,12 @@ export async function POST(request: Request) {
        * stops it crossing a tenant, and that is the whole check.
        */
       const site = await resolveSubmissionSite(db, { organisationId: orgId, siteId });
-      if (!site) return bad("Site not found.", 404);
+      /* A store outside the member's sites is not one they can file at, and
+         is answered as one that does not exist. */
+      if (!site || siteOutsideMemberScope(siteScope, siteId)) return bad("Site not found.", 404);
+    } else if (siteScope) {
+      /* No store: a job this member could never see again. */
+      return siteRequired();
     }
 
     const groupId = text(body.groupId, 64);
@@ -445,7 +466,9 @@ export async function POST(request: Request) {
             isNull(maintenanceRequests.deletedAt),
           ),
         );
-      if (!parent) return bad("Parent item not found.", 404);
+      if (!parent || !(await jobWithinMemberScope(db, orgId, siteScope, parentId))) {
+        return bad("Parent item not found.", 404);
+      }
     }
 
     /*
@@ -563,7 +586,7 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
     // `?? {}` because a body of literal `null` PARSES — the catch never fires,
     // and every `body.x` below would throw straight into the 503 catch.
     const body = (await request.json().catch(() => null)) ?? {};
@@ -630,7 +653,10 @@ export async function PATCH(request: Request) {
           ),
         )
         .limit(1);
-      if (!workOrder) return bad("Item not found.", 404);
+      /* Another store's job is not found, in the same words. */
+      if (!workOrder || !(await jobWithinMemberScope(db, orgId, siteScope, requestId))) {
+        return bad("Item not found.", 404);
+      }
 
       let value: string;
       if (column.system) {
@@ -767,10 +793,12 @@ export async function PATCH(request: Request) {
     // O7 — move items between or within groups.
     if (body.intent === "move") {
       const groupId = text(body.groupId, 64);
-      const itemIds: string[] = Array.isArray(body.itemIds)
+      const namedIds: string[] = Array.isArray(body.itemIds)
         ? body.itemIds.map((v: unknown) => text(v, 64)).filter(Boolean)
         : [];
-      if (!groupId || !itemIds.length) return bad("A group and at least one item are required.");
+      if (!groupId || !namedIds.length) return bad("A group and at least one item are required.");
+      /* Another store's jobs are not moved, and `moved` counts only the rest. */
+      const itemIds = await jobsWithinMemberScope(db, orgId, siteScope, namedIds);
 
       const [group] = await db
         .select({ id: maintenanceGroups.id })
@@ -836,10 +864,13 @@ export async function PATCH(request: Request) {
     }
 
     // O8 / O12 — batch status change, or archive and restore.
-    const itemIds: string[] = Array.isArray(body.itemIds)
+    const namedIds: string[] = Array.isArray(body.itemIds)
       ? body.itemIds.map((v: unknown) => text(v, 64)).filter(Boolean)
       : [text(body.id, 64)].filter(Boolean);
-    if (!itemIds.length) return bad("At least one item is required.");
+    if (!namedIds.length) return bad("At least one item is required.");
+    /* Another store's jobs are left alone, and `updated` below — the rows
+       actually written — says so, as it does for a foreign id. */
+    const itemIds = await jobsWithinMemberScope(db, orgId, siteScope, namedIds);
 
     const patch: Record<string, unknown> = { updatedAt: sql`CURRENT_TIMESTAMP` };
     let action = "updated";
@@ -970,7 +1001,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 64);
     if (!id) return bad("An item id is required.");
@@ -984,6 +1015,8 @@ export async function DELETE(request: Request) {
           eq(maintenanceRequests.organisationId, orgId),
           // Stage 23 — a job already in the bin is not found here.
           isNull(maintenanceRequests.deletedAt),
+          // Nor is a job at a store outside the member's sites.
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
         ),
       );
     if (!existing) return bad("Item not found.", 404);

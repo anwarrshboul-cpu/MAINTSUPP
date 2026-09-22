@@ -69,6 +69,7 @@ import {
 } from "../../lib/automations";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import { memberSiteCondition } from "../../lib/member-site-scope";
+import { jobWithinMemberScope, siteOutsideMemberScope, siteRequired } from "../../lib/job-site-scope";
 function databaseError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   if (process.env.NODE_ENV === "development") {
@@ -417,7 +418,7 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
     const payload = (await request.json()) as Record<string, unknown>;
     const location = trimString(payload.location, 120);
     const requester = trimString(payload.requester, 120);
@@ -463,7 +464,9 @@ export async function POST(request: Request) {
       organisationId: orgId,
       location,
     });
-    if (!matchedSite) {
+    /* A store outside the member's sites is, to them, a name that matches
+       nothing: the same refusal, so it does not confirm the store exists. */
+    if (!matchedSite || siteOutsideMemberScope(siteScope, matchedSite.id)) {
       return Response.json(
         { error: "Choose a site from this client workspace." },
         { status: 400 },
@@ -593,7 +596,7 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
     const payload = (await request.json()) as Record<string, unknown>;
     const id = trimString(payload.id, 40);
     const stage = trimString(payload.stage, 30);
@@ -619,6 +622,15 @@ export async function PATCH(request: Request) {
     }
     if (stage && !validStages.has(stage)) {
       return Response.json({ error: "Invalid workflow stage." }, { status: 400 });
+    }
+
+    /*
+     * A job at a store outside the member's sites is the 404 a missing job
+     * gets — and it is asked FIRST, before the completion gate below can answer
+     * a 409 that would confirm the job exists and name its category.
+     */
+    if (!(await jobWithinMemberScope(db, orgId, siteScope, id))) {
+      return Response.json({ error: "Request not found." }, { status: 404 });
     }
 
     /*
@@ -811,7 +823,7 @@ export async function PATCH(request: Request) {
                 isNull(maintenanceRequests.deletedAt),
               ),
             );
-          if (!parent) {
+          if (!parent || !(await jobWithinMemberScope(db, orgId, siteScope, parentId))) {
             return Response.json({ error: "That parent item does not exist." }, { status: 404 });
           }
           if (parent.parentId) {
@@ -872,9 +884,14 @@ export async function PATCH(request: Request) {
             .select({ id: sites.id })
             .from(sites)
             .where(and(eq(sites.id, nextSiteId), eq(sites.organisationId, orgId)));
-          if (!site) {
+          /* Moving a job to a store outside the member's sites is the same
+             escape in the other direction, and gets the same answer. */
+          if (!site || siteOutsideMemberScope(siteScope, nextSiteId)) {
             return Response.json({ error: "Site not found." }, { status: 404 });
           }
+        } else if (siteScope) {
+          /* Clearing the store would put the job out of the member's sight. */
+          return siteRequired();
         }
         /*
          * Clearing a site has to be written the way the column can hold it.

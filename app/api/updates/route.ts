@@ -323,7 +323,7 @@ export async function POST(request: Request) {
 
   const guard = await scopedDbWithCapability(request, "board.edit");
   if (guard.denied) return guard.denied;
-  const { db, orgId, actor } = guard.scope;
+  const { db, orgId, actor, siteScope } = guard.scope;
 
   let payload: Record<string, unknown>;
   try {
@@ -373,6 +373,8 @@ export async function POST(request: Request) {
          * cannot tell "deleted" from "never existed".
          */
         isNull(maintenanceRequests.deletedAt),
+        // Nor can one at a store outside the member's sites — GET's rule.
+        memberSiteCondition(maintenanceRequests.siteId, siteScope),
       ),
     )
     .limit(1);
@@ -513,7 +515,7 @@ export async function PUT(request: Request) {
 
   const guard = await scopedDbWithCapability(request, "board.view");
   if (guard.denied) return guard.denied;
-  const { db, orgId, actor } = guard.scope;
+  const { db, orgId, actor, siteScope } = guard.scope;
 
   /*
    * An email is required, and its absence is refused rather than filled in.
@@ -557,6 +559,10 @@ export async function PUT(request: Request) {
         eq(maintenanceRequests.id, itemUpdates.requestId),
         eq(maintenanceRequests.organisationId, orgId),
         isNull(maintenanceRequests.deletedAt),
+        /* A comment on another store's job is not on this member's board. The
+           Board Discussion fallback below has no job, so no store, and is the
+           board's own conversation — untouched. */
+        memberSiteCondition(maintenanceRequests.siteId, siteScope),
       ),
     )
     .where(and(eq(itemUpdates.id, updateId), eq(itemUpdates.organisationId, orgId)))

@@ -121,6 +121,9 @@ function computeNextSendAt(
   return at.toISOString();
 }
 
+/** What a restricted member is told about a record outside their sites. */
+const SUBJECT_NOT_FOUND = "The record this reminder belongs to was not found.";
+
 /**
  * Whether a reminder's record stands at one of the member's sites.
  *
@@ -200,7 +203,7 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return Response.json({ error: "Send a JSON body." }, { status: 400 });
@@ -209,6 +212,12 @@ export async function POST(request: Request) {
     const subjectId = text(body.subjectId, 120);
     if (!SUBJECT_TYPES.has(subjectType) || !subjectId) {
       return Response.json({ error: "Name the record this reminder belongs to." }, { status: 400 });
+    }
+    /* A reminder may hang only off a record at the member's sites — GET's
+       rule, `subjectWithinScope`. Outside it, or missing, the record is not
+       found; an unrestricted member is not asked, as before. */
+    if (siteScope && !(await subjectWithinScope(db, orgId, subjectType, subjectId, siteScope))) {
+      return Response.json({ error: SUBJECT_NOT_FOUND }, { status: 404 });
     }
 
     const recipients = readRecipients(body.recipients);
@@ -281,7 +290,7 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     const id = text(body?.id, 120);
@@ -298,7 +307,13 @@ export async function PATCH(request: Request) {
         ),
       )
       .limit(1);
-    if (!existing) return Response.json({ error: "That reminder no longer exists." }, { status: 404 });
+    /* A reminder on another store's record is one this member never saw. */
+    if (
+      !existing ||
+      (siteScope && !(await subjectWithinScope(db, orgId, existing.subjectType, existing.subjectId, siteScope)))
+    ) {
+      return Response.json({ error: "That reminder no longer exists." }, { status: 404 });
+    }
 
     /*
      * OMITTED IS NOT CLEARED. `undefined` leaves a field alone and an explicit
@@ -363,7 +378,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 120);
     if (!id) return Response.json({ error: "Name the reminder." }, { status: 400 });
@@ -373,7 +388,12 @@ export async function DELETE(request: Request) {
       .from(reminderRules)
       .where(and(eq(reminderRules.id, id), eq(reminderRules.organisationId, orgId)))
       .limit(1);
-    if (!existing) return Response.json({ error: "That reminder no longer exists." }, { status: 404 });
+    if (
+      !existing ||
+      (siteScope && !(await subjectWithinScope(db, orgId, existing.subjectType, existing.subjectId, siteScope)))
+    ) {
+      return Response.json({ error: "That reminder no longer exists." }, { status: 404 });
+    }
 
     await deleteReminder(db, orgId, id);
     const reminders = await listReminders(db, orgId, existing.subjectType, existing.subjectId);

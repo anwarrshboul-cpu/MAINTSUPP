@@ -1,7 +1,10 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { attachments, maintenanceRequests } from "../../../../db/schema";
+import { attachments, jobAccessTokens, maintenanceRequests } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
+import { jobWithinMemberScope } from "../../../lib/job-site-scope";
+import { outsideSiteScope } from "../../files/documents";
 import { demoIdentityAllowed } from "../../../lib/tenant-access";
 import {
   DEFAULT_EXPIRY_DAYS,
@@ -39,10 +42,25 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const requestId = text(url.searchParams.get("requestId"), 64);
     if (!requestId) return bad("A job id is required.");
+
+    /*
+     * Another store's job answers as a job with nothing issued — what this read
+     * already says about an id that does not exist. #83 confined the job reads
+     * and missed this one, which carries the links, the evidence waiting for
+     * review and the completion signature.
+     */
+    if (!(await jobWithinMemberScope(db, orgId, siteScope, requestId))) {
+      return Response.json({
+        links: [],
+        pendingEvidence: [],
+        completion: null,
+        defaultExpiryDays: DEFAULT_EXPIRY_DAYS,
+      });
+    }
 
     const tokens = await listJobTokens(db, orgId, requestId);
 
@@ -103,7 +121,7 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor, authenticated } = guard.scope;
+    const { db, orgId, actor, authenticated, siteScope } = guard.scope;
     /*
      * Issuing a link is issuing a credential.
      *
@@ -136,6 +154,9 @@ export async function POST(request: Request) {
           eq(maintenanceRequests.organisationId, orgId),
           // Stage 23 — no contractor link for a job sitting in the recycle bin.
           isNull(maintenanceRequests.deletedAt),
+          /* Nor for one at a store outside the member's sites: a link is a
+             credential to the job, and they may not reach the job. */
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
         ),
       );
     if (!job) return bad("Job not found.", 404);
@@ -202,10 +223,32 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
     const body = await request.json().catch(() => ({}));
     const attachmentId = text(body.attachmentId, 64);
     if (!attachmentId) return bad("An attachment id is required.");
+
+    /*
+     * Accepting or rejecting evidence is a write to the document, so a
+     * restricted member asks the document doors' own question of it
+     * (`outsideSiteScope`) — missing and outside answer alike. Unrestricted
+     * callers are not asked, and the route answers them exactly as before.
+     */
+    if (siteScope) {
+      const [file] = await db
+        .select({
+          siteId: attachments.siteId,
+          unitId: attachments.unitId,
+          requestId: attachments.requestId,
+          contractorId: attachments.contractorId,
+        })
+        .from(attachments)
+        .where(and(eq(attachments.id, attachmentId), eq(attachments.organisationId, orgId)))
+        .limit(1);
+      if (!file || (await outsideSiteScope(db, orgId, siteScope, file))) {
+        return bad("That file was not found.", 404);
+      }
+    }
 
     if (body.decision === "reject") {
       await db
@@ -243,10 +286,23 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 64);
     if (!id) return bad("A link id is required.");
+
+    /* A link to another store's job is not one this member can see, so not one
+       they can revoke; missing and outside answer alike. */
+    if (siteScope) {
+      const [link] = await db
+        .select({ requestId: jobAccessTokens.requestId })
+        .from(jobAccessTokens)
+        .where(and(eq(jobAccessTokens.id, id), eq(jobAccessTokens.organisationId, orgId)))
+        .limit(1);
+      if (!link || !(await jobWithinMemberScope(db, orgId, siteScope, link.requestId))) {
+        return bad("That link was not found.", 404);
+      }
+    }
 
     await revokeJobToken(db, orgId, id);
     return Response.json({ ok: true, revoked: true });

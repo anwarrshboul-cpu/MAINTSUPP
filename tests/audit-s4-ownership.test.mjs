@@ -57,9 +57,12 @@ test("items-route cell writes look the item up in the caller's organisation firs
     /eq\(maintenanceRequests\.id, requestId\),\s*\n\s*eq\(maintenanceRequests\.organisationId, orgId\)/,
     "the item lookup must filter on the organisation",
   );
+  /* RE-POINTED (site-scope writes, 2026-09-22): the same 404 now also answers a
+     job at a store outside the member's sites (`jobWithinMemberScope`). The
+     foreign-id half — `!workOrder` — is unchanged and still comes first. */
   assert.match(
     cell,
-    /if \(!workOrder\) return bad\("Item not found\.", 404\);/,
+    /if \(!workOrder \|\| !\(await jobWithinMemberScope\(db, orgId, siteScope, requestId\)\)\) \{\s*return bad\("Item not found\.", 404\);/,
     "an unknown or foreign item id must 404, not write an orphan cell",
   );
   // … and it happens BEFORE anything is written.

@@ -107,6 +107,14 @@ import {
   requestFieldEvents,
 } from "../../lib/automations";
 import { confineBoardPayload } from "../../lib/board-site-scope";
+import {
+  anyJobOutsideMemberScope,
+  beyondMemberScope,
+  jobWithinMemberScope,
+  jobsWithinMemberScope,
+  siteOutsideMemberScope,
+  siteRequired,
+} from "../../lib/job-site-scope";
 
 /*
  * Which board a request is for.
@@ -1839,7 +1847,7 @@ export async function POST(request: Request) {
     // testing role switcher, which a reader cannot tell apart otherwise.
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId, identityEmail, session } = guard.scope;
+    const { actor, db, orgId, identityEmail, session, siteScope } = guard.scope;
     /*
      * A body that is not a JSON object is a bad request, not an outage. The
      * unguarded read let broken JSON throw — and a body of literal `null`
@@ -1901,6 +1909,9 @@ export async function POST(request: Request) {
     }
 
     if (action === "create_item") {
+      /* A blank row has no store (`createBoardItem` files it at none), and a
+         restricted member could never see it again. See `job-site-scope.ts`. */
+      if (siteScope) return siteRequired();
       const groupId = trimString(payload.groupId, 80);
       // The write itself lives in `board-mutations.ts`, shared with the
       // automation engine so a rule's "create item" is this exact operation.
@@ -2224,13 +2235,17 @@ export async function POST(request: Request) {
     }
 
     if (action === "duplicate_items") {
-      const requestIds = requestIdsFrom(payload);
-      if (!requestIds.length) {
+      const named = requestIdsFrom(payload);
+      if (!named.length) {
         return Response.json(
           { error: "Select at least one item to duplicate." },
           { status: 400 },
         );
       }
+      /* A job at another store is, to a restricted member, a job that is not
+         there: dropped like a foreign id, so the 404 below answers when nothing
+         is left. The same filter guards the two verbs after this one. */
+      const requestIds = await jobsWithinMemberScope(db, orgId, siteScope, named);
       // Stage 23 — a job in the recycle bin cannot be duplicated; the helper
       // reads live rows only. See `duplicateBoardItems`.
       const outcome = await duplicateBoardItems(db, orgId, boardId, actor, requestIds);
@@ -2259,13 +2274,14 @@ export async function POST(request: Request) {
     }
 
     if (action === "move_items" || action === "archive_items") {
-      const requestIds = requestIdsFrom(payload);
-      if (!requestIds.length) {
+      const named = requestIdsFrom(payload);
+      if (!named.length) {
         return Response.json(
           { error: "Select at least one item." },
           { status: 400 },
         );
       }
+      const requestIds = await jobsWithinMemberScope(db, orgId, siteScope, named);
 
       /*
        * A LIVE TARGET GROUP — not one in the recycle bin. The lookup used to
@@ -2351,13 +2367,14 @@ export async function POST(request: Request) {
     }
 
     if (action === "delete_items") {
-      const requestIds = requestIdsFrom(payload);
-      if (!requestIds.length) {
+      const named = requestIdsFrom(payload);
+      if (!named.length) {
         return Response.json(
           { error: "Select at least one item to delete." },
           { status: 400 },
         );
       }
+      const requestIds = await jobsWithinMemberScope(db, orgId, siteScope, named);
       /*
        * STAGE 23 — THIS USED TO BE THE HARD DELETE, AND IS NOW THE BIN.
        *
@@ -2469,7 +2486,7 @@ export async function PATCH(request: Request) {
     // `session` joins the other two for the audit trail: an event whose email
     // has no user id behind it was performed under the testing role switcher,
     // and a reader has to be able to tell those apart. See `auditActor`.
-    const { actor, db, orgId, identityEmail, session } = guard.scope;
+    const { actor, db, orgId, identityEmail, session, siteScope } = guard.scope;
     // Same guard as POST: broken JSON and a literal-`null` body are 400s,
     // not the 503 the bottom catch would turn the resulting throw into.
     const payload = (await request.json().catch(() => null)) as
@@ -2678,6 +2695,38 @@ export async function PATCH(request: Request) {
       if (!groupItems.length && !requestIds.length) {
         return Response.json({ items: [] });
       }
+      /*
+       * A RESTRICTED MEMBER SORTS THEIR OWN ROWS, IN THEIR OWN SLOTS.
+       *
+       * They are sent only their stores' rows (`confineBoardPayload`), so the
+       * order they send cannot name the rest of the group — the check below
+       * would call every such sort a stale group — and must not move the rest
+       * either. So their rows go, in the order asked, into the positions those
+       * same rows already held, and every other store's row keeps its place.
+       */
+      if (siteScope) {
+        const mine = new Set(
+          await jobsWithinMemberScope(db, orgId, siteScope, groupItems.map((item) => item.requestId)),
+        );
+        const own = groupItems.filter((item) => mine.has(item.requestId));
+        if (requestIds.length !== own.length || requestIds.some((requestId) => !mine.has(requestId))) {
+          return Response.json(
+            { error: "The group changed while it was being sorted. Try again." },
+            { status: 409 },
+          );
+        }
+        const slots = own.map((item) => item.position).sort((a, b) => a - b);
+        const sortedOwn: Array<typeof maintenanceGroupItems.$inferSelect> = [];
+        for (const [index, requestId] of requestIds.entries()) {
+          const [item] = await db
+            .update(maintenanceGroupItems)
+            .set({ position: slots[index], updatedAt: new Date().toISOString() })
+            .where(and(eq(maintenanceGroupItems.requestId, requestId), eq(maintenanceGroupItems.organisationId, orgId)))
+            .returning();
+          if (item) sortedOwn.push(item);
+        }
+        return Response.json({ items: sortedOwn });
+      }
       const validIds = new Set(groupItems.map((item) => item.requestId));
       if (
         requestIds.length !== groupItems.length ||
@@ -2741,6 +2790,11 @@ export async function PATCH(request: Request) {
         .from(maintenanceGroupItems)
         .where(and(eq(maintenanceGroupItems.groupId, group.id), eq(maintenanceGroupItems.organisationId, orgId)))
         .orderBy(asc(maintenanceGroupItems.position));
+      /* Deleting a group moves every job in it and, into a stage group,
+         rewrites their stage — other stores' jobs included. */
+      if (await anyJobOutsideMemberScope(db, orgId, siteScope, sourceItems.map((item) => item.requestId))) {
+        return beyondMemberScope("this group still holds jobs at other sites");
+      }
       const [last] = await db
         .select({ value: max(maintenanceGroupItems.position) })
         .from(maintenanceGroupItems)
@@ -2850,7 +2904,8 @@ export async function PATCH(request: Request) {
         .from(maintenanceRequests)
         .where(and(eq(maintenanceRequests.id, requestId), eq(maintenanceRequests.organisationId, orgId)))
         .limit(1);
-      if (!column || !workOrder) {
+      /* A job at another store is "no longer exists" too — the same words. */
+      if (!column || !workOrder || !(await jobWithinMemberScope(db, orgId, siteScope, requestId))) {
         return Response.json(
           { error: "The row or column no longer exists." },
           { status: 404 },
@@ -3090,6 +3145,27 @@ export async function PATCH(request: Request) {
         );
       }
       /*
+       * Clearing destroys every value and file in the column on every job, for
+       * good — other stores' jobs included. (Deleting keeps them, recoverably,
+       * and takes a column off the board, which is the board's structure and
+       * not a store's; it is left as it is.) A file with no job proves nothing
+       * about the member's stores, so it counts as another store's.
+       */
+      if (action === "clear_column" && siteScope) {
+        const holders = await db
+          .select({ requestId: maintenanceBoardCells.requestId })
+          .from(maintenanceBoardCells)
+          .where(and(eq(maintenanceBoardCells.columnId, columnId), eq(maintenanceBoardCells.organisationId, orgId)));
+        const files = await db
+          .select({ requestId: attachments.requestId })
+          .from(attachments)
+          .where(and(eq(attachments.boardColumnId, columnId), eq(attachments.organisationId, orgId)));
+        const reached = [...holders.map((row) => row.requestId), ...files.map((file) => file.requestId ?? "")];
+        if (await anyJobOutsideMemberScope(db, orgId, siteScope, reached)) {
+          return beyondMemberScope("this column holds values at other sites");
+        }
+      }
+      /*
        * TWO VERBS THAT USED TO SHARE A BODY.
        *
        * "Clear" empties a column and keeps it: the files go, the values go, the
@@ -3180,8 +3256,16 @@ export async function PATCH(request: Request) {
           ),
         )
         .limit(1);
-      if (!existingItem) {
+      if (!existingItem || !(await jobWithinMemberScope(db, orgId, siteScope, requestId))) {
         return Response.json({ error: "Item not found." }, { status: 404 });
+      }
+      /* A drop position is a row the member was shown; another store's row is
+         a position that is not there, which is what the 409 below says. */
+      if (beforeRequestId && !(await jobWithinMemberScope(db, orgId, siteScope, beforeRequestId))) {
+        return Response.json(
+          { error: "The selected drop position is no longer available." },
+          { status: 409 },
+        );
       }
 
       const targetRows = await db
@@ -3363,7 +3447,9 @@ export async function PATCH(request: Request) {
           .from(sites)
           .where(and(eq(sites.id, siteOptionId), eq(sites.organisationId, orgId)))
           .limit(1);
-        if (!existingSite) {
+        /* Renaming a store is a write to the store: one outside the member's
+           sites is not found, as it is in the Sites register. */
+        if (!existingSite || siteOutsideMemberScope(siteScope, siteOptionId)) {
           return Response.json({ error: "Store location not found." }, { status: 404 });
         }
         const previousName = existingSite.name;

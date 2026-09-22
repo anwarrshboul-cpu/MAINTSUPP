@@ -82,9 +82,55 @@ import {
 import { CANONICAL_REGISTER } from "../../lib/register-scope";
 import { chunkIds } from "../../lib/sql-batching";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import { beyondMemberScope, jobsWithinMemberScope } from "../../lib/job-site-scope";
 
 type Scope = Awaited<ReturnType<typeof scopedDbWithCapability>>["scope"];
 type Database = NonNullable<Scope>["db"];
+
+/**
+ * THE BIN, AS A RESTRICTED MEMBER MAY SEE AND ACT ON IT.
+ *
+ * A JOB entry stands at its job's store and an ASSET entry at its asset's; one
+ * outside the member's sites is left out of the list and is "no longer in the
+ * bin" to restore and purge — the words a missing entry gets. A SECTION carries
+ * a whole board of jobs at every store, so it is outside any restriction.
+ * Groups, columns and views are the board's structure rather than a store's,
+ * and stay, as `/api/board` sends them. `null` scope: the entries themselves,
+ * no query.
+ */
+async function confineBinEntries<T extends { entityType: string; entityId: string }>(
+  db: Database,
+  orgId: string,
+  siteScope: string[] | null,
+  entries: T[],
+): Promise<T[]> {
+  const allowed = memberSiteSet(siteScope);
+  if (!allowed) return entries;
+  const jobs = new Set(
+    await jobsWithinMemberScope(
+      db,
+      orgId,
+      siteScope,
+      entries.filter((entry) => entry.entityType === "job").map((entry) => entry.entityId),
+    ),
+  );
+  const assetSite = new Map<string, string>();
+  const assetIds = entries.filter((entry) => entry.entityType === ASSET_ENTITY_TYPE).map((entry) => entry.entityId);
+  for (const chunk of chunkIds([...new Set(assetIds)])) {
+    const rows = await db
+      .select({ id: units.id, siteId: units.siteId })
+      .from(units)
+      .where(and(eq(units.organisationId, orgId), inArray(units.id, chunk)));
+    for (const row of rows) assetSite.set(row.id, row.siteId);
+  }
+  return entries.filter((entry) => {
+    if (entry.entityType === "job") return jobs.has(entry.entityId);
+    if (entry.entityType === ASSET_ENTITY_TYPE) return withinMemberScope(allowed, assetSite.get(entry.entityId));
+    if (entry.entityType === SECTION_ENTITY_TYPE) return false;
+    return true;
+  });
+}
 
 function unavailable(error: unknown) {
   // A session that has ended is not an outage: 503 tells a browser to retry
@@ -173,7 +219,10 @@ export async function GET(request: Request) {
      */
     const subject = await resolvePermissions(db, orgId, guard.scope.actor.role);
 
-    const all = await listBin(db, orgId);
+    /* Confined before anything is counted, so `total` does not say how much
+       of other stores' work is in the bin either. #83 confined the job reads
+       and missed this one, which lists deleted jobs by title. */
+    const all = await confineBinEntries(db, orgId, guard.scope.siteScope, await listBin(db, orgId));
     const entries = all.filter((entry) => {
       if (kind && kind !== "all" && entry.entityType !== kind) return false;
       if (board && board !== "all" && entry.boardId !== board) return false;
@@ -250,6 +299,19 @@ export async function POST(request: Request) {
      * the capability and the scope are resolved; that module takes a database
      * and an organisation and is deliberately not in the permissions business.
      */
+    /* A job at another store — or a section, which holds every store's — is
+       not in this member's bin. The asset rule below predates this and stays. */
+    if (siteScope) {
+      const [entry] = await db
+        .select({ entityType: recycleBin.entityType, entityId: recycleBin.entityId })
+        .from(recycleBin)
+        .where(and(eq(recycleBin.id, id), eq(recycleBin.organisationId, orgId)))
+        .limit(1);
+      if (entry && !(await confineBinEntries(db, orgId, siteScope, [entry])).length) {
+        return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });
+      }
+    }
+
     const assetSite = await binnedAssetSite(db, orgId, id);
     if (assetSite !== null) {
       const subject = await resolvePermissions(db, orgId, actor.role);
@@ -331,7 +393,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.delete");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor, identityEmail, session } = guard.scope;
+    const { db, orgId, actor, identityEmail, session, siteScope } = guard.scope;
 
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
@@ -343,8 +405,12 @@ export async function DELETE(request: Request) {
         { status: 400 },
       );
     }
+    /* Emptying the bin destroys every store's deleted work, for good. */
+    if (siteScope && !id) {
+      return beyondMemberScope("emptying the bin destroys every site's deleted items");
+    }
 
-    const all = await db
+    const unconfined = await db
       .select({
         id: recycleBin.id,
         entityType: recycleBin.entityType,
@@ -358,6 +424,9 @@ export async function DELETE(request: Request) {
           ? and(eq(recycleBin.id, id), eq(recycleBin.organisationId, orgId))
           : eq(recycleBin.organisationId, orgId),
       );
+    /* One entry, for a restricted member: another store's is not in their bin,
+       and the 404 below says so in the words a missing entry gets. */
+    const all = await confineBinEntries(db, orgId, siteScope, unconfined);
 
     /*
      * W2C — A CHILD OF A DELETED SECTION IS NOT SEPARATELY DESTROYABLE.

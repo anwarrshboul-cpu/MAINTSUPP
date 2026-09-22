@@ -1339,7 +1339,7 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
       orgId,
@@ -1359,9 +1359,13 @@ export async function PATCH(request: Request) {
     if (!id) throw new Error("A site ID is required.");
 
     /* The scope gate for the whole verb: an id outside this register is Not
-       Found, so no branch below can read, rename or archive it. */
+       Found, so no branch below can read, rename or archive it. A store
+       outside the MEMBER's sites is the same Not Found — `GET` above never
+       lists it for them (`withinMemberScope`). */
     const existing = await getSite(db, orgId, id, scope);
-    if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
+    if (!existing || !withinMemberScope(memberSiteSet(siteScope), id)) {
+      return Response.json({ error: "Site not found." }, { status: 404 });
+    }
 
     if (body.data?.groupIds !== undefined) {
       const badGroup = await unknownGroupRefusal(
@@ -1677,7 +1681,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
       orgId,
@@ -1691,8 +1695,11 @@ export async function DELETE(request: Request) {
     const id = text(body.id, 120);
     if (!id) throw new Error("A site ID is required.");
 
+    /* PATCH's gate: a store outside the member's sites is not found. */
     const existing = await getSite(db, orgId, id, scope);
-    if (!existing) return Response.json({ error: "Site not found." }, { status: 404 });
+    if (!existing || !withinMemberScope(memberSiteSet(siteScope), id)) {
+      return Response.json({ error: "Site not found." }, { status: 404 });
+    }
 
     const [openJobs] = await db
       .select({ total: count() })

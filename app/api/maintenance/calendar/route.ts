@@ -52,6 +52,21 @@ import { calendarEvents } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { databaseSafeFailure } from "../../../lib/database-failure";
 import { memberSiteCondition } from "../../../lib/member-site-scope";
+import { siteOutsideMemberScope, siteRequired } from "../../../lib/job-site-scope";
+
+/**
+ * A calendar item's site, as a restricted member may write it.
+ *
+ * `null` when the site is theirs (or they are unrestricted); otherwise the
+ * refusal — "Site not found." for a store outside their sites, which is what
+ * the rest of the product answers for a site a member cannot see, and 403 for
+ * no site at all, because a site-less item is one they could never see again
+ * (`GET` above filters on `memberSiteCondition`).
+ */
+function siteChoiceRefusal(siteScope: string[] | null, siteId: string | null): Response | null {
+  if (!siteOutsideMemberScope(siteScope, siteId)) return null;
+  return siteId ? Response.json({ error: "Site not found." }, { status: 404 }) : siteRequired();
+}
 
 /**
  * The capability a manual calendar item is written under.
@@ -298,13 +313,15 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
 
     const body = (await request.json()) as { data?: Record<string, unknown> };
     const data = body.data ?? {};
     const title = text(data.title, 160);
     if (!title) throw new Error("A title is required.");
     const { startsOn, endsOn } = range(data.startsOn, data.endsOn);
+    const refusedSite = siteChoiceRefusal(siteScope, text(data.siteId, 120) || null);
+    if (refusedSite) return refusedSite;
 
     const now = new Date().toISOString();
     const id = `cal-${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
@@ -363,7 +380,7 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
 
     const body = (await request.json()) as {
       id?: string;
@@ -385,8 +402,15 @@ export async function PATCH(request: Request) {
      * would have been wrong is answering `{ ok: true }` to an id that does not
      * exist here, which tells a caller a change happened.
      */
-    if (!existing) {
+    /* An item at a store outside the member's sites is not found here either:
+       `GET` never showed it to them. */
+    if (!existing || siteOutsideMemberScope(siteScope, existing.siteId)) {
       return Response.json({ error: "Calendar item not found." }, { status: 404 });
+    }
+    /* ...and one of theirs may not be moved to a store that is not. */
+    if (data.siteId !== undefined) {
+      const refusedSite = siteChoiceRefusal(siteScope, text(data.siteId, 120) || null);
+      if (refusedSite) return refusedSite;
     }
     if (existing.deletedAt && body.restore !== true) {
       return Response.json(
@@ -478,7 +502,7 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, WRITE_CAPABILITY);
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor } = guard.scope;
+    const { db, orgId, actor, siteScope } = guard.scope;
 
     const url = new URL(request.url);
     let id = text(url.searchParams.get("id"), 120);
@@ -492,11 +516,11 @@ export async function DELETE(request: Request) {
     if (!id) throw new Error("A calendar item ID is required.");
 
     const [existing] = await db
-      .select({ id: calendarEvents.id, deletedAt: calendarEvents.deletedAt })
+      .select({ id: calendarEvents.id, deletedAt: calendarEvents.deletedAt, siteId: calendarEvents.siteId })
       .from(calendarEvents)
       .where(and(eq(calendarEvents.id, id), eq(calendarEvents.organisationId, orgId)))
       .limit(1);
-    if (!existing) {
+    if (!existing || siteOutsideMemberScope(siteScope, existing.siteId)) {
       return Response.json({ error: "Calendar item not found." }, { status: 404 });
     }
     // Already gone. Idempotent rather than an error: a retried request and a
