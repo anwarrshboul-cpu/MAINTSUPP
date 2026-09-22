@@ -78,6 +78,13 @@ test("the workspace default dashboard can be removed — by settings.edit only, 
   assert.ok(remove.indexOf("ensureConfigBaseline(") < remove.indexOf(".delete(dashboardLayouts)"), "the default as it was is kept first");
   assert.match(remove, /kind: "deleted"/);
   assert.match(remove, /action: "dashboard\.default_removed"/);
+  /* The editor offers it to settings.edit holders. `canSetWorkspaceDefault` was
+     never passed where the widgets render, so the save, the history and now the
+     remove control were reachable only through the API (Preview QA found it). */
+  const portal = code(await read("app/(app)/portal/portal-app.tsx"));
+  assert.match(portal, /canSetWorkspaceDefault=\{runtimeContext\?\.capabilities\?\.\["settings\.edit"\] === true\}/);
+  assert.match(portal, /surface="reports"\s*barSlot=\{layoutSlot\}\s*canSetWorkspaceDefault=\{canSetWorkspaceDefault\}/);
+  assert.match(code(await read("app/(app)/portal/dashboard-widgets.tsx")), /onClick=\{\(\) => void removeDefault\(\)\}/);
 });
 
 /* ------------------------------------------------------------------ */
