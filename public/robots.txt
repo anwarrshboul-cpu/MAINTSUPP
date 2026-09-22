@@ -13,3 +13,5 @@ Disallow: /request
 Disallow: /api/
 
 Sitemap: https://maintsupp.com/sitemap.xml
+# The website pages written in the console (/p/...), read live.
+Sitemap: https://maintsupp.com/sitemap-pages.xml

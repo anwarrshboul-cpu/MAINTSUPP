@@ -131,6 +131,28 @@ export async function resolveUploadTenant(
 }
 
 /**
+ * NO SESSION AND NO GRANT: 401, before anything is looked up.
+ *
+ * Step 3 of `resolveUploadAuthority` refuses this caller too, and still does for
+ * one whose token matched nothing. But both upload routes look the job and the
+ * other anchors up FIRST, because a token decides which tenant to look in. For a
+ * caller holding no token at all that ordering answered a question nobody had
+ * the right to ask: a made-up job id got 404 "Work order not found" and a real
+ * one got 401, so a stranger could tell which `MN-<n>` exist. (The §77 sweep
+ * recorded the 404 as a harmless inconsistency; it was an existence oracle.)
+ *
+ * Nothing changes for a caller who presents a token, valid or not, or who has a
+ * session or the demo identity — they reach the same checks in the same order.
+ */
+export function ungrantedAnonymousRefusal(
+  scope: Pick<ScopedDatabase, "authenticated">,
+  uploadToken: string,
+): Response | null {
+  if (uploadToken || scope.authenticated || demoIdentityAllowed()) return null;
+  return refuse("Sign in to upload a document.", 401);
+}
+
+/**
  * Decides whether this upload may proceed, and under which grant.
  *
  * `storedKind` is the kind that will ACTUALLY be written — after the column has
