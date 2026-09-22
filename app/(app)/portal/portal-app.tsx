@@ -4147,7 +4147,7 @@ export default function PortalApp({
         <CreateRequestModal
           locations={currentStores.filter((store) => store.lifecycle === "Current").map((store) => store.name)}
           /* Decision O — this workspace's own trades, not a list written here. */
-          trades={workspace?.requestConfiguration?.engineers ?? []}
+          trades={runtimeContext?.requestConfiguration?.engineers ?? []}
           onClose={() => setShowCreateRequest(false)}
           onCreate={createRequest}
         />

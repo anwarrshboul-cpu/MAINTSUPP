@@ -195,14 +195,14 @@ test("the raise-a-job dialog offers this workspace's trades, not a list written 
    */
   assert.match(
     portal,
-    /trades=\{workspace\?\.requestConfiguration\?\.engineers \?\? \[\]\}/,
+    /trades=\{runtimeContext\?\.requestConfiguration\?\.engineers \?\? \[\]\}/,
     "the dialog is handed the register, through the one context read the shell already makes",
   );
-  assert.equal(
-    [...portal.matchAll(/fetch\(\s*["'`]\/api\/context/g)].length,
-    0,
-    "and not through a second fetch — see tests/shared-context-and-navigation-reads.test.mjs",
-  );
+  /* `runtimeContext` IS the shared read: the state `fetchRuntimeContext` fills.
+     That there is exactly one GET of /api/context in this file is the contract
+     tests/shared-context-and-navigation-reads.test.mjs owns, and it is not
+     restated here — two tests asserting one rule is how the weaker one ends up
+     being the one that gets relaxed. */
   assert.match(portal, /engineer: defaultTrade\(trades\)/, "a new job starts on a value the register holds");
   assert.match(portal, /\{tradeChoicesFor\(trades\)\.map\(\(choice\) => \(/, "and the picker draws that list");
   /* The five survive as the fallback for a workspace that has configured none,
