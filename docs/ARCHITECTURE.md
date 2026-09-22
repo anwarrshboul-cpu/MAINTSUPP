@@ -31,6 +31,15 @@ the single source of truth — change the rule there, not a copy of it.
   `integrations.manage`) and the role ceilings are in `app/lib/permissions.ts`.
   Platform Super Admin (`platform_admins`) is a separate, cross-workspace grant used
   by `/admin` and the website CMS.
+- A membership may be confined to named stores (`memberships.site_scope`, parsed
+  fail-closed by `parseSiteScope` in `app/lib/tenant-grants.ts`; NULL means every
+  store). One rule, `withinMemberScope` in `app/lib/member-site-scope.ts`, decides
+  it everywhere: reads through `memberSiteCondition` / `confineBoardPayload`, uploads
+  through `uploadOutsideSiteScope`, and writes through `app/lib/job-site-scope.ts`. A
+  record at another store answers as the route's own "not found"; a change that would
+  reach other stores as a side effect (an import, emptying the bin, clearing a column)
+  is a 403. `tests/site-scope-writes.test.mjs` keeps an inventory of every job-level
+  write route, so a new one must ask the rule or say why not.
 
 ## Configuration without code
 

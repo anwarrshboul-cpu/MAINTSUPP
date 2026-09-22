@@ -25,6 +25,7 @@ import {
   type ImportPlan,
 } from "../../lib/monday-import";
 import { parseDelimited, readXlsx } from "../../lib/xlsx-reader";
+import { beyondMemberScope } from "../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -712,7 +713,10 @@ export async function POST(request: Request) {
     // Identity is pulled through for the audit trail below.
     const guard = await scopedDbWithCapability(request, "data.import");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId, identityEmail, session } = guard.scope;
+    const { actor, db, orgId, identityEmail, session, siteScope } = guard.scope;
+    /* An import files jobs at whatever stores the sheet names and matches the
+       rows already in the workspace — every store, not the member's. */
+    if (siteScope) return beyondMemberScope("an import reaches every site in the workspace");
 
     const form = await request.formData().catch(() => null);
     if (!form) return bad("Send the export as multipart form data.");

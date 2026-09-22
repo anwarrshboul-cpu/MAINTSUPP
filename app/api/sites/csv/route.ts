@@ -3,6 +3,7 @@ import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
+import { beyondMemberScope } from "../../../lib/job-site-scope";
 import { csvResponse, parseCsvObjects, toCsv } from "../../../lib/csv";
 import { siteWriteFailure } from "../route";
 import { listOptionValues } from "../../../lib/options-repository";
@@ -356,7 +357,10 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.import");
     if (guard.denied) return guard.denied;
-    const { actor, db, orgId } = guard.scope;
+    const { actor, db, orgId, siteScope } = guard.scope;
+    /* A sheet updates whichever stores its names match — any store in the
+       register, not only the member's — and adds stores they would not see. */
+    if (siteScope) return beyondMemberScope("an import reaches every site in the register");
     const resolved = await resolveRegisterScope(
       db,
       orgId,

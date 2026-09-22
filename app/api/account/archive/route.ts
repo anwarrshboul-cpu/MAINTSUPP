@@ -39,6 +39,7 @@ import {
   anonymousRefusal,
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
 
 /** The kinds this route will restore, and the table each one flips. */
 const RESTORABLE = new Set(["job", "group", "board"]);
@@ -73,6 +74,9 @@ export async function GET(request: Request) {
              * Restore buttons that mean different things.
              */
             isNull(maintenanceRequests.deletedAt),
+            /* The member's sites only, before the 200 are cut. #83 confined
+               the job reads and missed this one. */
+            memberSiteCondition(maintenanceRequests.siteId, context.siteScope),
           ),
         )
         .orderBy(desc(maintenanceRequests.archivedAt))
@@ -279,6 +283,9 @@ export async function POST(request: Request) {
           and(
             eq(maintenanceRequests.id, id),
             eq(maintenanceRequests.organisationId, context.orgId),
+            /* A job at a store outside the member's sites matches nothing,
+               and the 404 below is the answer — the same as a foreign id. */
+            memberSiteCondition(maintenanceRequests.siteId, context.siteScope),
           ),
         )
         .returning({ id: maintenanceRequests.id });

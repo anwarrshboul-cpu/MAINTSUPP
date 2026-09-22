@@ -49,6 +49,8 @@ import { rowsToCsv, csvResponse } from "../../../lib/csv";
 import { exposeRequest } from "../../../lib/request-payload";
 import { customCellKey } from "../../../(app)/portal/board-format";
 import { selectInChunks } from "../../../lib/sql-batching";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
+import { jobsWithinMemberScope } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +81,11 @@ export async function POST(request: Request) {
      */
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
-    const { db, orgId, actor, identityEmail, session } = guard.scope;
+    const { db, orgId, actor, identityEmail, session, siteScope } = guard.scope;
+    /* The file holds exactly the rows the board shows this member: their
+       sites' jobs, on both paths below. #83 confined the board and missed its
+       export, which is a copy of it that leaves the building. */
+    const confined = memberSiteCondition(maintenanceRequests.siteId, siteScope);
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const board = await resolveBoard(db, orgId, text(body.board, 48) || undefined);
@@ -113,7 +119,15 @@ export async function POST(request: Request) {
           ),
       );
       const allowed = new Set(found.map((row) => row.id));
-      ids = requestedIds.filter((id) => allowed.has(id));
+      /* Checked after the lookup rather than inside it: each chunk already
+         spends its bound variables on ids, and the member's sites would be an
+         `IN` list of their own. */
+      ids = await jobsWithinMemberScope(
+        db,
+        orgId,
+        siteScope,
+        requestedIds.filter((id) => allowed.has(id)),
+      );
     } else {
       const placements = await db
         .select({ requestId: maintenanceGroupItems.requestId })
@@ -127,6 +141,7 @@ export async function POST(request: Request) {
             eq(maintenanceGroupItems.organisationId, orgId),
             eq(maintenanceGroupItems.boardId, board.key),
             isNull(maintenanceRequests.deletedAt),
+            confined,
           ),
         )
         .orderBy(asc(maintenanceGroupItems.position))

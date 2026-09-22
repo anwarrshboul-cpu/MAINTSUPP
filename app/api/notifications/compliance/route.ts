@@ -14,6 +14,8 @@ import {
   notificationTargets,
   sendNotification,
 } from "../../../lib/notifications";
+import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
+import { beyondMemberScope } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -343,8 +345,11 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
-    const scanned = await scan(db, orgId);
+    const { db, orgId, siteScope } = guard.scope;
+    /* The member's stores' certificates only — the Compliance register's own
+       rule. #83 confined the job reads and missed this digest preview. */
+    const allowed = memberSiteSet(siteScope);
+    const scanned = (await scan(db, orgId)).filter((item) => withinMemberScope(allowed, item.entry.siteId));
 
     return Response.json({
       expired: scanned
@@ -380,7 +385,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "settings.edit");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
+    /* A run alerts on, and stamps, every store's certificates. */
+    if (siteScope) return beyondMemberScope("a compliance alert run covers every site in the workspace");
     const url = new URL(request.url);
     const dryRun = url.searchParams.get("dryRun") === "true";
 
