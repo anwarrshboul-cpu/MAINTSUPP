@@ -87,7 +87,7 @@ export function ChartView({ items, palette }: { items: BoardItem[]; palette: Rec
                   className="chart-view__bar"
                   style={{
                     width: `${Math.max(2, (row.value / peak) * 100)}%`,
-                    background: palette[row.label] ?? "var(--teal)",
+                    background: palette[row.label] ?? "var(--chart-primary)",
                   }}
                 />
               </span>

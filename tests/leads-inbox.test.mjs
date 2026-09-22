@@ -429,8 +429,9 @@ test("the console lists the inbox because the inbox now has a server side", asyn
      only one landed. `platform-admin-shell.test.mjs` compares against its own
      ENTRIES list rather than a literal, so it needed no change.
      Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
-     API (`/api/contractor-applications/inbox`) — the same rule kept once more. */
-  assert.equal(PLATFORM_SECTIONS.length, 8);
+     API (`/api/contractor-applications/inbox`) — the same rule kept once more.
+     Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`. */
+  assert.equal(PLATFORM_SECTIONS.length, 9);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the

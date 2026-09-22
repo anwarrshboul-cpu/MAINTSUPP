@@ -76,13 +76,15 @@ const ENTRIES = [
   ["pages", "app/(app)/admin/pages/page.tsx", "/admin/pages"],
   ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
   ["applications", "app/(app)/admin/applications/page.tsx", "/admin/applications"],
+  /* NINE: Backups (§39) arrived with `/api/admin/backups` — visibility only. */
+  ["backups", "app/(app)/admin/backups/page.tsx", "/admin/backups"],
 ];
 
 /* ------------------------------------------------------------------ */
 /* The catalogue                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the console lists eight screens, and every one has a route", async () => {
+test("the console lists nine screens, and every one has a route", async () => {
   assert.equal(PLATFORM_SECTIONS.length, ENTRIES.length);
   assert.deepStrictEqual(
     [...PLATFORM_SECTION_KEYS],
