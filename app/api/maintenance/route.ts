@@ -55,6 +55,7 @@ import { unassignedSiteId } from "../../lib/site-reference";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import { resolveJobTypeWrite } from "../../lib/job-types";
+import { tradeWriteRefusal } from "../../lib/job-trade";
 import { contractorLinkValues } from "../../lib/contractor-reference";
 import {
   approvedByLinkValues,
@@ -995,6 +996,18 @@ export async function PATCH(request: Request) {
      * Absent is unchanged; `null` or "" is Unclassified. The `{ fields }` this
      * PATCH logs to `activity_log` below already carries the change.
      */
+    /*
+     * Decision O — the TRADE is a controlled field. A value this workspace does
+     * not offer is refused here rather than written into the column every
+     * dashboard groups by; the value a job already holds may stay, so an
+     * imported job's own spelling never blocks an unrelated edit. See
+     * `app/lib/job-trade.ts`.
+     */
+    if (fields && typeof fields.engineer === "string") {
+      const refusal = await tradeWriteRefusal(db, orgId, fields.engineer, before?.engineer);
+      if (refusal) return Response.json({ error: refusal, fields: [refusal] }, { status: 400 });
+    }
+
     if (fields && Object.prototype.hasOwnProperty.call(fields, "jobTypeId")) {
       const jobType = await resolveJobTypeWrite(
         db,

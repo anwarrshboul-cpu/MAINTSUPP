@@ -196,6 +196,7 @@ import {
   SpendAgainstBudget,
   SpendMatrix,
   JobVolumeTrend,
+  JobsByTrade,
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
 import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
@@ -395,6 +396,24 @@ type RuntimeWorkspaceContext = {
    * every reader treats as "do not offer" rather than "denied".
    */
   capabilities?: Record<string, boolean>;
+  /**
+   * WHAT A "RAISE A JOB" FORM MAY OFFER, resolved server-side from this
+   * workspace's option registers, active values only.
+   *
+   * Decision O reads `engineers` — the job's TRADE. `/api/context` has served
+   * this since the public request form was built (`app/(app)/request/
+   * request-form.tsx` and `views/board-views.tsx` both use it); this file simply
+   * never declared it, and hard-coded five trades into its own dialog instead.
+   * Declared rather than fetched: the shell already holds the whole context
+   * through `fetchRuntimeContext`, and a second read would be the duplication
+   * `tests/shared-context-and-navigation-reads.test.mjs` exists to prevent.
+   *
+   * Optional for the same reason `capabilities` is: a cached payload from before
+   * the field existed must not crash the shell.
+   */
+  requestConfiguration?: {
+    engineers?: Array<{ value: string; label: string; isDefault?: boolean }>;
+  };
   /**
    * The portal modules this workspace has switched on AND this actor may reach
    * — Master Specification §19, resolved server-side.
@@ -4126,6 +4145,8 @@ export default function PortalApp({
       {showCreateRequest && (
         <CreateRequestModal
           locations={currentStores.filter((store) => store.lifecycle === "Current").map((store) => store.name)}
+          /* Decision O — this workspace's own trades, not a list written here. */
+          trades={workspace?.requestConfiguration?.engineers ?? []}
           onClose={() => setShowCreateRequest(false)}
           onCreate={createRequest}
         />
@@ -6696,6 +6717,26 @@ function ReportsView({
                 loading={loading}
               />
             ),
+          },
+          {
+            /*
+             * Decision O — the Master specification's "Jobs by Trade". The
+             * trade is the job's own controlled field (see app/lib/job-trade.ts);
+             * nothing here reads a contractor's name.
+             *
+             * WHY ON REPORTS AND NOT THE OVERVIEW. A "Jobs by trade" panel was
+             * REMOVED from the Overview on 2026-09-04 — see the re-pointing note
+             * in `tests/stage-nineteen-overview-live.test.mjs` — because the
+             * Overview's Job breakdown already meters `engineer`, and two panels
+             * over one column on one screen was duplication the owner objected
+             * to. That objection is not re-opened here: this is the Reports
+             * surface, its panels ARE the Dashboard Builder's widgets, and this
+             * one can be reordered, renamed, widened or unticked like any other.
+             * The Overview still carries exactly one reading of the column.
+             */
+            key: "jobs-by-trade",
+            label: "Jobs by trade",
+            render: () => <JobsByTrade requests={scopedRequests} loading={loading} />,
           },
           {
             key: "reactive-planned",
@@ -10076,12 +10117,44 @@ interface CreateRequestDraft {
   jobTypeId: string;
 }
 
+/**
+ * THE TRADES THIS DIALOG OFFERED BEFORE IT WAS TOLD ANY — decision O.
+ *
+ * It offered exactly these five, written into this file, while the create path
+ * canonicalised the answer against the `engineer_required` register and fell
+ * back to "Other" for anything it did not recognise (`canonicalSubmissionOption`
+ * in `app/lib/submission-service.ts`). So in a workspace that had renamed or
+ * replaced its trades, picking "Electrician" here stored "Other" — the dialog
+ * was offering a list the server would not accept, and the mismatch was silent.
+ *
+ * KEPT as the fallback rather than deleted: the context may not have answered
+ * yet, and a workspace with no configured trades must still be able to raise a
+ * job. A configured register always wins.
+ */
+const BUILT_IN_TRADES = ["Electrician", "Handyman", "HVAC", "Plumber", "Specialist"];
+
+type TradeChoice = { value: string; label: string; isDefault?: boolean };
+
+function tradeChoicesFor(trades: readonly TradeChoice[]): TradeChoice[] {
+  if (trades.length) return [...trades];
+  return BUILT_IN_TRADES.map((value) => ({ value, label: value }));
+}
+
+/** What a new job starts on: the register's own default, else its first value. */
+function defaultTrade(trades: readonly TradeChoice[]): string {
+  const choices = tradeChoicesFor(trades);
+  return (choices.find((choice) => choice.isDefault) ?? choices[0])?.value ?? "";
+}
+
 function CreateRequestModal({
   locations: siteLocations,
+  trades,
   onClose,
   onCreate,
 }: {
   locations: string[];
+  /** This workspace's active trades, from `/api/context`. Empty until it answers. */
+  trades: TradeChoice[];
   onClose: () => void;
   onCreate: (draft: CreateRequestDraft, files: File[]) => Promise<void>;
 }) {
@@ -10095,7 +10168,7 @@ function CreateRequestModal({
     contact: "",
     description: "",
     category: "Lighting",
-    engineer: "Electrician",
+    engineer: defaultTrade(trades),
     priority: "Medium",
     /* Unclassified until somebody says otherwise — never guessed. */
     jobTypeId: "",
@@ -10277,16 +10350,19 @@ function CreateRequestModal({
                 </label>
               </div>
               <label className="form-field">
-                <span>Engineer required</span>
+                {/* The board column is "Engineer Required" and the product calls
+                    the dimension the Trade; both names are shown so a reader who
+                    knows one finds the other. */}
+                <span>Trade (Engineer required)</span>
                 <select
                   value={draft.engineer}
                   onChange={(event) => update("engineer", event.target.value)}
                 >
-                  <option>Electrician</option>
-                  <option>Handyman</option>
-                  <option>HVAC</option>
-                  <option>Plumber</option>
-                  <option>Specialist</option>
+                  {tradeChoicesFor(trades).map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label className="form-field">

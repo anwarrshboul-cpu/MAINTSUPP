@@ -29,6 +29,8 @@
 
 import { useMemo } from "react";
 import { Icon } from "../../components";
+import { useWidgetTitle } from "./widget-config";
+import { tradeBreakdown } from "./views/overview-series";
 import { chipStyle } from "./chip-ink";
 import type { MaintenanceRequest, StoreRecord } from "../../lib/types";
 import type { WorkspaceComplianceRecord } from "../../lib/workspace-data";
@@ -196,11 +198,15 @@ export function InsightPanel({
    */
   loading?: boolean;
 }) {
+  /* Decision O — the workspace's own name for this panel, when it has set one.
+     Read here because every panel's heading comes through this component; see
+     `widget-config.tsx`. It renames the panel and changes nothing it counts. */
+  const named = useWidgetTitle() ?? title;
   return (
     <section className="panel insight-panel">
       <header className="insight-panel__head">
         <div>
-          <h3>{title}</h3>
+          <h3>{named}</h3>
           {hint && <p>{hint}</p>}
         </div>
         {action}
@@ -1476,6 +1482,73 @@ export function CostByCategory({
               />
             </div>
             <strong>{money(row.total)}</strong>
+          </div>
+        ))}
+      </div>
+    </InsightPanel>
+  );
+}
+
+/**
+ * JOBS BY TRADE — decision O, and the Master specification's own donut.
+ *
+ * The trade is the job's `engineer` field: the CONTROLLED `engineer_required`
+ * option set, which the board mirrors as "Engineer Required" (monday's name for
+ * the column) and which `app/lib/job-trade.ts` now refuses an unconfigured
+ * value for. Nothing here derives a trade from a contractor's name or from free
+ * text — the panel counts the field, and a job that has none is counted as
+ * "Trade not recorded" rather than dropped.
+ *
+ * `tradeBreakdown` is reused rather than re-written: it was built for this
+ * exact question (see `views/overview-series.ts` for the two monday rows that
+ * arrive as "[object Object]" and why they belong in the unrecorded bucket) and
+ * was, until now, computed by nothing on screen.
+ */
+export function JobsByTrade({
+  requests,
+  loading = false,
+}: {
+  requests: MaintenanceRequest[];
+  loading?: boolean;
+}) {
+  const rows = useMemo(() => tradeBreakdown(requests, 8), [requests]);
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+
+  if (!total) {
+    return (
+      <InsightPanel
+        loading={loading}
+        title="Jobs by trade"
+        hint="Grouped by the job's Engineer Required column"
+        empty={{
+          message: "No jobs in this period",
+          hint: "The trade comes from the job's Engineer Required column; the list of trades is edited on the board.",
+        }}
+      >
+        <span />
+      </InsightPanel>
+    );
+  }
+
+  const maximum = Math.max(...rows.map((row) => row.value), 1);
+
+  return (
+    <InsightPanel
+      title="Jobs by trade"
+      hint={`${plural(total, "job")} · grouped by the job's Engineer Required column`}
+    >
+      <div className="insight-ageing">
+        {rows.map((row) => (
+          <div
+            key={row.label}
+            className="insight-ageing__row"
+            title={`${row.label}: ${plural(row.value, "job")}`}
+          >
+            <span>{row.label}</span>
+            <div className="insight-bar">
+              <i style={{ width: `${Math.max((row.value / maximum) * 100, 3)}%`, background: row.color }} />
+            </div>
+            <strong>{row.value}</strong>
           </div>
         ))}
       </div>

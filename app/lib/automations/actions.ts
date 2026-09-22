@@ -25,6 +25,7 @@ import {
   users,
 } from "../../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "../job-status-history";
+import { TRADE_FIELD, tradeWriteRefusal } from "../job-trade";
 import {
   createBoardGroup,
   createBoardItem,
@@ -133,6 +134,11 @@ async function setSystemField(
   const values = requestFieldValues({ [entry.field]: raw });
   if (!(entry.field in values)) {
     throw new Error(`${label}: "${wanted}" is not a value this column accepts.`);
+  }
+  /* Decision O — a rule may not invent a trade any more than a person may. */
+  if (entry.field === TRADE_FIELD) {
+    const refusal = await tradeWriteRefusal(ctx.db, ctx.orgId, values[entry.field], item.engineer);
+    if (refusal) throw new Error(`${label}: ${refusal}`);
   }
   /*
    * A rule that sets Contractor sets the REFERENCE too, by the same rule the
