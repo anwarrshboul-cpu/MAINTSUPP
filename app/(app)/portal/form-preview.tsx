@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Icon } from "../../components";
 import { askedPages, projectPublicForm } from "../../lib/form-projection";
 import {
@@ -120,8 +120,16 @@ export default function FormPreview({ form }: { form: BuilderForm }) {
    * what a submitter would experience too.
    */
 
-  /* Prefills show in Preview exactly as they will on the link. */
-  useEffect(() => {
+  /*
+   * Prefills show in Preview exactly as they will on the link.
+   *
+   * Seeded during render whenever the questions change, and only into answers
+   * nobody has typed — React's "adjust state when a prop changes", with no
+   * effect setting state from inside itself.
+   */
+  const [seededFor, setSeededFor] = useState<typeof payload | null>(null);
+  if (seededFor !== payload) {
+    setSeededFor(payload);
     setAnswers((current) => {
       const seeded = { ...current };
       let changed = false;
@@ -133,7 +141,7 @@ export default function FormPreview({ form }: { form: BuilderForm }) {
       }
       return changed ? seeded : current;
     });
-  }, [payload]);
+  }
 
   const current = Math.min(Math.max(step, 0), pages.length - 1);
   const last = current === pages.length - 1;

@@ -113,9 +113,14 @@ export default function PublicForm({ token }: { token: string }) {
     [token],
   );
 
+  /* eslint-disable react-hooks/set-state-in-effect -- `load` awaits the fetch
+     before it touches state, so nothing here sets state synchronously in the
+     effect body; the rule cannot see through the promise. Fetching the form a
+     link names is the external-system synchronisation an effect is for. */
   useEffect(() => {
     void load();
   }, [load]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /*
    * Load the configured webfont — and only then.
@@ -154,20 +159,24 @@ export default function PublicForm({ token }: { token: string }) {
    * computed on the server (see `resolvePrefill`) precisely so the date shown
    * and the date validated come from one clock.
    */
-  useEffect(() => {
-    if (payload?.state !== "open") return;
-    setAnswers((current) => {
-      const seeded = { ...current };
-      let changed = false;
-      for (const question of payload.form.questions) {
-        if (question.settings.prefill && seeded[question.id] === undefined) {
-          seeded[question.id] = question.settings.prefill;
-          changed = true;
+  const [seededFor, setSeededFor] = useState<Payload | null>(null);
+  if (payload && seededFor !== payload) {
+    // During render, not in an effect: seeded once per payload, into untouched fields only.
+    setSeededFor(payload);
+    if (payload.state === "open") {
+      setAnswers((current) => {
+        const seeded = { ...current };
+        let changed = false;
+        for (const question of payload.form.questions) {
+          if (question.settings.prefill && seeded[question.id] === undefined) {
+            seeded[question.id] = question.settings.prefill;
+            changed = true;
+          }
         }
-      }
-      return changed ? seeded : current;
-    });
-  }, [payload]);
+        return changed ? seeded : current;
+      });
+    }
+  }
 
   /*
    * The form, split into the pages a submitter actually walks.

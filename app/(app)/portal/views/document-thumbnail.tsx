@@ -47,7 +47,7 @@
  *    Neither changes this component.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Icon, type IconName } from "../../../components";
 import { documentThumbnailUrl } from "./document-register";
 
@@ -75,17 +75,17 @@ export function DocumentThumbnail({
   box: { width: number; height: number };
 }) {
   const src = documentThumbnailUrl(file);
-  const [failed, setFailed] = useState(false);
-
   /*
-   * A new document in the same slot starts again.
+   * WHICH picture failed, not whether one did — so a new document in the same
+   * slot starts again.
    *
    * The register pages and re-sorts in place, so React reuses this element for
-   * a different row. Without this, one denied or missing picture would poison
-   * every document that later landed on the same node — the reader would see a
-   * glyph for a photograph that is perfectly readable.
+   * a different row. A boolean would poison every document that later landed
+   * on the same node — the reader would see a glyph for a photograph that is
+   * perfectly readable. Remembering the failed `src` needs no effect to reset.
    */
-  useEffect(() => setFailed(false), [src]);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc !== null && failedSrc === src;
 
   if (!src || failed) {
     return (
@@ -129,7 +129,7 @@ export function DocumentThumbnail({
         height={box.height}
         loading="lazy"
         decoding="async"
-        onError={() => setFailed(true)}
+        onError={() => setFailedSrc(src)}
       />
     </span>
   );

@@ -2450,6 +2450,12 @@ export default function PortalApp({
    * replaying a forty-page walk for a register nobody is looking at — opening
    * Documents reloads it anyway, which is fresher rather than staler.
    */
+  /* eslint-disable react-hooks/set-state-in-effect -- deliberate, and not the
+     "awaits first" case: `loadDocuments` raises its loading flag synchronously
+     so the register says "Loading" the moment Documents opens. The effect is
+     the synchronisation with the server that opening the surface — reached
+     from many places — and another screen's upload both ask for; the one
+     extra render is what shows the reader it is working. */
   useEffect(() => {
     if (activeSurface !== "documents") return undefined;
     void loadDocuments();
@@ -2457,6 +2463,7 @@ export default function PortalApp({
     return () =>
       window.removeEventListener("maintsupp:refresh-board", loadDocuments);
   }, [activeSurface, loadDocuments]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     /*
@@ -5050,7 +5057,9 @@ function CalendarView({
     day: string,
   ) => Promise<void>;
 }) {
-  const nowMs = useMemo(() => Date.now(), []);
+  /* "Now", read once for the life of the page — a lazy initial state, because
+     reading the clock during render is impure (`react-hooks/purity`). */
+  const [nowMs] = useState(() => Date.now());
 
   /*
    * THE PAGE'S OWN RANGE, and what it is for on a calendar.
@@ -5346,10 +5355,9 @@ function DocumentsView({
   const filtered = matching.filter((file) => matchesDocumentSearch(file, query));
   /* Options come from everything in range INCLUDING the archive, so
      "Archived" is offered whenever there is one to look at. */
-  const options = useMemo(
-    () => documentFilterOptions(inRange, today),
-    [inRange, today],
-  );
+  /* Computed, not memoised: `inRange` is a fresh array every render, so the
+     `useMemo` that stood here never held (and the compiler said so). */
+  const options = documentFilterOptions(inRange, today);
   const narrowed = filtered.length !== visible.length;
   /*
    * A NEW QUESTION STARTS AT ITS FIRST PAGE.
@@ -9183,8 +9191,22 @@ function FileDetailDrawer({
    * time; without this the boxes would go on showing what was typed before the
    * save rather than what the server stored, and a value the server trimmed or
    * refused would look as though it had been kept.
+   *
+   * During render, not in an effect: the draft remembers which stored values
+   * it was seeded from and re-seeds when they differ — React's "adjust state
+   * when a prop changes", with no extra render pass.
    */
-  useEffect(() => {
+  const storedKey = [
+    file.id,
+    file.title,
+    file.documentType,
+    file.description,
+    file.expiryDate,
+    file.contractorId,
+  ].join("\u0000");
+  const [seededFrom, setSeededFrom] = useState(storedKey);
+  if (seededFrom !== storedKey) {
+    setSeededFrom(storedKey);
     setDraft({
       title: file.title ?? "",
       documentType: file.documentType ?? "",
@@ -9192,14 +9214,7 @@ function FileDetailDrawer({
       expiryDate: file.expiryDate ?? "",
       contractorId: file.contractorId ?? "",
     });
-  }, [
-    file.id,
-    file.title,
-    file.documentType,
-    file.description,
-    file.expiryDate,
-    file.contractorId,
-  ]);
+  }
 
   useEffect(() => {
     if (editing) titleFieldRef.current?.focus();
@@ -9275,9 +9290,15 @@ function FileDetailDrawer({
     }
   }, [file.rootDocumentId]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- `loadVersions` awaits the
+     fetch before it touches state, so nothing here sets state synchronously in
+     the effect body; the rule cannot see through the promise. Reading the
+     server's version history when the panel opens is the external-system
+     synchronisation an effect is for. */
   useEffect(() => {
     if (showVersions) void loadVersions();
   }, [showVersions, loadVersions]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   async function uploadReplacement(chosen: File) {
     setBusy("replace");
