@@ -11,6 +11,14 @@ import { DEFAULT_BOARD_KEY } from "../../lib/board-registry";
 import { automationContext, dispatchAutomationEvents, itemCreatedEvent } from "../../lib/automations";
 import { createSubmission, resolveSubmissionSite } from "../../lib/submission-service";
 import { PRIMARY_ORGANISATION_ID, scopedDb } from "../../lib/tenant-db";
+import { getD1 } from "../../../db";
+import {
+  publicRetryAfter,
+  recordPublicAttempt,
+  requestIp,
+  tooManyAttempts,
+} from "../../lib/auth-session";
+import { REPORT_JOB_SUBMISSIONS } from "../../lib/form-throttle";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +85,16 @@ async function sha256(value: string) {
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
+    /*
+     * THROTTLED, per address, before anything is read or written — the same
+     * door-counter every other public form uses. See `REPORT_JOB_SUBMISSIONS`.
+     */
+    const d1 = await getD1();
+    const address = requestIp(request);
+    const wait = await publicRetryAfter(d1, REPORT_JOB_SUBMISSIONS, address);
+    if (wait > 0) return tooManyAttempts(wait);
+    await recordPublicAttempt(d1, REPORT_JOB_SUBMISSIONS, address);
+
     const payload = (await request.json()) as Record<string, unknown>;
 
     const location = trimString(payload.location, 120);

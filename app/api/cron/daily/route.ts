@@ -13,6 +13,9 @@
  *   3. §35b webhook retries — `retryWebhookDeliveries`, the same claim-and-send
  *      the Retry button and the next event use, within a 20-second budget; it
  *      also prunes delivered rows older than 30 days. Never throws.
+ *   4. abandoned uploads — `expireUploadSessions`: every direct-upload session
+ *      past its expiry is aborted in storage (its parts are discarded) and
+ *      marked `expired`. No document row ever existed for one.
  *
  * AUTHENTICATION as every cron here: `CRON_SECRET`, bearer or `x-cron-secret`,
  * and REFUSED when unset (`authoriseCron` fails closed). A scheduler has no
@@ -26,6 +29,7 @@ import { generatePlannedOccurrences } from "../../../lib/planned-generation";
 import { publicOrigin } from "../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../lib/report-delivery";
 import { retryWebhookDeliveries } from "../../../lib/integrations/webhooks";
+import { expireUploadSessions } from "../../../lib/upload-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +48,14 @@ export async function POST(request: Request) {
       return null;
     });
     const webhooks = await retryWebhookDeliveries(db, { limit: 200, budgetMs: 20_000 });
+    const uploads = await expireUploadSessions(db, async (objectKey, uploadId) => {
+      const { env } = await import("cloudflare:workers");
+      if (!env.BUCKET) throw new Error("File storage is unavailable.");
+      await env.BUCKET.resumeMultipartUpload(objectKey, uploadId).abort();
+    }).catch((error: unknown) => {
+      console.error("[/api/cron/daily] upload sessions", error);
+      return null;
+    });
     /* Counts and ids only: this lands in platform logs. */
     return Response.json({
       ok: planned !== null && reports !== null,
@@ -52,6 +64,7 @@ export async function POST(request: Request) {
         ? reports.map(({ scheduleId, organisationId, occurrence, outcome, recipients }) => ({ scheduleId, organisationId, occurrence, outcome, recipients }))
         : { error: true },
       webhooks,
+      uploads: uploads ?? { error: true },
       ranAt: new Date().toISOString(),
     }, { status: planned !== null && reports !== null ? 200 : 503 });
   } catch (error) {

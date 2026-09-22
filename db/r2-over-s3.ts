@@ -178,6 +178,16 @@ export interface S3R2MultipartUpload {
   uploadPart(partNumber: number, value: R2PutValue): Promise<R2UploadedPart>;
   complete(parts: R2UploadedPart[]): Promise<S3R2Object>;
   abort(): Promise<void>;
+  /** A write-only URL for exactly one part of this upload. See `presignPart`. */
+  presignPart(partNumber: number, contentLength: number, expiresSeconds: number): string;
+  /** What the bucket holds for this upload so far, measured by the bucket. */
+  listParts(): Promise<ListedPart[]>;
+}
+
+export interface ListedPart {
+  partNumber: number;
+  etag: string;
+  size: number;
 }
 
 export interface R2ListOptions {
@@ -411,6 +421,85 @@ export function signS3Request(input: SignInput): SignedRequest {
     stringToSign,
     signature,
   };
+}
+
+export interface PresignInput {
+  method: string;
+  /** Already AWS-encoded, slashes intact — the same form `SignInput` takes. */
+  canonicalPath: string;
+  host: string;
+  query: QueryPairs;
+  /** Lower-cased names to sign besides `host`. UploadPart signs `content-length`. */
+  headers: Record<string, string>;
+  expiresSeconds: number;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  service?: string;
+  now?: Date;
+}
+
+/**
+ * SigV4 in the QUERY STRING — the capability travels in the URL, not in headers.
+ *
+ * Used for one thing only: `presignPart`, a write-only URL for one part of one
+ * multipart upload the server already created. The algorithm is the header
+ * signature's with three differences, all from AWS's "Authenticating Requests:
+ * Using Query Parameters": the X-Amz-* parameters join the canonical query, the
+ * payload hash is the literal `UNSIGNED-PAYLOAD` (the bytes are not known when
+ * the URL is made), and the signature is appended as `X-Amz-Signature`.
+ *
+ * Returns the intermediates for the same reason `signS3Request` does: a
+ * known-answer test can say whether a fault is in canonicalisation or in the
+ * key derivation.
+ */
+export function presignS3Url(input: PresignInput): {
+  query: QueryPairs;
+  canonicalRequest: string;
+  stringToSign: string;
+  signature: string;
+} {
+  const now = input.now ?? new Date();
+  const service = input.service ?? "s3";
+  const { amzDate, dateStamp } = sigv4Stamps(now);
+  const scope = `${dateStamp}/${input.region}/${service}/aws4_request`;
+
+  const all: Record<string, string> = {};
+  for (const [name, value] of Object.entries(input.headers)) {
+    if (value === undefined || value === null) continue;
+    all[name.toLowerCase()] = value;
+  }
+  all.host = input.host;
+  const names = Object.keys(all).sort();
+  const signedHeaders = names.join(";");
+
+  const query: QueryPairs = [
+    ...input.query,
+    ["X-Amz-Algorithm", "AWS4-HMAC-SHA256"],
+    ["X-Amz-Credential", `${input.accessKeyId}/${scope}`],
+    ["X-Amz-Date", amzDate],
+    ["X-Amz-Expires", String(input.expiresSeconds)],
+    ["X-Amz-SignedHeaders", signedHeaders],
+  ];
+  const canonicalRequest = [
+    input.method,
+    input.canonicalPath,
+    canonicalQueryString(query),
+    names.map((name) => `${name}:${String(all[name]).trim()}\n`).join(""),
+    signedHeaders,
+    "UNSIGNED-PAYLOAD",
+  ].join("\n");
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    sha256Hex(canonicalRequest),
+  ].join("\n");
+  const signature = hmac(
+    sigv4SigningKey(input.secretAccessKey, dateStamp, input.region, service),
+    stringToSign,
+  ).toString("hex");
+  return { query: [...query, ["X-Amz-Signature", signature]], canonicalRequest, stringToSign, signature };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1302,6 +1391,96 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
       },
 
       /**
+       * A URL that can do ONE thing: put `contentLength` bytes as part
+       * `partNumber` of this upload, within `expiresSeconds`.
+       *
+       * This is the only place a storage URL is ever handed to a browser, and
+       * everything about it is narrower than the credential that signs it:
+       *   - the method is PUT and the query names this `uploadId` and this part,
+       *     so it is UploadPart and nothing else — no GET, no list, no delete, no
+       *     PutObject over an existing key; a part is invisible until the SERVER
+       *     completes the upload, and `complete` is never signed for a client;
+       *   - `content-length` is a SIGNED header, so the browser (which sets it
+       *     from the body) can send exactly the size the server planned for this
+       *     part, not a byte more or less;
+       *   - the key is the one the server named at `start` — the browser chooses
+       *     no path;
+       *   - it expires in minutes; the route signs each part only when asked.
+       * The secret never leaves the server: the URL carries the access key id,
+       * which S3 treats as an identifier, and a signature over this request.
+       */
+      presignPart(partNumber: number, contentLength: number, expiresSeconds: number): string {
+        if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+          throw new Error("Part number must be between 1 and 10000.");
+        }
+        if (!Number.isInteger(contentLength) || contentLength < 1 || contentLength > 5 * 1024 ** 3) {
+          throw new Error("A part is between 1 byte and 5 GiB.");
+        }
+        if (!Number.isInteger(expiresSeconds) || expiresSeconds < 1 || expiresSeconds > 3600) {
+          throw new Error("A part URL expires within an hour.");
+        }
+        const canonicalPath = objectPath(key);
+        const signed = presignS3Url({
+          method: "PUT",
+          canonicalPath,
+          host: base.host,
+          query: [
+            ["partNumber", String(partNumber)],
+            ["uploadId", uploadId],
+          ],
+          headers: { "content-length": String(contentLength) },
+          expiresSeconds,
+          region,
+          accessKeyId,
+          secretAccessKey,
+          now: clock(),
+        });
+        // `urlFor` refuses a key the URL parser would rewrite, exactly as it does
+        // for every request this module sends itself.
+        return urlFor(canonicalPath, signed.query);
+      },
+
+      /**
+       * ListParts: the parts the bucket actually holds, with the sizes IT
+       * measured and the etags IT issued.
+       *
+       * When the browser puts its parts straight to storage the server never
+       * sees them go by, and the part URL's response headers may not be readable
+       * cross-origin. So `complete` asks the bucket instead of trusting a list
+       * the browser posts back, and checks every size against the plan before
+       * assembling anything.
+       */
+      async listParts(): Promise<ListedPart[]> {
+        const response = await send({
+          method: "GET",
+          canonicalPath: objectPath(key),
+          query: [
+            ["max-parts", "1000"],
+            ["uploadId", uploadId],
+          ],
+        });
+        if (!response.ok) await fail("GET ?uploadId (ListParts)", response);
+        const xml = await response.text();
+        if (xmlTag(xml, "IsTruncated") === "true") {
+          throw new Error("S3 ListParts was truncated; this route never plans more than 1000 parts.");
+        }
+        /*
+         * `<Part>` is AWS's element; Supabase Storage's S3 layer names the same
+         * list `<Parts>` (measured on the Staging bucket: every part stored,
+         * zero parsed). EXACT names on both ends — `xmlBlocks(xml, "Part")`
+         * also opens on `<PartNumberMarker>` and never closes on `</Parts>`.
+         */
+        return [...xml.matchAll(/<(Part|Parts)>([\s\S]*?)<\/\1>/g)]
+          .map((match) => match[2])
+          .map((block) => ({
+            partNumber: Number(xmlTag(block, "PartNumber") ?? 0),
+            etag: unquote(xmlTag(block, "ETag") ?? ""),
+            size: Number(xmlTag(block, "Size") ?? 0),
+          }))
+          .sort((a, b) => a.partNumber - b.partNumber);
+      },
+
+      /**
        * `abort()` on an upload that is already gone is a success.
        *
        * `client-upload.ts` aborts from its own `catch`, and the thing it is
@@ -1378,9 +1557,11 @@ export function createS3BucketFromEnv(
  * WHAT THIS DOES NOT DO
  *
  *   - No `onlyIf` / conditional get, no checksum verification on put, no
- *     storage classes, no presigned URLs. None appear at any call site in the
- *     legacy portal. (apps/api/src/lib/storage.ts presigns; that is the other
- *     stack and the other file.)
+ *     storage classes. None appear at any call site in the legacy portal.
+ *   - Presigned URLs for exactly one operation: UploadPart, via `presignPart`
+ *     (write-only, one part of one server-created upload, minutes). Never GET,
+ *     never PutObject, never a listing: every read stays brokered through
+ *     `GET /api/files/[id]`, which is what keeps the bucket private.
  *   - No `cacheExpiry`. R2 has it, S3 does not, and nothing here sets it.
  *   - No DeleteObjects. See `remove()`.
  *   - No retry and no backoff. A 500 or a 503 from the endpoint surfaces to the

@@ -51,6 +51,12 @@ import {
   resolveUploadAuthority,
   resolveUploadTenant,
 } from "./upload-authority";
+import {
+  SIGNATURE_BYTES,
+  SIGNATURE_REFUSAL,
+  signatureMatches,
+  typeAgreesWithExtension,
+} from "../../lib/file-signature";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -149,7 +155,12 @@ function isAllowedFile(file: File) {
   // extension rather than refusing a legitimate upload outright.
   const declared = file.type.trim();
   const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(file.name));
+  // And the name and the type must agree with each other — see `typeAgreesWithExtension`.
+  return (
+    typeOk &&
+    allowedExtensions.has(fileExtension(file.name)) &&
+    typeAgreesWithExtension(declared, file.name)
+  );
 }
 
 function requestPayload(
@@ -974,8 +985,19 @@ export async function POST(request: Request) {
      * its `start` said it would, and two spellings of one rule is how those two
      * halves drift apart.
      */
+    /*
+     * WHAT THE BYTES ACTUALLY ARE — the same check the multipart `complete`
+     * makes, before anything is stored or any predecessor stands down. The
+     * declared type and the extension are both the caller's claims; the first
+     * bytes are the file's own. See `app/lib/file-signature.ts`.
+     */
+    const bytes = await file.arrayBuffer();
+    if (!signatureMatches(file.type, file.name, new Uint8Array(bytes, 0, Math.min(bytes.byteLength, SIGNATURE_BYTES)))) {
+      return Response.json({ error: SIGNATURE_REFUSAL }, { status: 415 });
+    }
+
     const key = `${orgId}/maintenance/${anchorSegment(filedAgainst)}/${kind}/${id}-${cleanName}`;
-    await runtimeEnv.BUCKET.put(key, await file.arrayBuffer(), {
+    await runtimeEnv.BUCKET.put(key, bytes, {
       httpMetadata: {
         contentType: file.type || "application/octet-stream",
         contentDisposition: `inline; filename="${cleanName}"`,

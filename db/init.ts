@@ -388,6 +388,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      unique indexes; no seed. See `ensureConfigVersions`. */
   await ensureConfigVersions(d1);
 
+  /* Direct uploads — one pending row per multipart upload, binding it to the
+     person and workspace that started it. One guarded table; no seed. See
+     `ensureUploadSessions`. */
+  await ensureUploadSessions(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6440,6 +6445,57 @@ async function ensureConfigVersions(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE UNIQUE INDEX IF NOT EXISTS config_versions_installation_subject_idx ON config_versions(subject_type, subject_key, version_no) WHERE organisation_id IS NULL",
+    ),
+  ]);
+}
+
+/**
+ * DIRECT UPLOADS — one row per multipart upload, from `start` until it is
+ * completed, aborted or expires.
+ *
+ * Files over 900 KB now go from the browser straight into the private bucket,
+ * part by part, on short-lived write-only URLs (`presignPart` in
+ * `db/r2-over-s3.ts`). The server never sees those bytes, so it has to remember
+ * what it agreed to at `start`: WHO began the upload (`uploader` — a signed-in
+ * user, a job link, or the local testing identity), in WHICH workspace, for
+ * WHICH server-named key, of what declared type and exact size, split into how
+ * many parts of what size. Every later step — signing a part, a proxied part,
+ * `complete`, `abort` — must match this row, so one person's upload can never
+ * be fed, finished or cancelled by another.
+ *
+ * `state` is TEXT (`pending` → `finalizing` → `completed`, or `aborted`,
+ * `expired`, `failed`), never a boolean: see BOOLEAN_COLUMNS. `finalizing` is
+ * claimed by one conditional UPDATE, so `complete` runs at most once. Times are
+ * ISO text written by the app; `expires_at` is compared in JavaScript.
+ * `byte_size`/`part_size` are BIGINT so the shim cannot narrow them.
+ */
+async function ensureUploadSessions(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS upload_sessions (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         file_id TEXT NOT NULL,
+         object_key TEXT NOT NULL,
+         upload_id TEXT NOT NULL,
+         uploader TEXT NOT NULL,
+         transport TEXT NOT NULL DEFAULT 'proxy',
+         content_type TEXT NOT NULL,
+         original_name TEXT NOT NULL,
+         byte_size BIGINT NOT NULL,
+         part_size BIGINT NOT NULL,
+         part_count INTEGER NOT NULL,
+         state TEXT NOT NULL DEFAULT 'pending',
+         created_at TEXT NOT NULL,
+         expires_at TEXT NOT NULL,
+         finalized_at TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS upload_sessions_object_key_idx ON upload_sessions(object_key)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS upload_sessions_state_idx ON upload_sessions(state, expires_at)",
     ),
   ]);
 }

@@ -37,6 +37,19 @@ export const FORM_SUBMISSIONS: PublicThrottle = {
   lockoutMs: 10 * 60_000,
 };
 
+/*
+ * `/api/report-job` — the home page's anonymous "report a fault" door. Every
+ * report mints a thirty-minute upload token, and since uploads over 900 KB go
+ * straight into the bucket that token is worth up to 90 MB of storage. Ten
+ * reports per address per ten minutes is far above a shop's real need.
+ */
+export const REPORT_JOB_SUBMISSIONS: PublicThrottle = {
+  name: "report-job",
+  windowMs: 10 * 60_000,
+  max: 10,
+  lockoutMs: 10 * 60_000,
+};
+
 export const FORM_PASSWORD_FAILURES: PublicThrottle = {
   name: "form-password",
   windowMs: 15 * 60_000,

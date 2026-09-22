@@ -573,7 +573,10 @@ test("W06-08 uploading from a contractor goes through uploadEvidenceFile, with t
    * multipart fallback past `DIRECT_UPLOAD_LIMIT`, and the thumbnail. A
    * hand-rolled `fetch("/api/files")` silently loses all three.
    */
-  assert.match(profile, /import \{ uploadEvidenceFile \} from "\.\.\/\.\.\/lib\/client-upload"/);
+  /* Re-pointed for the direct-upload batch: the same import now also brings
+     `describeUploadStage`, the one wording for "Uploading 37%" / "Finishing…".
+     The contract is unchanged — the upload itself is `uploadEvidenceFile`. */
+  assert.match(profile, /import \{[^}]*\buploadEvidenceFile\b[^}]*\} from "\.\.\/\.\.\/lib\/client-upload"/);
   assert.match(
     profile,
     /await uploadEvidenceFile\(\{[\s\S]*?contractorId: contractor\.id,/,

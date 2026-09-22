@@ -35,6 +35,27 @@ import {
   resolveUploadAuthority,
   resolveUploadTenant,
 } from "../upload-authority";
+import {
+  MAX_PENDING_UPLOADS_PER_UPLOADER,
+  PART_URL_LIFETIME_SECONDS,
+  abandonUploadSession,
+  claimFinalize,
+  createUploadSession,
+  directTransport,
+  findUploadSession,
+  partPlan,
+  partsMatchPlan,
+  pendingUploadCount,
+  sessionRefusal,
+  settleUploadSession,
+  uploaderKey,
+} from "../../../lib/upload-sessions";
+import {
+  SIGNATURE_BYTES,
+  SIGNATURE_REFUSAL,
+  signatureMatches,
+  typeAgreesWithExtension,
+} from "../../../lib/file-signature";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -135,7 +156,13 @@ function isVideo(originalName: string, contentType: string) {
 function isAllowedFile(originalName: string, contentType: string) {
   const declared = (contentType ?? "").trim();
   const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(originalName));
+  /* And the two claims must agree with EACH OTHER — see `typeAgreesWithExtension`:
+     `x.mp4` declared `text/plain` earned the video limit and skipped the byte check. */
+  return (
+    typeOk &&
+    allowedExtensions.has(fileExtension(originalName)) &&
+    typeAgreesWithExtension(declared, originalName)
+  );
 }
 
 /*
@@ -447,7 +474,31 @@ async function authorizeUpload(
      * quietly filed every large contractor upload as internal and approved.
      */
     scopedToken,
+    /* The raw link, for `uploaderKey`: a legacy request-row token has no id. */
+    uploadToken,
   } as const;
+}
+
+/**
+ * WHO this caller is, for matching them to the upload session `start` created.
+ * One expression for POST and PUT, so the two can never disagree about a person.
+ */
+function uploaderOf(authorization: {
+  via: "job-token" | "request-token" | "capability";
+  scopedToken: { id: string } | null;
+  uploadToken: string;
+  scope: { authenticated: boolean; session: { user: { id: string } } | null };
+  actorEmail: string;
+}) {
+  return uploaderKey({
+    // The grant that AUTHORISED this call names the uploader — see `uploaderKey`.
+    via: authorization.via,
+    tokenId: authorization.scopedToken?.id ?? null,
+    uploadToken: authorization.uploadToken,
+    userId: authorization.scope.session?.user.id ?? null,
+    authenticated: authorization.scope.authenticated,
+    actorEmail: authorization.actorEmail,
+  });
 }
 
 /**
@@ -601,6 +652,7 @@ export async function POST(request: Request) {
     const uploadedByEmail = scopedToken
       ? `contractor-link:${scopedToken.id}`
       : actorEmail;
+    const uploader = await uploaderOf(authorization);
     const storage = await bucket();
     if (!storage) {
       return Response.json(
@@ -636,6 +688,18 @@ export async function POST(request: Request) {
               : "Files must be 25 MB or smaller.",
           },
           { status: 413 },
+        );
+      }
+
+      /*
+       * A few uploads in flight per uploader, not an unbounded number: every part
+       * costs storage from the moment it lands, and a job link or a public
+       * report's token must not be a way to park bytes in the bucket.
+       */
+      if ((await pendingUploadCount(db, orgId, uploader)) >= MAX_PENDING_UPLOADS_PER_UPLOADER) {
+        return Response.json(
+          { error: "Too many uploads are in progress. Let them finish, then try again." },
+          { status: 429 },
         );
       }
 
@@ -684,8 +748,43 @@ export async function POST(request: Request) {
           uploadedBy: uploadedByEmail,
         },
       });
+      /*
+       * THE SESSION — what every later step of this upload is checked against:
+       * this person, this workspace, this key, this exact size and part plan.
+       * `transport` is "direct" when the storage driver can sign part URLs (S3 —
+       * the deployed bucket), so the browser sends the bytes straight to the
+       * private bucket and a 90 MB video never passes through this function;
+       * "proxy" keeps the parts on `PUT` below (Miniflare R2, the filesystem).
+       * If the row cannot be written the reserved upload is abandoned at once,
+       * rather than left for the daily sweep to find.
+       */
+      let session;
+      try {
+        session = await createUploadSession(db, {
+          organisationId: orgId,
+          fileId,
+          objectKey: upload.key,
+          uploadId: upload.uploadId,
+          uploader,
+          transport: directTransport(upload) ? "direct" : "proxy",
+          contentType,
+          originalName,
+          byteSize,
+        });
+      } catch (error) {
+        await upload.abort().catch(() => undefined);
+        throw error;
+      }
       return Response.json(
-        { key: upload.key, uploadId: upload.uploadId, fileId },
+        {
+          key: upload.key,
+          uploadId: upload.uploadId,
+          fileId,
+          transport: session.transport,
+          partSize: Number(session.partSize),
+          partCount: Number(session.partCount),
+          expiresAt: session.expiresAt,
+        },
         { status: 201 },
       );
     }
@@ -699,332 +798,514 @@ export async function POST(request: Request) {
       );
     }
     const multipart = storage.resumeMultipartUpload(key, uploadId);
+    /*
+     * The session `start` wrote, in THIS workspace. A key and an upload id are
+     * not enough on their own any more: they must belong to a session this same
+     * caller started, which is what stops one person feeding, finishing or
+     * cancelling another person's upload even inside one workspace.
+     */
+    const session = await findUploadSession(db, {
+      organisationId: orgId,
+      objectKey: key,
+      uploadId,
+    });
 
     if (action === "abort") {
-      await multipart.abort();
+      if (!session || session.uploader !== uploader) {
+        return Response.json({ error: "The upload session is invalid." }, { status: 404 });
+      }
+      // Only an upload still in progress is abandoned, by whichever call wins
+      // the pending → aborted transition; a finishing or finished one is not undone.
+      if (session.state === "pending" && (await abandonUploadSession(db, session.id, orgId))) {
+        await multipart.abort();
+      }
       return Response.json({ aborted: true });
     }
 
-    if (action === "complete") {
-      const parts = Array.isArray(payload.parts)
-        ? payload.parts
-            .map((part) => {
-              const value = part as Record<string, unknown>;
-              return {
-                partNumber: Number(value.partNumber),
-                etag: String(value.etag ?? ""),
-              };
-            })
-            .filter(
-              (part) =>
-                Number.isInteger(part.partNumber) &&
-                part.partNumber > 0 &&
-                part.etag.length > 0,
-            )
-        : [];
-      if (!parts.length || parts.length > 100) {
+    /*
+     * ONE WRITE-ONLY URL FOR ONE PART — the browser asks for each part as it
+     * reaches it, and gets a URL good only for that part number, at the exact
+     * size the plan gives it, for `PART_URL_LIFETIME_SECONDS`. The browser
+     * chooses nothing: not the key, not the size, not the upload. See
+     * `presignPart` in `db/r2-over-s3.ts` for everything the URL cannot do.
+     */
+    if (action === "sign-part") {
+      const refused = sessionRefusal(session, uploader);
+      if (refused || !session) {
+        return Response.json({ error: refused?.error }, { status: refused?.status ?? 404 });
+      }
+      const direct = directTransport(multipart);
+      if (!direct || session.transport !== "direct") {
         return Response.json(
-          { error: "The uploaded file parts are incomplete." },
-          { status: 400 },
+          { error: "This upload sends its parts through the server.", transport: "proxy" },
+          { status: 409 },
         );
       }
-      await multipart.complete(parts);
-      const completed = await completeMetadata(
-        key,
-        // The same expression `start` wrote — see the note beside it.
-        keyAnchors.requestId,
-        kind,
-        boardColumnId,
-      );
-      if (!completed) {
-        await storage.delete(key);
-        return Response.json(
-          { error: "The completed file metadata is invalid." },
-          { status: 400 },
-        );
+      const partNumber = Number(payload.partNumber);
+      const size = partPlan(Number(session.byteSize), Number(session.partSize)).sizeOf(partNumber);
+      if (!size) {
+        return Response.json({ error: "That part is not part of this upload." }, { status: 400 });
       }
-      const byteSize = Number(completed.metadata.byteSize);
-      const video = isVideo(completed.originalName, completed.contentType);
-      const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
-      if (
-        !Number.isInteger(byteSize) ||
-        byteSize !== completed.head.size ||
-        byteSize > maxSize
-      ) {
-        await storage.delete(key);
-        return Response.json(
-          { error: "The completed file size could not be verified." },
-          { status: 400 },
-        );
-      }
-
-      const [existing] = await db
-        .select()
-        .from(attachments)
-        .where(
-          and(
-            eq(attachments.id, completed.fileId),
-            eq(attachments.objectKey, key),
-            eq(attachments.organisationId, orgId),
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        return Response.json({
-          file: attachmentPayload(existing),
-          request: workOrder ? requestPayload(workOrder) : null,
-        });
-      }
-
-      /*
-       * W07-02 metadata and W07-03 lineage, read from the `complete` body.
-       *
-       * Both are read here rather than at `start` because `start` only reserves
-       * a key: the row does not exist until now, so this is the first moment
-       * either can be written, and a caller that abandons an upload has not
-       * changed anything.
-       */
-      const fields = documentFieldUpdates({
-        ...("title" in payload ? { title: payload.title } : {}),
-        ...("documentType" in payload
-          ? { documentType: payload.documentType }
-          : {}),
-        ...("description" in payload
-          ? { description: payload.description }
-          : {}),
-        ...("expiryDate" in payload ? { expiryDate: payload.expiryDate } : {}),
+      return Response.json({
+        url: direct.presignPart(partNumber, size, PART_URL_LIFETIME_SECONDS),
+        partNumber,
+        size,
+        expiresIn: PART_URL_LIFETIME_SECONDS,
       });
-      if (!fields.ok) {
-        // The bytes are already in the bucket; a refused row must not leave them
-        // there, or an abandoned certificate accumulates storage for ever.
-        await storage.delete(key);
-        return Response.json({ error: fields.error }, { status: 400 });
-      }
+    }
 
+    if (action === "complete") {
       /*
-       * `replacesId` is read at the top of this handler now, not here: `start`
-       * needs it to name the key after the anchors a replacement inherits, and
-       * one reading of it is the only way `start`, the parts and `abort` can
-       * agree on that key.
+       * FINISHING HAPPENS ONCE. A repeated `complete` for an upload this caller
+       * already finished answers with the document it made, not a second one;
+       * any other ended session is refused; and `claimFinalize` moves a pending
+       * session to `finalizing` in one conditional UPDATE, so two concurrent
+       * calls cannot both assemble it. Whatever happens after the claim, the
+       * `finally` below records how it ended — `completed` only when the row
+       * really exists.
        */
-      let version: Awaited<ReturnType<typeof planVersion>> | null = null;
-      if (replacesId) {
-        if (via !== "capability") {
+      if (session && session.uploader === uploader && session.state === "completed") {
+        const [done] = await db
+          .select()
+          .from(attachments)
+          .where(and(eq(attachments.id, session.fileId), eq(attachments.organisationId, orgId)))
+          .limit(1);
+        if (done) {
+          // The document only: a repeat must not become a way to re-read the job.
+          return Response.json({ file: attachmentPayload(done), request: null });
+        }
+      }
+      const refused = sessionRefusal(session, uploader);
+      if (refused || !session) {
+        return Response.json({ error: refused?.error }, { status: refused?.status ?? 404 });
+      }
+      if (!(await claimFinalize(db, session.id, orgId))) {
+        return Response.json({ error: "This upload is already being finished." }, { status: 409 });
+      }
+      let settled: "completed" | "failed" = "failed";
+      /* Whether storage has assembled the object — decides how a failure cleans up. */
+      let assembled = false;
+      try {
+        const plan = partPlan(Number(session.byteSize), Number(session.partSize));
+        /*
+         * WHICH PARTS — measured by the bucket when the browser sent them there.
+         * A direct upload's parts never passed through this server, so the list the
+         * browser might post is not evidence of anything: ListParts is. Every part
+         * the plan names must be present at exactly its planned size before
+         * anything is assembled; a missing or wrong-sized part abandons the upload.
+         * The proxied path keeps the browser's etag list — those parts DID pass
+         * through `PUT` below, where each was checked against the same plan.
+         */
+        const direct = session.transport === "direct" ? directTransport(multipart) : null;
+        /* What the browser says each part is: its etag on the proxied path, and
+           on the direct path the MD5 it computed of the bytes it sent. */
+        const claimed = Array.isArray(payload.parts)
+          ? payload.parts
+              .map((part) => {
+                const value = part as Record<string, unknown>;
+                return {
+                  partNumber: Number(value.partNumber),
+                  etag: String(value.etag ?? "").trim().toLowerCase(),
+                };
+              })
+              .filter(
+                (part) =>
+                  Number.isInteger(part.partNumber) &&
+                  part.partNumber > 0 &&
+                  part.etag.length > 0,
+              )
+          : [];
+        let parts: Array<{ partNumber: number; etag: string }>;
+        if (direct) {
+          const listed = await direct.listParts();
+          if (!partsMatchPlan(listed, plan)) {
+            // Numbers only — which parts the bucket reported against the plan.
+            console.error("[/api/files/multipart] parts do not match the plan", {
+              planned: plan.partCount,
+              listed: listed.map((part) => [part.partNumber, part.size]),
+            });
+            await multipart.abort().catch(() => undefined);
+            return Response.json(
+              { error: "Part of the file did not arrive. Start the upload again." },
+              { status: 400 },
+            );
+          }
+          /*
+           * WHAT EACH PART HOLDS, not only that it exists. The bucket's ETag for a
+           * part is the MD5 of the bytes it stored, and the browser declares the
+           * MD5 of the bytes it SENT. Measured on Supabase Storage: a part URL
+           * honoured an unsigned `x-amz-copy-source` header and filled the part
+           * with ANOTHER object's bytes. Such a part carries the source's MD5,
+           * which nobody can declare without already holding the source — so a
+           * copied part never gets past this line, whoever's object it names.
+           */
+          const declared = new Map(claimed.map((part) => [part.partNumber, part.etag]));
+          if (!listed.every((part) => declared.get(part.partNumber) === part.etag.toLowerCase())) {
+            console.error("[/api/files/multipart] part contents do not match what was sent", {
+              planned: plan.partCount,
+              declared: declared.size,
+            });
+            await multipart.abort().catch(() => undefined);
+            return Response.json(
+              { error: "The file's parts do not match what was sent. Start the upload again." },
+              { status: 400 },
+            );
+          }
+          parts = listed.map(({ partNumber, etag }) => ({ partNumber, etag }));
+        } else {
+          parts = claimed;
+          if (!parts.length || parts.length > 100 || parts.length !== plan.partCount) {
+            return Response.json(
+              { error: "The uploaded file parts are incomplete." },
+              { status: 400 },
+            );
+          }
+        }
+        try {
+          await multipart.complete(parts);
+          assembled = true;
+        } catch (error) {
+          /*
+           * The bucket's own size limit is enforced HERE, against the assembled
+           * object, after every byte has been sent. Say that plainly rather than
+           * answering the 503 that tells a browser to retry something no retry
+           * can fix.
+           */
+          if (error instanceof Error && /EntityTooLarge|too large|maximum allowed size/i.test(error.message)) {
+            await multipart.abort().catch(() => undefined);
+            return Response.json(
+              { error: "The file store refused a file this large. Ask your administrator to raise the storage file-size limit." },
+              { status: 413 },
+            );
+          }
+          throw error;
+        }
+        const completed = await completeMetadata(
+          key,
+          // The same expression `start` wrote — see the note beside it.
+          keyAnchors.requestId,
+          kind,
+          boardColumnId,
+        );
+        if (!completed) {
           await storage.delete(key);
           return Response.json(
-            { error: "This link cannot replace an existing document." },
-            { status: 403 },
+            { error: "The completed file metadata is invalid." },
+            { status: 400 },
           );
         }
-        version = await planVersion(db, orgId, replacesId);
-        if (!version.ok) {
+        const byteSize = Number(completed.metadata.byteSize);
+        const video = isVideo(completed.originalName, completed.contentType);
+        const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
+        if (
+          !Number.isInteger(byteSize) ||
+          byteSize !== completed.head.size ||
+          byteSize > maxSize
+        ) {
           await storage.delete(key);
-          return version.denied;
+          return Response.json(
+            { error: "The completed file size could not be verified." },
+            { status: 400 },
+          );
         }
-      }
-
-      /*
-       * W07-07 — EVERY DOCUMENT BELONGS TO SOMETHING, asked here because here is
-       * where the row is written and here is the first moment the answer is
-       * knowable. `authorizeUpload` used to ask it at `start`, on the supplied
-       * anchors alone, and so refused every new version that did not re-send its
-       * parent's relationships — see the long note there.
-       *
-       * Supplied wins, the predecessor's filing is the floor, and nothing is
-       * invented: an original with no anchor, or a replacement whose parent is
-       * itself unanchored, is refused with the same message it always gave.
-       *
-       * BEFORE `standDownPredecessor`, not after. Standing the parent down and
-       * then refusing would leave the lineage with no current version at all —
-       * the document would vanish from every register while both its rows still
-       * existed.
-       */
-      const filedAgainst = effectiveAnchors(
-        anchors,
-        version?.ok ? version.plan.carried : null,
-      );
-      const missingAnchor = anchorRefusal(filedAgainst);
-      if (missingAnchor) {
-        // The bytes are already in the bucket; a refused row must not leave them
-        // there, exactly as the metadata and size refusals above do not.
-        await storage.delete(key);
-        return missingAnchor;
-      }
-
-      if (version?.ok) {
-        await standDownPredecessor(db, orgId, version.predecessor.id);
-      }
-
-      try {
-        const [created] = await db
-          .insert(attachments)
-          .values({
-            id: completed.fileId,
-            organisationId: orgId,
-            // W07-07 anchors, with an explicit site beating the job's inherited
-            // one — see `resolveSiteId`.
-            requestId: requestId || version?.plan.carried.requestId || null,
-            siteId: resolveSiteId(
-              anchors.siteId,
-              workOrder?.siteId ?? version?.plan.carried.siteId,
-            ),
-            unitId: anchors.unitId || version?.plan.carried.unitId || null,
-            contractorId:
-              anchors.contractorId || version?.plan.carried.contractorId || null,
-            /*
-             * A NEW VERSION KEEPS THE DOCUMENT'S KIND — the same rule and the
-             * same precedence as `../route.ts`, written here too because this
-             * is the path every file over ~900 KB takes.
-             *
-             * `planVersion` has always computed `carried.kind` and neither
-             * insert ever read it, so a `general` workspace document came back
-             * as `issue` evidence after "Upload new version". An explicitly
-             * requested kind still wins and the file column still overrules
-             * both; the predecessor is consulted only where the request said
-             * nothing and no column spoke.
-             */
-            kind:
-              version?.ok && !kindWasChosen && !kindFromColumn
-                ? carriedKind(version.plan.carried.kind, allowedKinds, kind)
-                : kind,
-            boardColumnId,
-            objectKey: key,
-            originalName: completed.originalName,
-            contentType: completed.contentType,
-            byteSize,
-            uploadedByEmail,
-            title: fields.values.title ?? version?.plan.carried.title ?? null,
-            documentType:
-              fields.values.documentType ??
-              version?.plan.carried.documentType ??
-              null,
-            description:
-              fields.values.description ??
-              version?.plan.carried.description ??
-              null,
-            expiryDate:
-              fields.values.expiryDate ??
-              version?.plan.carried.expiryDate ??
-              null,
-            rootDocumentId: version?.ok ? version.plan.rootDocumentId : null,
-            versionNo: version?.ok ? version.plan.versionNo : 1,
-            isCurrent: true,
-            /*
-             * EVIDENCE FROM A PUBLIC LINK WAITS FOR A COORDINATOR — and until
-             * now it did so only if it was small enough.
-             *
-             * `../route.ts` sets these two, so a contractor's photograph under
-             * ~900 KB landed `pending` and appeared in the review queue. Every
-             * file above that threshold takes THIS route, which set neither —
-             * and a phone photograph is 2–5 MB, so in practice the review queue
-             * saw the test files and nothing else. Anonymous evidence published
-             * itself straight onto the job exactly as it did before migration
-             * 0012, on the path that carries the real photographs.
-             *
-             * A signed-in operator's upload is not pending, here as there.
-             *
-             * Keyed on the GRANT rather than on the presence of a token object —
-             * see `pendingReview`.
-             */
-            pending: pendingReview(via),
-            submittedVia: scopedToken ? scopedToken.id : null,
-          })
-          .returning();
 
         /*
-         * RECOUNTED, NOT INCREMENTED.
-         *
-         * This was four conditional `+ 1`s, one per kind. Correct arithmetic
-         * on a number that was already wrong: `db/init.ts` sets a job's issue
-         * counter to its undifferentiated total on every cold start where the
-         * job has attachments and no issue-kind row, so incrementing from
-         * there compounds the lie rather than correcting it — MN-1055 reported
-         * five photographs against three rows. A COUNT converges from whatever
-         * the counter had drifted to. See `app/lib/attachment-counts.ts`.
+         * WHAT THE BYTES ACTUALLY ARE. The declared type and the extension are the
+         * caller's claims, and a direct upload's bytes never passed through this
+         * server — so the first bytes are read back from the bucket and checked
+         * against the format the file says it is. See `app/lib/file-signature.ts`.
          */
-        const updatedRequest = requestId
-          ? await reconcileAttachmentCounts(db, orgId, requestId)
-          : null;
+        const sample = await storage.get(key, { range: { offset: 0, length: SIGNATURE_BYTES } });
+        const leading = sample
+          ? new Uint8Array(await new Response(sample.body as ReadableStream).arrayBuffer())
+          : new Uint8Array(0);
+        if (!signatureMatches(completed.contentType, completed.originalName, leading)) {
+          await storage.delete(key);
+          return Response.json({ error: SIGNATURE_REFUSAL }, { status: 415 });
+        }
 
-        // The job's own timeline, where there is a job.
-        if (requestId) {
-          await db.insert(activityLog).values({
-            id: crypto.randomUUID(),
-            organisationId: orgId,
-            entityType: "maintenance_request",
-            entityId: requestId,
-            action: "request.file_uploaded",
-            actorEmail,
-            detail: JSON.stringify({
-              fileId: completed.fileId,
-              fileName: completed.originalName,
-              kind,
-              boardColumnId,
-              contentType: completed.contentType,
-              multipart: true,
-            }),
+        const [existing] = await db
+          .select()
+          .from(attachments)
+          .where(
+            and(
+              eq(attachments.id, completed.fileId),
+              eq(attachments.objectKey, key),
+              eq(attachments.organisationId, orgId),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          settled = "completed";
+          return Response.json({
+            file: attachmentPayload(existing),
+            request: workOrder ? requestPayload(workOrder) : null,
           });
         }
 
         /*
-         * W07-12 — the Audit viewer's stream, which this route never reached.
-         * Written whether or not there is a job, because a contractor's
-         * certificate has no timeline to appear on and is exactly the document
-         * somebody will later need to account for. See `../route.ts` for the
-         * naming convention; the two routes must produce indistinguishable
-         * events, or document history splits by file size.
+         * W07-02 metadata and W07-03 lineage, read from the `complete` body.
+         *
+         * Both are read here rather than at `start` because `start` only reserves
+         * a key: the row does not exist until now, so this is the first moment
+         * either can be written, and a caller that abandons an upload has not
+         * changed anything.
          */
-        await recordAudit({
-          db,
-          organisationId: orgId,
-          actor: auditActor(scope),
-          action: version?.ok ? "document.version_added" : "document.uploaded",
-          entityType: "document",
-          entityId: completed.fileId,
-          summary: version?.ok
-            ? `Replaced ${version.predecessor.originalName} with ${completed.originalName} (version ${version.plan.versionNo}).`
-            : `Uploaded ${completed.originalName}.`,
-          detail: {
-            fileId: completed.fileId,
-            fileName: completed.originalName,
-            contentType: completed.contentType,
-            byteSize,
-            kind,
-            boardColumnId,
-            requestId: requestId || null,
-            siteId: anchors.siteId || workOrder?.siteId || null,
-            unitId: anchors.unitId || null,
-            contractorId: anchors.contractorId || null,
-            via,
-            multipart: true,
-            ...(version?.ok
-              ? {
-                  replacedFileId: version.predecessor.id,
-                  rootDocumentId: version.plan.rootDocumentId,
-                  versionNo: version.plan.versionNo,
-                }
-              : {}),
-          },
-          request,
+        const fields = documentFieldUpdates({
+          ...("title" in payload ? { title: payload.title } : {}),
+          ...("documentType" in payload
+            ? { documentType: payload.documentType }
+            : {}),
+          ...("description" in payload
+            ? { description: payload.description }
+            : {}),
+          ...("expiryDate" in payload ? { expiryDate: payload.expiryDate } : {}),
         });
-
-        return Response.json(
-          {
-            file: attachmentPayload(created),
-            request: updatedRequest ? requestPayload(updatedRequest) : null,
-          },
-          { status: 201 },
-        );
-      } catch (error) {
-    // A session that has ended is not an outage. See `anonymousRefusal`.
-    const refusal = anonymousRefusal(error);
-    if (refusal) return refusal;
-        await storage.delete(key);
-        // The lineage must not be left headless by a failed insert.
-        if (version?.ok) {
-          await restorePredecessor(db, orgId, version.predecessor.id);
+        if (!fields.ok) {
+          // The bytes are already in the bucket; a refused row must not leave them
+          // there, or an abandoned certificate accumulates storage for ever.
+          await storage.delete(key);
+          return Response.json({ error: fields.error }, { status: 400 });
         }
-        throw error;
+
+        /*
+         * `replacesId` is read at the top of this handler now, not here: `start`
+         * needs it to name the key after the anchors a replacement inherits, and
+         * one reading of it is the only way `start`, the parts and `abort` can
+         * agree on that key.
+         */
+        let version: Awaited<ReturnType<typeof planVersion>> | null = null;
+        if (replacesId) {
+          if (via !== "capability") {
+            await storage.delete(key);
+            return Response.json(
+              { error: "This link cannot replace an existing document." },
+              { status: 403 },
+            );
+          }
+          version = await planVersion(db, orgId, replacesId);
+          if (!version.ok) {
+            await storage.delete(key);
+            return version.denied;
+          }
+        }
+
+        /*
+         * W07-07 — EVERY DOCUMENT BELONGS TO SOMETHING, asked here because here is
+         * where the row is written and here is the first moment the answer is
+         * knowable. `authorizeUpload` used to ask it at `start`, on the supplied
+         * anchors alone, and so refused every new version that did not re-send its
+         * parent's relationships — see the long note there.
+         *
+         * Supplied wins, the predecessor's filing is the floor, and nothing is
+         * invented: an original with no anchor, or a replacement whose parent is
+         * itself unanchored, is refused with the same message it always gave.
+         *
+         * BEFORE `standDownPredecessor`, not after. Standing the parent down and
+         * then refusing would leave the lineage with no current version at all —
+         * the document would vanish from every register while both its rows still
+         * existed.
+         */
+        const filedAgainst = effectiveAnchors(
+          anchors,
+          version?.ok ? version.plan.carried : null,
+        );
+        const missingAnchor = anchorRefusal(filedAgainst);
+        if (missingAnchor) {
+          // The bytes are already in the bucket; a refused row must not leave them
+          // there, exactly as the metadata and size refusals above do not.
+          await storage.delete(key);
+          return missingAnchor;
+        }
+
+        if (version?.ok) {
+          await standDownPredecessor(db, orgId, version.predecessor.id);
+        }
+
+        try {
+          const [created] = await db
+            .insert(attachments)
+            .values({
+              id: completed.fileId,
+              organisationId: orgId,
+              // W07-07 anchors, with an explicit site beating the job's inherited
+              // one — see `resolveSiteId`.
+              requestId: requestId || version?.plan.carried.requestId || null,
+              siteId: resolveSiteId(
+                anchors.siteId,
+                workOrder?.siteId ?? version?.plan.carried.siteId,
+              ),
+              unitId: anchors.unitId || version?.plan.carried.unitId || null,
+              contractorId:
+                anchors.contractorId || version?.plan.carried.contractorId || null,
+              /*
+               * A NEW VERSION KEEPS THE DOCUMENT'S KIND — the same rule and the
+               * same precedence as `../route.ts`, written here too because this
+               * is the path every file over ~900 KB takes.
+               *
+               * `planVersion` has always computed `carried.kind` and neither
+               * insert ever read it, so a `general` workspace document came back
+               * as `issue` evidence after "Upload new version". An explicitly
+               * requested kind still wins and the file column still overrules
+               * both; the predecessor is consulted only where the request said
+               * nothing and no column spoke.
+               */
+              kind:
+                version?.ok && !kindWasChosen && !kindFromColumn
+                  ? carriedKind(version.plan.carried.kind, allowedKinds, kind)
+                  : kind,
+              boardColumnId,
+              objectKey: key,
+              originalName: completed.originalName,
+              contentType: completed.contentType,
+              byteSize,
+              uploadedByEmail,
+              title: fields.values.title ?? version?.plan.carried.title ?? null,
+              documentType:
+                fields.values.documentType ??
+                version?.plan.carried.documentType ??
+                null,
+              description:
+                fields.values.description ??
+                version?.plan.carried.description ??
+                null,
+              expiryDate:
+                fields.values.expiryDate ??
+                version?.plan.carried.expiryDate ??
+                null,
+              rootDocumentId: version?.ok ? version.plan.rootDocumentId : null,
+              versionNo: version?.ok ? version.plan.versionNo : 1,
+              isCurrent: true,
+              /*
+               * EVIDENCE FROM A PUBLIC LINK WAITS FOR A COORDINATOR — and until
+               * now it did so only if it was small enough.
+               *
+               * `../route.ts` sets these two, so a contractor's photograph under
+               * ~900 KB landed `pending` and appeared in the review queue. Every
+               * file above that threshold takes THIS route, which set neither —
+               * and a phone photograph is 2–5 MB, so in practice the review queue
+               * saw the test files and nothing else. Anonymous evidence published
+               * itself straight onto the job exactly as it did before migration
+               * 0012, on the path that carries the real photographs.
+               *
+               * A signed-in operator's upload is not pending, here as there.
+               *
+               * Keyed on the GRANT rather than on the presence of a token object —
+               * see `pendingReview`.
+               */
+              pending: pendingReview(via),
+              submittedVia: scopedToken ? scopedToken.id : null,
+            })
+            .returning();
+
+          /*
+           * RECOUNTED, NOT INCREMENTED.
+           *
+           * This was four conditional `+ 1`s, one per kind. Correct arithmetic
+           * on a number that was already wrong: `db/init.ts` sets a job's issue
+           * counter to its undifferentiated total on every cold start where the
+           * job has attachments and no issue-kind row, so incrementing from
+           * there compounds the lie rather than correcting it — MN-1055 reported
+           * five photographs against three rows. A COUNT converges from whatever
+           * the counter had drifted to. See `app/lib/attachment-counts.ts`.
+           */
+          const updatedRequest = requestId
+            ? await reconcileAttachmentCounts(db, orgId, requestId)
+            : null;
+
+          // The job's own timeline, where there is a job.
+          if (requestId) {
+            await db.insert(activityLog).values({
+              id: crypto.randomUUID(),
+              organisationId: orgId,
+              entityType: "maintenance_request",
+              entityId: requestId,
+              action: "request.file_uploaded",
+              actorEmail,
+              detail: JSON.stringify({
+                fileId: completed.fileId,
+                fileName: completed.originalName,
+                kind,
+                boardColumnId,
+                contentType: completed.contentType,
+                multipart: true,
+              }),
+            });
+          }
+
+          /*
+           * W07-12 — the Audit viewer's stream, which this route never reached.
+           * Written whether or not there is a job, because a contractor's
+           * certificate has no timeline to appear on and is exactly the document
+           * somebody will later need to account for. See `../route.ts` for the
+           * naming convention; the two routes must produce indistinguishable
+           * events, or document history splits by file size.
+           */
+          await recordAudit({
+            db,
+            organisationId: orgId,
+            actor: auditActor(scope),
+            action: version?.ok ? "document.version_added" : "document.uploaded",
+            entityType: "document",
+            entityId: completed.fileId,
+            summary: version?.ok
+              ? `Replaced ${version.predecessor.originalName} with ${completed.originalName} (version ${version.plan.versionNo}).`
+              : `Uploaded ${completed.originalName}.`,
+            detail: {
+              fileId: completed.fileId,
+              fileName: completed.originalName,
+              contentType: completed.contentType,
+              byteSize,
+              kind,
+              boardColumnId,
+              requestId: requestId || null,
+              siteId: anchors.siteId || workOrder?.siteId || null,
+              unitId: anchors.unitId || null,
+              contractorId: anchors.contractorId || null,
+              via,
+              multipart: true,
+              ...(version?.ok
+                ? {
+                    replacedFileId: version.predecessor.id,
+                    rootDocumentId: version.plan.rootDocumentId,
+                    versionNo: version.plan.versionNo,
+                  }
+                : {}),
+            },
+            request,
+          });
+
+          settled = "completed";
+          return Response.json(
+            {
+              file: attachmentPayload(created),
+              request: updatedRequest ? requestPayload(updatedRequest) : null,
+            },
+            { status: 201 },
+          );
+        } catch (error) {
+      // A session that has ended is not an outage. See `anonymousRefusal`.
+      const refusal = anonymousRefusal(error);
+      if (refusal) return refusal;
+          await storage.delete(key);
+          // The lineage must not be left headless by a failed insert.
+          if (version?.ok) {
+            await restorePredecessor(db, orgId, version.predecessor.id);
+          }
+          throw error;
+        }
+      } finally {
+        /*
+         * NOTHING OF A FAILED UPLOAD STAYS IN THE BUCKET, whatever failed —
+         * including a throw nobody anticipated between assembly and the row.
+         * Parts never assembled are discarded; an assembled object no row names
+         * is deleted. Both are no-ops when the refusal path already did it.
+         */
+        if (settled !== "completed") {
+          if (assembled) await storage.delete(key).catch(() => undefined);
+          else await multipart.abort().catch(() => undefined);
+        }
+        await settleUploadSession(db, session.id, orgId, settled).catch(() => undefined);
       }
     }
 
@@ -1110,11 +1391,30 @@ export async function PUT(request: Request) {
       );
     }
 
+    /* The same session rule as every POST action: this caller's, still pending. */
+    const session = await findUploadSession(authorization.db, {
+      organisationId: authorization.orgId,
+      objectKey: key,
+      uploadId,
+    });
+    const refused = sessionRefusal(session, await uploaderOf(authorization));
+    if (refused || !session) {
+      return Response.json({ error: refused?.error }, { status: refused?.status ?? 404 });
+    }
+
     const bytes = await request.arrayBuffer();
     if (bytes.byteLength < 1 || bytes.byteLength > MAX_PART_SIZE) {
       return Response.json(
         { error: "Each upload part must be 5 MB or smaller." },
         { status: 413 },
+      );
+    }
+    /* Exactly the size `start` planned for this part number — no more, no less. */
+    const expected = partPlan(Number(session.byteSize), Number(session.partSize)).sizeOf(partNumber);
+    if (!expected || bytes.byteLength !== expected) {
+      return Response.json(
+        { error: "That part is not the size this upload planned." },
+        { status: 400 },
       );
     }
     const storage = await bucket();

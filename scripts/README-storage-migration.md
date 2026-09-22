@@ -103,6 +103,22 @@ calls it) and a `describe` string for diagnostics.
 
 ## 4. The 25 MB problem — read this before migrating
 
+> **Status, measured 2026-09-22 (direct-upload batch).** The Production
+> `job-media` bucket is now **100 MiB** (104,857,600 bytes, private, no MIME
+> restriction) — the recommendation below was carried out. The Staging bucket
+> was raised from 50 MiB to 100 MiB the same day. What still caps a video on
+> Staging is the PROJECT's global upload limit: with the bucket at 100 MiB, a
+> part crossing 50 MiB is refused with 413 during upload (not at complete — see
+> the correction to "Multipart does not help" below), which is the free-plan
+> ceiling. Production's global limit is not readable over SQL; check Dashboard
+> → Storage → Settings and set it to at least 100 MB for 90 MB videos. The
+> historical Monday files this migration would copy are deferred by the owner
+> (storage capacity), and the script must not be run against them for now.
+>
+> Correction, measured on Staging: Supabase Storage enforces the project limit
+> on the running total of an upload's PARTS, so an oversized upload fails at
+> the first part past the limit rather than after every byte has been sent.
+
 The `job-media` bucket has a **file size limit of 25 MB**. The portal's own
 limits are **25 MB for files and 90 MB for videos** (`MAX_VIDEO_FILE_SIZE` in
 `app/api/files/multipart/route.ts`). Those do not agree, and the existing data

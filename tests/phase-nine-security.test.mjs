@@ -301,12 +301,17 @@ test("#4 the throttles share sign-in's table without sharing its key space", asy
 
   const throttles = await read("app/lib/form-throttle.ts");
   const windows = [...throttles.matchAll(/windowMs: (\d+) \* 60_000/g)].map((m) => Number(m[1]));
-  assert.equal(windows.length, 3);
+  /* Re-pointed 3 → 4 for the direct-upload batch: `REPORT_JOB_SUBMISSIONS`
+     throttles the home page's anonymous report door, whose upload token is now
+     worth up to 90 MB of storage. The lock still makes every addition visible. */
+  assert.equal(windows.length, 4);
   for (const minutes of windows) assert.ok(minutes <= 60, "within the sweep's hour");
   /* Keyed per address, never per form alone — a per-form cap is a way to close
      a client's fault form to everybody. */
   const submit = await read("app/api/forms/[token]/submit/route.ts");
   assert.match(submit, /const submitter = `\$\{record\.id\}\|\$\{ip\}`;/);
+  const report = await read("app/api/report-job/route.ts");
+  assert.match(report, /publicRetryAfter\(d1, REPORT_JOB_SUBMISSIONS, address\)/, "the report door is keyed per address too");
 });
 
 test("#4 the public form says 'wait', not 'wrong password', when throttled", async () => {
