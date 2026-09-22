@@ -385,7 +385,14 @@ test("the leads route stopped requiring what the form stopped asking", async () 
    * grows.
    */
   const post = route.slice(route.indexOf("export async function POST"));
-  const guard = post.slice(post.indexOf("if (!name || !company"), post.indexOf("await ensureDatabase"));
+  /* Re-pointed for the public intake batch: `POST` now calls `ensureDatabase`
+     FIRST, for the per-address throttle, so that marker sits before the guard and
+     would empty this slice again. The guard's end is now the scoped-db call that
+     follows it — the first thing after validation. */
+  const guard = post.slice(
+    post.indexOf("if (!name || !company"),
+    post.indexOf("await scopedDb(request, { allowAnonymous: true })"),
+  );
   assert.ok(guard.length > 40, "the guard slice must not be empty -- see the comment above");
 
   assert.doesNotMatch(guard, /regions\.length/, "regions must not be required");

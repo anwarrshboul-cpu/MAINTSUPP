@@ -115,6 +115,16 @@ test("no configurable list has reappeared as a code constant", async () => {
      */
     ["app/lib/planned-recurrence.ts", /export const STOPPED_STATUSES = \["Cancelled", "On hold"\] as const;/],
     /*
+     * THE PLATFORM'S OWN INBOX WORKFLOW, NOT A WORKSPACE VOCABULARY (public intake,
+     * 2026-09-22). Where a contractor's application to join MAINTSUPP's network has
+     * got to — New, In review, Approved, Declined, Spam — worked by MAINTSUPP
+     * platform staff in /admin, the same shape as the lead statuses. It cannot be an
+     * `option_values` row: those are per-workspace, and these rows belong to the
+     * platform, not to any workspace an admin could configure. The route narrows a
+     * write to this list so the inbox's filter and totals stay true.
+     */
+    ["app/lib/application-status.ts", /export type ApplicationStatusKey = "New" \| "In review" \| "Approved" \| "Declined" \| "Spam";/],
+    /*
      * A FLAG'S OWN LIFECYCLE, and the same shape as the reminder statuses above.
      *
      * §7 raises a flag against an invoice; a person then either clears it (the

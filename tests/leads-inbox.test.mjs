@@ -427,8 +427,10 @@ test("the console lists the inbox because the inbox now has a server side", asyn
   /* SEVEN once the website CMS and the enquiries inbox are both merged: each
      phase added one entry, and each phase's own test said six while it was the
      only one landed. `platform-admin-shell.test.mjs` compares against its own
-     ENTRIES list rather than a literal, so it needed no change. */
-  assert.equal(PLATFORM_SECTIONS.length, 7);
+     ENTRIES list rather than a literal, so it needed no change.
+     Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
+     API (`/api/contractor-applications/inbox`) — the same rule kept once more. */
+  assert.equal(PLATFORM_SECTIONS.length, 8);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the

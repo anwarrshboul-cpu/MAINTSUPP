@@ -56,8 +56,9 @@ const decommented = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 /**
  * The console entries, by the route file each lives in.
  *
- * SEVEN. `pages` was added the day `/api/site-pages` existed and `leads` the day
- * `GET /api/leads` stopped being a 501 — which is the rule in
+ * EIGHT. `pages` was added the day `/api/site-pages` existed, `leads` the day
+ * `GET /api/leads` stopped being a 501, and `applications` the day
+ * `/api/contractor-applications/inbox` gave the application rows a reader — which is the rule in
  * `platform-sections.ts` being kept rather than bent: a rail entry is a promise that
  * there is something behind it. The four screens with no server side are still
  * absent, and the test below still proves it.
@@ -74,13 +75,14 @@ const ENTRIES = [
   ["audit", "app/(app)/admin/audit/page.tsx", "/admin/audit"],
   ["pages", "app/(app)/admin/pages/page.tsx", "/admin/pages"],
   ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
+  ["applications", "app/(app)/admin/applications/page.tsx", "/admin/applications"],
 ];
 
 /* ------------------------------------------------------------------ */
 /* The catalogue                                                       */
 /* ------------------------------------------------------------------ */
 
-test("the console lists seven screens, and every one has a route", async () => {
+test("the console lists eight screens, and every one has a route", async () => {
   assert.equal(PLATFORM_SECTIONS.length, ENTRIES.length);
   assert.deepStrictEqual(
     [...PLATFORM_SECTION_KEYS],
