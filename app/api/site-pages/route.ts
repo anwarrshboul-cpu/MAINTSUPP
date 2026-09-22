@@ -36,6 +36,7 @@ import { ensureDatabase } from "../../../db/init";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { invalidatePublicNavigation } from "../../lib/site-navigation-public.ts";
+import { mediaKinds } from "../../lib/cms-media-repository.ts";
 import {
   BLOCK_CATALOGUE,
   CMS_OMISSIONS,
@@ -334,6 +335,46 @@ export async function PUT(request: Request) {
         );
       }
       blocks.push({ kind: checked.kind, body: checked.body });
+    }
+
+    /*
+     * DECISION K — AN IMAGE OR A VIDEO IS AN ASSET IN THE LIBRARY, NOW.
+     *
+     * `validateBlock` can only see that a block names a well-formed id; whether
+     * that asset exists, is the kind the block draws, and — for an image — has
+     * something for a screen reader to say, is only knowable here. Asked of every
+     * save, a restore included, so an old version that names a deleted asset is
+     * refused whole rather than published with a hole in it. An ARCHIVED asset is
+     * still an asset: it keeps working on the pages that use it.
+     */
+    const named = blocks.flatMap((block) => (typeof block.body.mediaId === "string" ? [block.body.mediaId] : []));
+    if (named.length) {
+      const library = await mediaKinds(scope.db, named);
+      for (const [index, block] of blocks.entries()) {
+        const mediaId = block.body.mediaId;
+        if (typeof mediaId !== "string") continue;
+        const asset = library.get(mediaId);
+        const noun = block.kind === "video" ? "video" : "image";
+        if (!asset || !asset.hasFile) {
+          return Response.json(
+            { error: `Block ${index + 1}: that ${noun} is no longer in the media library. Choose another.`, block: index },
+            { status: 400 },
+          );
+        }
+        if (asset.kind !== block.kind) {
+          return Response.json({ error: `Block ${index + 1}: choose ${noun === "video" ? "a video" : "an image"} for this block.`, block: index }, { status: 400 });
+        }
+        const blockAlt = typeof block.body.alt === "string" && block.body.alt.trim();
+        if (block.kind === "image" && !blockAlt && !asset.altText) {
+          return Response.json(
+            {
+              error: `Block ${index + 1}: an image needs alt text — describe it on the block, or give the image alt text in the media library.`,
+              block: index,
+            },
+            { status: 400 },
+          );
+        }
+      }
     }
 
     /*

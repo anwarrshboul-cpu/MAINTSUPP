@@ -247,7 +247,10 @@ test("every catalogue entry has a renderer, and every renderer an entry", async 
     [...BLOCK_KINDS].sort(),
     "a renderer with no catalogue entry can never be reached, and a catalogue entry with no renderer draws nothing",
   );
-  assert.equal(BLOCK_CATALOGUE.length, 5, "five blocks, each earning a distinct renderer");
+  /* RE-POINTED 5 → 7 (decision K): `image` and `video` arrived with the media
+     library, each drawing its asset with its own element (`<img>`, `<video>`) —
+     distinct renderers, which is the rule this count protects. */
+  assert.equal(BLOCK_CATALOGUE.length, 7, "seven blocks, each earning a distinct renderer");
 });
 
 /* ------------------------------------------------------------------ */
@@ -626,8 +629,10 @@ test("the console lists the screen because the screen has an API", async () => {
      API (`/api/contractor-applications/inbox`) — the same rule kept once more.
      Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`.
      Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
-     `/api/site-navigation`. */
-  assert.equal(PLATFORM_SECTIONS.length, 10);
+     `/api/site-navigation`.
+     Re-pointed 10 → 11 for Website media (decision K), which arrived with
+     `/api/cms-media` and its upload route. */
+  assert.equal(PLATFORM_SECTIONS.length, 11);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -655,12 +660,15 @@ test("the console lists the screen because the screen has an API", async () => {
    *
    * And a fifth: `navigation` (decision J), for the pages entry's own reason —
    * it is MAINTSUPP's website, so no workspace capability can reach it.
+   *
+   * And a sixth: `media` (decision K), the same reason again — the website's own
+   * files, in a bucket of their own, belonging to no workspace.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "backups", "leads", "navigation", "pages"],
-    "only the five platform-owned surfaces answer to no capability",
+    ["applications", "backups", "leads", "media", "navigation", "pages"],
+    "only the six platform-owned surfaces answer to no capability",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

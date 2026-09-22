@@ -52,6 +52,7 @@ import { VersionHistory } from "../portal/views/version-history";
 import { formatShortDateTime } from "../../lib/format-date";
 import { useUnsavedChanges } from "../../lib/use-unsaved-changes";
 import { SiteRedirectsPanel, type SiteRedirect } from "./site-redirects-panel";
+import { MediaField, type MediaAccept } from "./media-picker";
 
 /* The server's shapes. Mirrored, not imported: `app/lib/cms-blocks.ts` is a server
    module and these are what crosses the wire. */
@@ -59,7 +60,9 @@ type FieldRule =
   | { kind: "text"; max: number; required?: boolean }
   | { kind: "href"; required?: boolean }
   | { kind: "lines"; max: number; maxItems: number; required?: boolean }
-  | { kind: "pairs"; max: number; maxItems: number; required?: boolean };
+  | { kind: "pairs"; max: number; maxItems: number; required?: boolean }
+  /* Decision K — an asset from the website media library. */
+  | { kind: "media"; accept: MediaAccept; required?: boolean };
 
 type BlockDefinition = {
   kind: string;
@@ -200,6 +203,7 @@ function hintFor(rule: FieldRule): string {
   }
   if (rule.kind === "lines") return `One per line. Up to ${rule.maxItems}, ${rule.max} characters each.`;
   if (rule.kind === "pairs") return `Up to ${rule.maxItems} pairs. Both halves are needed, or the pair is dropped.`;
+  if (rule.kind === "media") return "From the website media library.";
   return `Up to ${rule.max} characters.`;
 }
 
@@ -781,6 +785,18 @@ function BlockField({
   onChange: (value: unknown) => void;
 }) {
   const label = name.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
+
+  /* Decision K — chosen from the library, never typed. */
+  if (rule.kind === "media") {
+    return (
+      <MediaField
+        accept={rule.accept}
+        required={rule.required}
+        value={value}
+        onChange={onChange}
+      />
+    );
+  }
 
   if (rule.kind === "pairs") {
     const pairs = asPairs(value);

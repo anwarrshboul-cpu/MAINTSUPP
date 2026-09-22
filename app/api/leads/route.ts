@@ -76,62 +76,110 @@ function clean(value: unknown, max: number) {
  * the same instrument `GET /api/audit` uses. Reading only the current workspace
  * would strand every lead the day the primary organisation changes.
  */
+/**
+ * The gate, as its own function because a second reader now needs exactly it.
+ *
+ * `GET` and the CSV export (`app/api/leads/csv/route.ts`) must answer the same
+ * question about the same caller. Restating the check in the export would be one
+ * edit away from the leak the header above describes at length, so the check is
+ * written once and imported.
+ */
+export function platformLeadsRefusal(
+  scope: Awaited<ReturnType<typeof scopedDb>>,
+  /* The sentence differs by verb — reading an enquiry and moving its status are
+     different things to be told you may not do — so the caller supplies it. The
+     RULE is not the caller's to vary, which is the whole point of the function. */
+  message = "The website's enquiries are read by MAINTSUPP platform staff.",
+): Response | null {
+  if (scope.platformAdmin === true && scope.authenticated) return null;
+  return Response.json({ error: message }, { status: 403 });
+}
+
+export type LeadEnquiry = {
+  id: string;
+  name: string;
+  company: string;
+  email: string;
+  phone: string | null;
+  siteRange: string;
+  services: string[];
+  regions: string[];
+  challenge: string;
+  status: string;
+  closed: boolean;
+  notifiedAt: string | null;
+  notifyAttempts: number;
+  createdAt: string;
+  organisationId: string;
+  workspaceName: string | null;
+};
+
+/**
+ * Every enquiry this reader may see, newest first, with its workspace named.
+ *
+ * Exported for the CSV export, which must be the same rows in the same order as
+ * the screen — a spreadsheet that disagrees with the inbox it was downloaded
+ * from is worse than no spreadsheet.
+ */
+export async function readLeadEnquiries(
+  scope: Awaited<ReturnType<typeof scopedDb>>,
+): Promise<{ enquiries: LeadEnquiry[]; counts: Record<string, number>; open: number }> {
+  const rows = await scope.db
+    .select()
+    .from(leads)
+    .where(inArray(leads.organisationId, scope.organisationIds))
+    .orderBy(desc(leads.createdAt));
+
+  /* Which workspace each lead landed in, named rather than shown as an opaque id
+     — because "these are all filed under a client" is the fact a reader of this
+     screen most needs to be able to see for themselves. */
+  const workspaces = scope.organisationIds.length
+    ? await scope.db
+        .select({ id: organisations.id, name: organisations.name })
+        .from(organisations)
+        .where(inArray(organisations.id, scope.organisationIds))
+    : [];
+  const workspaceNames = new Map(workspaces.map((row) => [row.id, row.name]));
+
+  const counts: Record<string, number> = {};
+  let open = 0;
+  const enquiries = rows.map((row) => {
+    const status = leadStatus(row.status);
+    counts[status.key] = (counts[status.key] ?? 0) + 1;
+    if (!status.closed) open += 1;
+    return {
+      id: row.id,
+      name: row.name,
+      company: row.company,
+      email: row.email,
+      phone: row.phone ?? null,
+      siteRange: row.siteRange,
+      /* Stored as JSON text by `POST`. Parsed here rather than on the screen, so a
+         row written before the form stopped asking — which stores "[]" — reads as
+         an empty list instead of the two characters. */
+      services: parseList(row.services),
+      regions: parseList(row.regions),
+      challenge: row.challenge,
+      status: status.key,
+      closed: status.closed,
+      notifiedAt: row.notifiedAt ?? null,
+      notifyAttempts: row.notifyAttempts,
+      createdAt: row.createdAt,
+      organisationId: row.organisationId,
+      workspaceName: workspaceNames.get(row.organisationId) ?? null,
+    };
+  });
+  return { enquiries, counts, open };
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    if (scope.platformAdmin !== true || !scope.authenticated) {
-      return Response.json(
-        { error: "The website's enquiries are read by MAINTSUPP platform staff." },
-        { status: 403 },
-      );
-    }
+    const refusal = platformLeadsRefusal(scope);
+    if (refusal) return refusal;
 
-    const rows = await scope.db
-      .select()
-      .from(leads)
-      .where(inArray(leads.organisationId, scope.organisationIds))
-      .orderBy(desc(leads.createdAt));
-
-    /* Which workspace each lead landed in, named rather than shown as an opaque id
-       — because "these are all filed under a client" is the fact a reader of this
-       screen most needs to be able to see for themselves. */
-    const workspaces = scope.organisationIds.length
-      ? await scope.db
-          .select({ id: organisations.id, name: organisations.name })
-          .from(organisations)
-          .where(inArray(organisations.id, scope.organisationIds))
-      : [];
-    const workspaceNames = new Map(workspaces.map((row) => [row.id, row.name]));
-
-    const counts: Record<string, number> = {};
-    let open = 0;
-    const enquiries = rows.map((row) => {
-      const status = leadStatus(row.status);
-      counts[status.key] = (counts[status.key] ?? 0) + 1;
-      if (!status.closed) open += 1;
-      return {
-        id: row.id,
-        name: row.name,
-        company: row.company,
-        email: row.email,
-        phone: row.phone ?? null,
-        siteRange: row.siteRange,
-        /* Stored as JSON text by `POST`. Parsed here rather than on the screen, so a
-           row written before the form stopped asking — which stores "[]" — reads as
-           an empty list instead of the two characters. */
-        services: parseList(row.services),
-        regions: parseList(row.regions),
-        challenge: row.challenge,
-        status: status.key,
-        closed: status.closed,
-        notifiedAt: row.notifiedAt ?? null,
-        notifyAttempts: row.notifyAttempts,
-        createdAt: row.createdAt,
-        organisationId: row.organisationId,
-        workspaceName: workspaceNames.get(row.organisationId) ?? null,
-      };
-    });
+    const { enquiries, counts, open } = await readLeadEnquiries(scope);
 
     return Response.json({
       canEdit: true,
@@ -164,12 +212,11 @@ export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    if (scope.platformAdmin !== true || !scope.authenticated) {
-      return Response.json(
-        { error: "The website's enquiries are managed by MAINTSUPP platform staff." },
-        { status: 403 },
-      );
-    }
+    const refusal = platformLeadsRefusal(
+      scope,
+      "The website's enquiries are managed by MAINTSUPP platform staff.",
+    );
+    if (refusal) return refusal;
 
     const body = (await request.json().catch(() => null)) as {
       id?: unknown;
@@ -231,7 +278,7 @@ export async function PATCH(request: Request) {
 }
 
 /** A JSON array stored as text, or an empty list. Never a throw. */
-function parseList(value: string | null | undefined): string[] {
+export function parseList(value: string | null | undefined): string[] {
   if (!value) return [];
   try {
     const parsed = JSON.parse(value);
