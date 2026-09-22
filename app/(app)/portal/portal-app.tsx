@@ -218,6 +218,8 @@ import ContractorLinkPanel from "./contractor-link-panel";
 import { SitesManager } from "./sites/sites-manager";
 import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
+import { WorkspaceLogoPanel } from "./views/workspace-logo-panel";
+import { WORKSPACE_LOGO_EVENT, WorkspaceMark } from "./workspace-mark";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
 import { WorkspaceEmailPanel } from "./views/workspace-email-panel";
@@ -1342,6 +1344,16 @@ export default function PortalApp({
       });
     }, 0);
     return () => window.clearTimeout(timer);
+  }, [loadRuntimeContext]);
+
+  /* A new or removed workspace logo redraws the sidebar mark without a reload:
+     the logo panel announces the change and the context is read again. */
+  useEffect(() => {
+    const refresh = () => {
+      void loadRuntimeContext({ force: true }).catch(() => undefined);
+    };
+    window.addEventListener(WORKSPACE_LOGO_EVENT, refresh);
+    return () => window.removeEventListener(WORKSPACE_LOGO_EVENT, refresh);
   }, [loadRuntimeContext]);
 
   const changeDemoRole = async (role: DemoRole) => {
@@ -3027,8 +3039,15 @@ export default function PortalApp({
         </div>
 
         <div className="workspace-switcher">
-          <span className="workspace-icon">
-            <Icon name="building" size={17} />
+          {/* The workspace's own logo where it has one — beside its name, never
+              in place of the MAINTSUPP mark above. See workspace-mark.tsx. */}
+          <span
+            className={`workspace-icon${runtimeContext?.currentOrganisation.logoUrl ? " workspace-icon--logo" : ""}`}
+          >
+            <WorkspaceMark
+              logoUrl={runtimeContext?.currentOrganisation.logoUrl}
+              fallback={<Icon name="building" size={17} />}
+            />
           </span>
           <span className="workspace-switcher__copy">
             {/* The client company, when it says something the workspace name
@@ -6877,6 +6896,12 @@ function SettingsView({
           need `settings.edit`, and are audited. See
           views/brand-colours-panel.tsx for why the two are not one card. */}
       <BrandColoursPanel />
+
+      {/* And the workspace's own logo, beside the palette: the same kind of
+          decision (`settings.edit`, audited, seen by everybody in the
+          workspace). It marks the workspace's portal and its reports; it never
+          replaces the MAINTSUPP mark. See views/workspace-logo-panel.tsx. */}
+      <WorkspaceLogoPanel />
 
       {/* And which screens exist at all — Master Specification §19. Reserved to
           Super Admin (`navigation.edit`), so the panel renders nothing for every

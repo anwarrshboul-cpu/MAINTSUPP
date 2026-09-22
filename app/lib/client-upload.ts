@@ -412,6 +412,44 @@ function putPart(url: string, chunk: Blob, onLoaded: (loaded: number) => void, s
 const PART_ATTEMPTS = 4;
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * One part, straight to the bucket, on a URL the route signs for it.
+ *
+ * Each attempt asks `sign` for a FRESH URL, so an attempt after an expired one
+ * (403) or a dropped connection (0) is a clean retry; a refusal of any other
+ * kind is final and says why. Shared by every direct upload — a document's
+ * parts and a workspace logo's — so the retry rule cannot differ between them.
+ */
+async function sendSignedPart(
+  sign: () => Promise<SignedPartResponse>,
+  chunk: Blob,
+  partNumber: number,
+  report: (loaded: number) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let status = 0;
+  for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
+    const signed = await sign();
+    status = await putPart(signed.url, chunk, report, signal);
+    if (status >= 200 && status < 300) break;
+    const retryable = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
+    if (!retryable || attempt === PART_ATTEMPTS) break;
+    await wait(1000 * 2 ** (attempt - 1));
+  }
+  if (status < 200 || status >= 300) {
+    throw new UploadApiError(
+      status === 0
+        ? "The connection dropped while the file was uploading. Check the signal and try again."
+        : status === 403
+          ? "The upload took too long to send a part. Try again."
+          : status === 413
+            ? "The file store will not accept a file this large. Ask your administrator to raise the storage file-size limit."
+            : `The file store refused part ${partNumber} of the upload (${status}).`,
+      status || 503,
+    );
+  }
+}
+
 async function multipartUpload(options: UploadOptions & UploadProgress) {
   const { file, requestId, kind, columnId, uploadToken, onProgress, onStage, signal } = options;
   /*
@@ -505,43 +543,30 @@ async function multipartUpload(options: UploadOptions & UploadProgress) {
          * there on why a part's size alone is not proof of its contents.
          */
         const digest = md5Hex(new Uint8Array(await chunk.arrayBuffer()));
-        let status = 0;
-        for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
-          const signed = await readApi<SignedPartResponse>(
-            await fetch("/api/files/multipart", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                action: "sign-part",
-                requestId,
-                kind,
-                columnId,
-                key: start.key,
-                uploadId: start.uploadId,
-                partNumber: index + 1,
-                uploadToken,
-                ...keyBody,
+        await sendSignedPart(
+          async () =>
+            readApi<SignedPartResponse>(
+              await fetch("/api/files/multipart", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  action: "sign-part",
+                  requestId,
+                  kind,
+                  columnId,
+                  key: start.key,
+                  uploadId: start.uploadId,
+                  partNumber: index + 1,
+                  uploadToken,
+                  ...keyBody,
+                }),
               }),
-            }),
-          );
-          status = await putPart(signed.url, chunk, report, signal);
-          if (status >= 200 && status < 300) break;
-          const retryable = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
-          if (!retryable || attempt === PART_ATTEMPTS) break;
-          await wait(1000 * 2 ** (attempt - 1));
-        }
-        if (status < 200 || status >= 300) {
-          throw new UploadApiError(
-            status === 0
-              ? "The connection dropped while the file was uploading. Check the signal and try again."
-              : status === 403
-                ? "The upload took too long to send a part. Try again."
-                : status === 413
-                  ? "The file store will not accept a file this large. Ask your administrator to raise the storage file-size limit."
-                  : `The file store refused part ${index + 1} of the upload (${status}).`,
-            status || 503,
-          );
-        }
+            ),
+          chunk,
+          index + 1,
+          report,
+          signal,
+        );
         // The route lists the parts from the bucket itself at `complete`, and
         // checks each one's stored MD5 against this declaration.
         parts.push({ partNumber: index + 1, etag: digest });
@@ -731,6 +756,221 @@ export async function uploadEvidenceFile(
   }
 }
 
+/* ── The workspace logo ──────────────────────────────────────────────────── */
+
+/**
+ * What `/api/branding/logo` says a logo is. Never its storage key: the browser
+ * draws `url`, which the route authorises on every request.
+ */
+export type WorkspaceLogo = {
+  id: string;
+  url: string;
+  contentType: string;
+  byteSize: number;
+  width: number;
+  height: number;
+  originalName: string;
+  updatedAt: string;
+};
+
+type LogoResponse = { logo: WorkspaceLogo | null; canEdit?: boolean };
+
+/** The owner's rule, repeated here only to answer before any byte is sent. */
+const LOGO_MAX_FILE_SIZE = 2 * 1024 * 1024;
+const LOGO_EXTENSIONS: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+function logoFileProblem(file: File): string | null {
+  const type = (file.type || LOGO_EXTENSIONS[extension(file.name)] || "").toLowerCase();
+  if (!["image/png", "image/jpeg", "image/webp"].includes(type) || !LOGO_EXTENSIONS[extension(file.name)]) {
+    return "The logo must be a PNG, JPEG or WebP image.";
+  }
+  if (file.size > LOGO_MAX_FILE_SIZE) return "The logo must be 2 MB or smaller.";
+  if (file.size < 1) return "Choose a logo to upload.";
+  return null;
+}
+
+/**
+ * A logo over `DIRECT_UPLOAD_LIMIT`, on the #78 direct-upload path: the same
+ * start / sign-part / PUT / complete protocol, the same part PUT, the same MD5
+ * declaration and the same retry rule as a document's parts — against
+ * `/api/branding/logo/upload`, which applies the logo's own authority
+ * (`settings.edit`) and its own ending.
+ */
+async function logoPartsUpload(file: File, progress: UploadProgress): Promise<LogoResponse> {
+  const endpoint = "/api/branding/logo/upload";
+  const post = (body: Record<string, unknown>) =>
+    fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  const start = await readApi<MultipartStartResponse>(
+    await post({
+      action: "start",
+      originalName: file.name,
+      contentType: file.type || LOGO_EXTENSIONS[extension(file.name)] || "",
+      byteSize: file.size,
+    }),
+  );
+  const chunkSize = start.partSize ?? MULTIPART_CHUNK_SIZE;
+  const partCount = start.partCount ?? Math.ceil(file.size / chunkSize);
+  const parts: Array<{ partNumber: number; etag: string }> = [];
+  let sent = 0;
+  const report = (loaded: number) => {
+    const value = Math.min(100, Math.round(((sent + loaded) / file.size) * 100));
+    progress.onStage?.({ phase: "uploading", progress: value });
+    progress.onProgress?.(Math.round(value * 0.92));
+  };
+  report(0);
+  try {
+    for (let index = 0; index < partCount; index += 1) {
+      const chunk = file.slice(index * chunkSize, Math.min((index + 1) * chunkSize, file.size));
+      const partNumber = index + 1;
+      if (start.transport === "direct") {
+        const partDigest = md5Hex(new Uint8Array(await chunk.arrayBuffer()));
+        await sendSignedPart(
+          async () =>
+            readApi<SignedPartResponse>(
+              await post({ action: "sign-part", key: start.key, uploadId: start.uploadId, partNumber }),
+            ),
+          chunk,
+          partNumber,
+          report,
+          progress.signal,
+        );
+        parts.push({ partNumber, etag: partDigest });
+      } else {
+        const uploaded = await readApi<MultipartPartResponse>(
+          await fetch(endpoint, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "X-Upload-Key": start.key,
+              "X-Upload-Id": start.uploadId,
+              "X-Upload-Part": String(partNumber),
+            },
+            body: chunk,
+          }),
+          partUploadError,
+        );
+        parts.push(uploaded.part);
+      }
+      sent += chunk.size;
+      report(0);
+    }
+    progress.onStage?.({ phase: "finalizing" });
+    const completed = await readApi<LogoResponse>(
+      await post({ action: "complete", key: start.key, uploadId: start.uploadId, parts }),
+    );
+    progress.onProgress?.(100);
+    return completed;
+  } catch (error) {
+    progress.onStage?.({
+      phase: "failed",
+      message:
+        error instanceof UploadCancelledError
+          ? "Upload cancelled."
+          : error instanceof Error
+            ? error.message
+            : "The logo could not be uploaded.",
+    });
+    post({ action: "abort", key: start.key, uploadId: start.uploadId }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/*
+ * THE DOCUMENTS' COPY, drawn where the pixels already are.
+ *
+ * A PDF and a Word file embed a JPEG natively and a WebP not at all, and the
+ * server has no image pipeline (the same reason the board's thumbnails are made
+ * here). So after a logo is saved the browser draws it once more — on white, as
+ * it will sit on a page, at most 1200 px wide — and offers that JPEG back.
+ * BEST EFFORT, like the thumbnail: without it the reports simply carry no logo,
+ * and nothing here may fail the upload the person asked for.
+ */
+const LOGO_PRINT_WIDTH = 1200;
+const LOGO_PRINT_HEIGHT = 480;
+
+async function offerLogoPrintCopy(file: File, logo: WorkspaceLogo) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, LOGO_PRINT_WIDTH / bitmap.width, LOGO_PRINT_HEIGHT / bitmap.height);
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+    if (!blob || !blob.type.includes("jpeg") || blob.size > 512 * 1024) return;
+    await fetch(`/api/branding/logo/image?rendition=print&v=${encodeURIComponent(logo.id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/jpeg" },
+      body: blob,
+    });
+  } catch {
+    /* The logo itself is saved; a missing print copy costs the documents their
+       logo, never the upload its success. */
+  }
+}
+
+/**
+ * Upload a workspace logo — the one way in, for the same reasons
+ * `uploadEvidenceFile` is the one way in for a document: it owns the ~1 MiB
+ * ceiling and the parts fallback, so no screen can hand-roll a POST that works
+ * for a small file and fails with a bare 413 for a real one.
+ */
+export async function uploadWorkspaceLogo(
+  file: File,
+  progress: UploadProgress = {},
+): Promise<WorkspaceLogo> {
+  const problem = logoFileProblem(file);
+  if (problem) {
+    progress.onStage?.({ phase: "failed", message: problem });
+    throw new Error(problem);
+  }
+  progress.onStage?.({ phase: "preparing" });
+  const finish = async (result: LogoResponse) => {
+    if (!result.logo) throw new Error("The logo could not be uploaded.");
+    await offerLogoPrintCopy(file, result.logo);
+    progress.onStage?.({ phase: "complete" });
+    return result.logo;
+  };
+  if (file.size > DIRECT_UPLOAD_LIMIT) {
+    return finish(await logoPartsUpload(file, progress));
+  }
+  try {
+    progress.onStage?.({ phase: "uploading", progress: 0 });
+    const form = new FormData();
+    form.set("file", file);
+    const result = await readApi<LogoResponse>(
+      await fetch("/api/branding/logo", { method: "POST", body: form }),
+    );
+    progress.onProgress?.(100);
+    return finish(result);
+  } catch (error) {
+    if (error instanceof UploadApiError && error.status === 413) {
+      return finish(await logoPartsUpload(file, progress));
+    }
+    progress.onStage?.({
+      phase: "failed",
+      message: error instanceof Error ? error.message : "The logo could not be uploaded.",
+    });
+    throw error;
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* The website media library (decision K)                              */
 /* ------------------------------------------------------------------ */
@@ -810,27 +1050,15 @@ export async function uploadWebsiteMedia(options: WebsiteMediaOptions): Promise<
       const chunk = file.slice(index * chunkSize, Math.min((index + 1) * chunkSize, file.size));
       if (direct) {
         const digest = md5Hex(new Uint8Array(await chunk.arrayBuffer()));
-        let status = 0;
-        for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
-          const signed = await readApi<SignedPartResponse>(
-            await post({ action: "sign-part", key: start.key, uploadId: start.uploadId, partNumber: index + 1 }),
-          );
-          status = await putPart(signed.url, chunk, report, signal);
-          if (status >= 200 && status < 300) break;
-          const retryable = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
-          if (!retryable || attempt === PART_ATTEMPTS) break;
-          await wait(1000 * 2 ** (attempt - 1));
-        }
-        if (status < 200 || status >= 300) {
-          throw new UploadApiError(
-            status === 0
-              ? "The connection dropped while the file was uploading. Check the signal and try again."
-              : status === 413
-                ? "The file store will not accept a file this large."
-                : `The file store refused part ${index + 1} of the upload (${status}).`,
-            status || 503,
-          );
-        }
+        /* The shared part sender: a fresh URL per attempt, the same retry rule
+           as a document's parts and a workspace logo's. */
+        await sendSignedPart(
+          async () => readApi<SignedPartResponse>(await post({ action: "sign-part", key: start.key, uploadId: start.uploadId, partNumber: index + 1 })),
+          chunk,
+          index + 1,
+          report,
+          signal,
+        );
         parts.push({ partNumber: index + 1, etag: digest });
       } else {
         const uploaded = await readApi<MultipartPartResponse>(

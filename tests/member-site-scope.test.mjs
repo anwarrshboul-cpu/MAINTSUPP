@@ -175,10 +175,13 @@ test("the workspace SNAPSHOT is confined too — it is the same estate under ano
     /const allowed = memberSiteSet\(siteScope\);\s*if \(!allowed\) return snapshot;/,
     "an unrestricted member is handed the snapshot untouched",
   );
+  /* Re-pointed 2026-09-22 (security review): the four filters are named first
+     (`const stores = snapshot.stores.filter(`), so the activity feed can be
+     confined to them — the same filters, spelled as declarations. */
   for (const collection of ["stores", "compliance", "units", "planned"]) {
     assert.match(
       route,
-      new RegExp(String.raw`${collection}: snapshot\.${collection}\.filter\(`),
+      new RegExp(String.raw`(?:${collection}: |const ${collection} = )snapshot\.${collection}\.filter\(`),
       `${collection} carries a site, so it is filtered`,
     );
   }
@@ -187,16 +190,26 @@ test("the workspace SNAPSHOT is confined too — it is the same estate under ano
    * scope says which STORES a member may see; narrowing the roster or the
    * settings by it would be inventing a rule nothing asked for.
    */
-  for (const collection of ["contractors", "team", "settings", "activity"]) {
+  for (const collection of ["contractors", "team", "settings"]) {
     assert.doesNotMatch(
       route,
       new RegExp(String.raw`${collection}: snapshot\.${collection}\.filter\(`),
       `${collection} is organisation-level and must stay whole`,
     );
   }
+  /*
+   * Re-pointed 2026-09-22 (security review). `activity` was on the list above,
+   * but an entry about a site, unit, compliance record or planned visit is that
+   * RECORD's history: it is now kept only when the record is in the member's
+   * confined snapshot, while workspace-level entries stay. And the contractors'
+   * per-contractor figures (jobs, spend) are counted over the member's sites —
+   * the contractor LIST stays whole, as asserted above.
+   */
+  assert.match(route, /activity: snapshot\.activity\.filter\(\(entry\) => visible\[entry\.entityType\]\?\.has\(entry\.entityId\) \?\? true\)/);
+  assert.equal((route.match(/memberSiteCondition\(maintenanceRequests\.siteId, siteScope\),/g) ?? []).length >= 2, true, "both contractor aggregates confined");
   assert.match(
     route,
-    /confineSnapshot\(await readWorkspace\(db, orgId\), siteScope\)/,
+    /confineSnapshot\(await readWorkspace\(db, orgId, siteScope\), siteScope\)/,
     "and the GET applies it to what it returns",
   );
 });

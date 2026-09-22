@@ -329,7 +329,11 @@ test("the upload path is #78's: session-bound, bucket-listed parts, MD5 per part
   assert.match(documents, /const declared = new Map\(claimed\.map\(\(part\) => \[part\.partNumber, part\.etag\.toLowerCase\(\)\]\)\);/);
   const client = code(await read("app/lib/client-upload.ts"));
   const uploader = client.slice(client.indexOf("export async function uploadWebsiteMedia"));
-  assert.match(uploader, /status = await putPart\(signed\.url, chunk, report, signal\);/, "the browser reuses the one part uploader");
+  /* RE-POINTED: `sendSignedPart` is the shared part sender (a fresh signed URL
+     per attempt, one retry rule) that main extracted for the workspace logo;
+     the website library uses that rather than a loop of its own. */
+  assert.match(uploader, /await sendSignedPart\(/, "the browser reuses the one part sender");
+  assert.match(client, /async function sendSignedPart\(/, "which lives once in this module");
   assert.match(uploader, /validateFile\(file\);/, "and the one size policy");
 });
 

@@ -37,8 +37,8 @@
  */
 
 import type { CombinedReportPayload, DocumentKind } from "../reporting/contract";
-import { buildReportDocument, keyValuesFor, sectionsFor } from "./document-model";
-import type { DocCell, DocSection, DocTable, ReportDocument } from "./document-model";
+import { NO_BRANDING, buildReportDocument, coverLogoSize, keyValuesFor, sectionsFor } from "./document-model";
+import type { DocCell, DocSection, DocTable, DocumentBranding, ReportDocument } from "./document-model";
 import { encodeWinAnsi, measure, truncateToWidth, wrapToWidth } from "./pdf-font";
 import type { PdfFont } from "./pdf-font";
 
@@ -119,6 +119,12 @@ class Content {
     this.ops.push(
       `q ${options.colour ?? INK} rg BT ${font} ${n(size)} Tf 1 0 0 1 ${n(x)} ${n(y)} Tm (${literal(value)}) Tj ET Q`,
     );
+    return this;
+  }
+
+  /** Draw the page's one image XObject, `/Im1`, into a box. */
+  image(x: number, y: number, width: number, height: number) {
+    this.ops.push(`q ${n(width)} 0 0 ${n(height)} ${n(x)} ${n(y)} cm /Im1 Do Q`);
     return this;
   }
 
@@ -505,7 +511,32 @@ const LATIN1 = (text: string): Uint8Array => {
   return bytes;
 };
 
-function serialise(pages: Page[], title: string, generatedAt: string): Uint8Array {
+/**
+ * The workspace logo as an image XObject. A JPEG is embedded byte-for-byte
+ * under `/DCTDecode` — PDF reads JPEG natively, so nothing is decoded here —
+ * in the one colour model its frame header declared (grey or RGB; the copy is
+ * refused on the way in if it is anything else).
+ */
+function imageObject(logo: NonNullable<DocumentBranding["logo"]>): Uint8Array {
+  const head = LATIN1(
+    `<< /Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} ` +
+      `/ColorSpace ${logo.components === 1 ? "/DeviceGray" : "/DeviceRGB"} /BitsPerComponent 8 ` +
+      `/Filter /DCTDecode /Length ${logo.jpeg.length} >>\nstream\n`,
+  );
+  const tail = LATIN1("\nendstream");
+  const body = new Uint8Array(head.length + logo.jpeg.length + tail.length);
+  body.set(head, 0);
+  body.set(logo.jpeg, head.length);
+  body.set(tail, head.length + logo.jpeg.length);
+  return body;
+}
+
+function serialise(
+  pages: Page[],
+  title: string,
+  generatedAt: string,
+  logo: DocumentBranding["logo"] = null,
+): Uint8Array {
   const objects: Uint8Array[] = [];
   const add = (body: Uint8Array | string) => {
     objects.push(typeof body === "string" ? LATIN1(body) : body);
@@ -524,6 +555,9 @@ function serialise(pages: Page[], title: string, generatedAt: string): Uint8Arra
   const info = add(
     `<< /Title (${literal(title)}) /Producer (MAINTSUPP Operations Platform) /Creator (MAINTSUPP) /CreationDate (D:${pdfDate(generatedAt)}) >>`,
   );
+  /* Only when there is a logo, so an unbranded file is byte-for-byte what it was. */
+  const image = logo ? add(imageObject(logo)) : null;
+  const xobjects = image ? ` /XObject << /Im1 ${image} 0 R >>` : "";
 
   const pageNumbers: number[] = [];
   for (const page of pages) {
@@ -537,7 +571,7 @@ function serialise(pages: Page[], title: string, generatedAt: string): Uint8Arra
     const contentNumber = add(streamObject);
     const pageNumber = add(
       `<< /Type /Page /Parent ${pagesNode} 0 R /MediaBox [0 0 ${n(page.width)} ${n(page.height)}] ` +
-        `/Resources << /Font << /F1 ${fontRegular} 0 R /F2 ${fontBold} 0 R >> >> ` +
+        `/Resources << /Font << /F1 ${fontRegular} 0 R /F2 ${fontBold} 0 R >>${xobjects} >> ` +
         `/Contents ${contentNumber} 0 R >>`,
     );
     pageNumbers.push(pageNumber);
@@ -599,9 +633,13 @@ function pdfDate(iso: string): string {
 
 /* ── The entry point ─────────────────────────────────────────────────────── */
 
+/** The cover logo's box: a letterhead's height, never wider than a third of the page. */
+const COVER_LOGO_BOX = { width: 170, height: 48 };
+
 export function renderPdf(
   payload: CombinedReportPayload,
   kind: DocumentKind = "combined",
+  branding: DocumentBranding = NO_BRANDING,
 ): Uint8Array {
   const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "all");
@@ -609,6 +647,12 @@ export function renderPdf(
 
   layout.newPage(false);
   layout.advance(24);
+  /* The workspace's own mark above the title — the title stays MAINTSUPP's. */
+  if (branding.logo) {
+    const size = coverLogoSize(branding.logo, COVER_LOGO_BOX);
+    layout.current.image(MARGIN, layout.y - size.height, size.width, size.height);
+    layout.advance(size.height + 14);
+  }
   drawParagraph(layout, document.title, { font: "bold", size: TITLE_SIZE, colour: BRAND, gap: 2 });
   drawParagraph(layout, document.clientName, { font: "bold", size: 13, gap: 0 });
   drawParagraph(
@@ -639,7 +683,7 @@ export function renderPdf(
   }
 
   drawFooters(layout, document);
-  return serialise(layout.pages, `${document.title} — ${document.clientName}`, payload.generatedAt);
+  return serialise(layout.pages, `${document.title} — ${document.clientName}`, payload.generatedAt, branding.logo);
 }
 
 export const PDF_CONTENT_TYPE = "application/pdf";

@@ -1,0 +1,55 @@
+/*
+ * The workspace's logo, wherever it is drawn.
+ *
+ * On a light plate, always: most logos are drawn for a white page, and the rail
+ * is dark in both themes, so a transparent logo with dark ink would otherwise
+ * vanish into it. The plate is `--rail-fg` — the rail's own light ink, defined
+ * once on the bare `:root` and the same in both themes — rather than a literal,
+ * because the rail's rules may not hard-code a colour.
+ *
+ * `object-fit: contain` inside a fixed box: a wide wordmark and a square badge
+ * both fit without distorting and without moving what sits beside them.
+ */
+
+.workspace-mark {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 3px;
+  border-radius: inherit;
+  background: var(--rail-fg);
+  object-fit: contain;
+}
+
+/* The sidebar's workspace card: the logo takes the icon tile's place exactly. */
+.workspace-icon--logo {
+  overflow: hidden;
+  padding: 0;
+}
+
+/* The account menu's header: a small mark before the workspace name. The
+   wrapper keeps the header's two ends where they were — identity on the left,
+   the plan pill on the right — whether or not there is a logo. */
+.account-menu__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.account-menu__workspace-mark {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+/* The cover of a report, on screen: the height a letterhead would give it. */
+.reports-doc__logo {
+  width: auto;
+  max-width: 220px;
+  height: 56px;
+  margin: 0 0 10px;
+  border-radius: 6px;
+}

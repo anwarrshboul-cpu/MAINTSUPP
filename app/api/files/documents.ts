@@ -840,7 +840,11 @@ export async function releaseComplianceLinks(
  *      that contractor to a site in the scope. Job history is not a link.
  *
  * `null` scope (an unrestricted member, an owner, a platform admin) never
- * reaches this function; the call sites test `siteScope && siteScope.length`.
+ * reaches this function; the call sites test `siteScope` for null. An EMPTY
+ * scope does reach it and is outside everything: `parseSiteScope` answers `[]`
+ * for a malformed restriction, and a restriction to no site reaches nothing.
+ * (The call sites used to test `siteScope && siteScope.length`, which read that
+ * empty list as "unrestricted" — fixed with the security review, 2026-09-22.)
  *
  * MOVED here from `[id]/route.ts`, body unchanged, so the two upload doors ask
  * the same question through `uploadOutsideSiteScope` below — one rule, not a
@@ -857,6 +861,8 @@ export async function outsideSiteScope(
     contractorId: string | null;
   },
 ): Promise<boolean> {
+  /* A restriction to no site reaches no document (fail-closed). */
+  if (!siteScope.length) return true;
   let anchored = false;
   if (record.siteId) {
     anchored = true;
@@ -941,7 +947,10 @@ export async function uploadOutsideSiteScope(
   filed: Anchors,
   replacesId: string,
 ): Promise<boolean> {
-  if (!siteScope || !siteScope.length) return false;
+  /* Null is unrestricted; an EMPTY scope is a restriction to no site (the
+     fail-closed reader's answer for a malformed value) and reaches nothing. */
+  if (!siteScope) return false;
+  if (!siteScope.length) return true;
   const asRecord = (anchors: Anchors) => ({
     siteId: anchors.siteId || null,
     unitId: anchors.unitId || null,

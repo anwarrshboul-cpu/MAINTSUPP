@@ -910,7 +910,13 @@ export async function POST(request: Request) {
          */
         const direct = session.transport === "direct" ? directTransport(multipart) : null;
         /* What the browser says each part is: its etag on the proxied path, and
-           on the direct path the MD5 it computed of the bytes it sent. */
+           on the direct path the MD5 it computed of the bytes it sent.
+           Kept AS SENT: it is lowercased only where it is compared as an MD5
+           (the direct path below). On the proxied path it goes back to the
+           storage driver, and Miniflare's R2 etags are case-sensitive
+           base64url — lowercased, every local upload over 900 KB failed at
+           `complete` with "One or more of the specified parts could not be
+           found" (measured; `tests/direct-upload.test.mjs` live half). */
         const claimed = Array.isArray(payload.parts)
           ? payload.parts
               .map((part) => {
