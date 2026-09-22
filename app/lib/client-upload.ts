@@ -536,7 +536,9 @@ async function multipartUpload(options: UploadOptions & UploadProgress) {
               ? "The connection dropped while the file was uploading. Check the signal and try again."
               : status === 403
                 ? "The upload took too long to send a part. Try again."
-                : `The file store refused part ${index + 1} of the upload (${status}).`,
+                : status === 413
+                  ? "The file store will not accept a file this large. Ask your administrator to raise the storage file-size limit."
+                  : `The file store refused part ${index + 1} of the upload (${status}).`,
             status || 503,
           );
         }

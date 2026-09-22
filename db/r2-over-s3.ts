@@ -1464,7 +1464,14 @@ export function createS3Bucket(options: S3BucketOptions): S3R2Bucket {
         if (xmlTag(xml, "IsTruncated") === "true") {
           throw new Error("S3 ListParts was truncated; this route never plans more than 1000 parts.");
         }
-        return xmlBlocks(xml, "Part")
+        /*
+         * `<Part>` is AWS's element; Supabase Storage's S3 layer names the same
+         * list `<Parts>` (measured on the Staging bucket: every part stored,
+         * zero parsed). EXACT names on both ends — `xmlBlocks(xml, "Part")`
+         * also opens on `<PartNumberMarker>` and never closes on `</Parts>`.
+         */
+        return [...xml.matchAll(/<(Part|Parts)>([\s\S]*?)<\/\1>/g)]
+          .map((match) => match[2])
           .map((block) => ({
             partNumber: Number(xmlTag(block, "PartNumber") ?? 0),
             etag: unquote(xmlTag(block, "ETag") ?? ""),

@@ -117,6 +117,22 @@ test("ListParts is read from the bucket, sorted, and refuses a truncated listing
   await assert.rejects(() => upload.listParts(), /truncated/);
 });
 
+test("ListParts also reads Supabase Storage's `<Parts>` shape, and ignores the markers", async () => {
+  /* Measured on the Staging bucket: every part stored, and the AWS-only parser
+     read none of them, so every direct upload was refused at `complete`. */
+  const supabase =
+    `<?xml version="1.0" encoding="UTF-8"?><ListPartsResult><Bucket>job-media</Bucket><Key>k</Key><UploadId>UP1</UploadId>` +
+    `<PartNumberMarker>0</PartNumberMarker><NextPartNumberMarker>2</NextPartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated>` +
+    `<Parts><PartNumber>1</PartNumber><LastModified>2026-09-22T10:00:00.000Z</LastModified><ETag>"aaa"</ETag><Size>5242880</Size></Parts>` +
+    `<Parts><PartNumber>2</PartNumber><LastModified>2026-09-22T10:00:01.000Z</LastModified><ETag>"bbb"</ETag><Size>1000</Size></Parts>` +
+    `</ListPartsResult>`;
+  const { bucket } = bucketWith([{ status: 200, body: supabase }]);
+  assert.deepEqual(await bucket.resumeMultipartUpload("org_1/k", "UP1").listParts(), [
+    { partNumber: 1, etag: "aaa", size: 5242880 },
+    { partNumber: 2, etag: "bbb", size: 1000 },
+  ]);
+});
+
 /* ------------------------------------------------------------------ */
 /* File signatures                                                      */
 /* ------------------------------------------------------------------ */

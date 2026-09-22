@@ -874,6 +874,11 @@ export async function POST(request: Request) {
             listed.length === plan.partCount &&
             listed.every((part, index) => part.partNumber === index + 1 && part.size === plan.sizeOf(index + 1));
           if (!whole) {
+            // Numbers only — which parts the bucket reported against the plan.
+            console.error("[/api/files/multipart] parts do not match the plan", {
+              planned: plan.partCount,
+              listed: listed.map((part) => [part.partNumber, part.size]),
+            });
             await multipart.abort().catch(() => undefined);
             return Response.json(
               { error: "Part of the file did not arrive. Start the upload again." },
