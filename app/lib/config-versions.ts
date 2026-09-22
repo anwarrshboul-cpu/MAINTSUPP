@@ -212,3 +212,20 @@ export async function loadRestoreSnapshot(
   }
   return { ok: true, snapshot: JSON.parse(row.snapshot) };
 }
+
+/**
+ * §38b — the keys (page slugs) whose LATEST version is a deletion: what the
+ * "Deleted pages" list offers to bring back. Installation-wide subjects only.
+ */
+export async function listDeletedKeys(db: Database, subject: VersionSubject) {
+  const rows = await db
+    .select({ key: configVersions.subjectKey, versionNo: configVersions.versionNo, changeKind: configVersions.changeKind, createdAt: configVersions.createdAt, actorEmail: configVersions.actorEmail })
+    .from(configVersions)
+    .where(and(isNull(configVersions.organisationId), eq(configVersions.subjectType, subject)))
+    .orderBy(desc(configVersions.versionNo));
+  const latestByKey = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!latestByKey.has(row.key)) latestByKey.set(row.key, row);
+  return [...latestByKey.values()]
+    .filter((row) => row.changeKind === "deleted")
+    .map((row) => ({ key: row.key, deletedAt: row.createdAt, deletedBy: row.actorEmail ?? null, version: row.versionNo }));
+}

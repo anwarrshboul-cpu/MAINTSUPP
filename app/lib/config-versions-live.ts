@@ -12,10 +12,12 @@ import { and, eq, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { dashboardLayouts, navigationLayouts } from "../../db/schema";
 import { sanitiseArrangement, sanitiseLocked } from "../api/navigation/layout";
+import { listPages } from "./cms-repository";
 import {
   dashboardSnapshot,
   modulesSnapshot,
   navigationSnapshot,
+  pageSnapshot,
   themeSnapshot,
   type VersionSubject,
 } from "./config-versions-model";
@@ -32,7 +34,13 @@ function parsed(text: string | null | undefined): unknown {
   }
 }
 
-export async function liveSnapshot(db: Database, organisationId: string, subject: VersionSubject, key: string): Promise<unknown> {
+export async function liveSnapshot(db: Database, organisationId: string | null, subject: VersionSubject, key: string): Promise<unknown> {
+  /* §38b — installation-wide: the page as it is now, or "absent" (no version equals that). */
+  if (subject === "site_page") {
+    const page = (await listPages(db)).find((entry) => entry.slug === key);
+    return page ? pageSnapshot(page) : { absent: true };
+  }
+  if (organisationId === null) return { absent: true };
   if (subject === "theme") return themeSnapshot(await readThemeOverrides(db, organisationId));
   if (subject === "portal_modules") return modulesSnapshot(await readModuleOverrides(db, organisationId));
   if (subject === "navigation") {

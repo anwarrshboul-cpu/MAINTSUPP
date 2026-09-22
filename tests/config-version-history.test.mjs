@@ -235,8 +235,15 @@ test("each route: gate, then restore load, then validation; baseline, then write
 test("the history list: the caller's workspace only, the setting's own capability, never a snapshot", async () => {
   const route = code(await read("app/api/versions/route.ts"));
   assert.doesNotMatch(route, /searchParams\.get\("(organisation|org|orgId|organisationId)"\)/);
-  assert.match(route, /requireCapability\(permissions, VERSION_SUBJECTS\[target\.subject\]\.capability\)/);
-  assert.match(route, /organisationId: scope\.orgId/);
+  /* RE-POINTED (§38b): the list now also serves installation-wide website
+     pages, whose gate is platform staff and whose rows have no workspace. The
+     contract is unchanged and stated for both branches: a workspace setting is
+     read under ITS capability in the caller's own workspace; a page only by
+     platform staff, on `organisation_id IS NULL`. */
+  assert.match(route, /const refusal = requireCapability\(permissions, definition\.capability as "settings\.edit" \| "navigation\.edit"\);/);
+  assert.match(route, /const organisationId = installation \? null : scope\.orgId;/);
+  assert.match(route, /if \(installation\) \{\s*if \(!platformStaff\) return Response\.json\(\{ error: "The website is administered by MAINTSUPP platform staff\." \}, \{ status: 403 \}\);/);
+  assert.match(route, /const platformStaff = scope\.platformAdmin === true && scope\.authenticated;/);
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE)/, "restore lives on each setting's own route");
   const store = code(await read("app/lib/config-versions.ts"));
   const list = store.slice(store.indexOf("export async function listConfigVersions"), store.indexOf("export async function loadRestoreSnapshot"));
