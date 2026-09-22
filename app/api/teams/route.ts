@@ -185,7 +185,7 @@ export async function GET(request: Request) {
     const [list, people, subject] = await Promise.all([
       loadTeams(scope.db, scope.orgId),
       loadPeople(scope.db, scope.orgId),
-      resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
     ]);
     /*
      * `people` IS THE DIRECTORY, AND ONLY ONE CONTROL USES IT.
@@ -252,7 +252,7 @@ export async function POST(request: Request) {
     if (guard.denied) return guard.denied;
     const scope = guard.scope;
     const refusal = requireCapability(
-      await resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
       MANAGE,
     );
     if (refusal) return refusal;
@@ -324,7 +324,7 @@ export async function PATCH(request: Request) {
     if (guard.denied) return guard.denied;
     const scope = guard.scope;
     const refusal = requireCapability(
-      await resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
       MANAGE,
     );
     if (refusal) return refusal;

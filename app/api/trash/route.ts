@@ -83,7 +83,12 @@ import { CANONICAL_REGISTER } from "../../lib/register-scope";
 import { chunkIds } from "../../lib/sql-batching";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
-import { beyondMemberScope, jobsWithinMemberScope } from "../../lib/job-site-scope";
+import {
+  beyondMemberScope,
+  boardStructureRefusal,
+  jobsWithinMemberScope,
+  subitemsOutsideMemberScope,
+} from "../../lib/job-site-scope";
 
 type Scope = Awaited<ReturnType<typeof scopedDbWithCapability>>["scope"];
 type Database = NonNullable<Scope>["db"];
@@ -217,7 +222,7 @@ export async function GET(request: Request) {
      * and, more to the point, it is the only way the screen can tell the
      * difference between "nothing to restore" and "not yours to restore".
      */
-    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role, guard.scope.siteScope);
 
     /* Confined before anything is counted, so `total` does not say how much
        of other stores' work is in the bin either. #83 confined the job reads
@@ -310,11 +315,24 @@ export async function POST(request: Request) {
       if (entry && !(await confineBinEntries(db, orgId, siteScope, [entry])).length) {
         return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });
       }
+      /* A group, a column or a board view is board STRUCTURE: restoring one puts
+         it back for every site (security review) — see `boardStructureRefusal`. */
+      if (entry && ["group", "column", "board_view"].includes(entry.entityType)) {
+        const structure = boardStructureRefusal(siteScope);
+        if (structure) return structure;
+      }
+      /* Restoring a job brings back the subitems binned with it; one at another
+         site fails the whole restore. See `subitemsOutsideMemberScope`. */
+      if (entry?.entityType === "job" && (await subitemsOutsideMemberScope(db, orgId, siteScope, [entry.entityId], true))) {
+        return beyondMemberScope(
+          "this job has subitems outside your sites, and restoring it would restore them with it",
+        );
+      }
     }
 
     const assetSite = await binnedAssetSite(db, orgId, id);
     if (assetSite !== null) {
-      const subject = await resolvePermissions(db, orgId, actor.role);
+      const subject = await resolvePermissions(db, orgId, actor.role, siteScope);
       if (!can(subject, "sites.edit")) {
         return Response.json(
           {
@@ -427,6 +445,19 @@ export async function DELETE(request: Request) {
     /* One entry, for a restricted member: another store's is not in their bin,
        and the 404 below says so in the words a missing entry gets. */
     const all = await confineBinEntries(db, orgId, siteScope, unconfined);
+    /* A purge is permanent, so the restore's rules hold here too (security
+       review): board structure is every site's, and purging a job destroys
+       its subitems with it — one outside the member's sites fails it all. */
+    if (siteScope) {
+      if (all.some((entry) => ["group", "column", "board_view"].includes(entry.entityType))) {
+        const structure = boardStructureRefusal(siteScope);
+        if (structure) return structure;
+      }
+      const jobIds = all.filter((entry) => entry.entityType === "job").map((entry) => entry.entityId);
+      if (await subitemsOutsideMemberScope(db, orgId, siteScope, jobIds, true)) {
+        return beyondMemberScope("some of these jobs have subitems outside your sites, and purging a job destroys its subitems with it");
+      }
+    }
 
     /*
      * W2C — A CHILD OF A DELETED SECTION IS NOT SEPARATELY DESTROYABLE.

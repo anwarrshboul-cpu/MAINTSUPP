@@ -375,7 +375,8 @@ test("only an admin may invite, and never above their own role", async () => {
    */
   assert.match(
     create,
-    /const subject = await resolvePermissions\(db, target\.id, actingRole\);\s*if \(!can\(subject, "users\.invite"\)\)/,
+    /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+    /const subject = await resolvePermissions\(db, target\.id, actingRole, siteScopeInOrganisation\(scope, target\.id\)\);\s*if \(!can\(subject, "users\.invite"\)\)/,
   );
   const permissions = await import("../app/lib/permissions.ts");
   assert.equal(permissions.defaultAllows("admin", "users.invite"), true);

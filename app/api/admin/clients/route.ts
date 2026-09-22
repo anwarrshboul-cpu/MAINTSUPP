@@ -287,6 +287,6 @@ function actorPayload(context: Exclude<Awaited<ReturnType<typeof adminContext>>,
     role: context.actor.role,
     roleLabel: ROLE_LABELS[context.actor.role],
     currentOrganisationId: context.orgId,
-    capabilities: effectiveCapabilities(context.actor.role, context.subject.capabilities),
+    capabilities: effectiveCapabilities(context.actor.role, context.subject.capabilities, context.subject.siteRestricted),
   };
 }

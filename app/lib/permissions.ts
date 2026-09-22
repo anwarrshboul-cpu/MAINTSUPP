@@ -354,6 +354,50 @@ const ROLE_CEILINGS: Partial<Record<WorkspaceRole, ReadonlySet<Capability>>> = {
   ]),
 };
 
+/**
+ * WHAT A SITE-RESTRICTED MEMBER NEVER HOLDS, whatever their role or the matrix
+ * says (owner decision, 2026-09-22).
+ *
+ * `memberships.site_scope` confines a member to named sites: every job-level
+ * read and write answers only for those sites (#83, #87). These capabilities do
+ * not act on a site — they act on the WHOLE workspace: its settings, theme,
+ * SLA and portal modules, its sidebar, its integrations, who its people are and
+ * what their roles may do, its teams, its billing, bulk import, and the audit
+ * log of everyone's activity at every site. A member confined to one store who
+ * held one of these could reshape — or read — every other store's setup, and,
+ * worst, invite a new member who is NOT restricted: a way out of their own
+ * restriction. So the ceiling removes them at the one place every route asks
+ * (`can`), exactly as `ROLE_CEILINGS` does for a Manager.
+ *
+ * Board STRUCTURE (columns, options, groups, the board's form, automations)
+ * sits under `board.edit`, which a restricted member needs for their own jobs;
+ * those operations are refused per operation instead — see `boardStructureRefusal`
+ * in `app/lib/job-site-scope.ts`.
+ *
+ * Super Admin is exempt, as from every ceiling: it is the recovery role (see
+ * `can`), and the site-restriction UI refuses to restrict an Owner or a Super
+ * Admin at all.
+ */
+export const SITE_RESTRICTED_CEILING: ReadonlySet<Capability> = new Set<Capability>([
+  "settings.edit",
+  "navigation.edit",
+  "integrations.manage",
+  "roles.edit",
+  "users.invite",
+  "users.edit",
+  "users.deactivate",
+  "teams.manage",
+  "billing.manage",
+  "data.import",
+  "audit.read",
+  "clients.view_all",
+]);
+
+/** True when a site-restricted member is refused `capability` by the ceiling above. */
+export function isForbiddenWhenSiteRestricted(capability: Capability) {
+  return SITE_RESTRICTED_CEILING.has(capability);
+}
+
 /** True when `role` may never hold `capability`, whatever the matrix says. */
 export function isForbiddenForRole(role: WorkspaceRole, capability: Capability) {
   if (role === IMMUTABLE_ROLE) return false;
@@ -548,6 +592,8 @@ export async function loadRoleOverridesForOrganisations(
 export type PermissionSubject = {
   role: WorkspaceRole;
   capabilities: CapabilityOverrides;
+  /** True when the member's `site_scope` confines them — see `SITE_RESTRICTED_CEILING`. */
+  siteRestricted?: boolean;
 };
 
 /**
@@ -566,6 +612,9 @@ export function can(actor: PermissionSubject, capability: Capability): boolean {
   // ignored here, which is what makes the rule a boundary rather than a default.
   if (isForbiddenForRole(actor.role, capability)) return false;
 
+  // A site-restricted member never holds a workspace-wide capability.
+  if (actor.siteRestricted && isForbiddenWhenSiteRestricted(capability)) return false;
+
   const override = actor.capabilities[capability];
   if (typeof override === "boolean") return override;
   return defaultAllows(actor.role, capability);
@@ -575,10 +624,13 @@ export function can(actor: PermissionSubject, capability: Capability): boolean {
 export function effectiveCapabilities(
   role: WorkspaceRole,
   overrides: CapabilityOverrides,
+  /* The same ceiling `can` applies, so what the browser is told it may do and
+     what the API allows cannot disagree for a site-restricted member. */
+  siteRestricted = false,
 ): Record<Capability, boolean> {
   const result = {} as Record<Capability, boolean>;
   for (const capability of CAPABILITIES) {
-    result[capability] = can({ role, capabilities: overrides }, capability);
+    result[capability] = can({ role, capabilities: overrides, siteRestricted }, capability);
   }
   return result;
 }
@@ -588,9 +640,16 @@ export async function resolvePermissions(
   db: Database,
   organisationId: string,
   role: WorkspaceRole,
+  /*
+   * REQUIRED, so that no caller can forget it: the member's `site_scope` in
+   * THIS workspace (null = unrestricted). A restricted member's subject carries
+   * `siteRestricted`, and `can` then withholds `SITE_RESTRICTED_CEILING`. A
+   * caller with no member behind it passes null with its reason.
+   */
+  siteScope: readonly string[] | null,
 ): Promise<PermissionSubject> {
   const overrides = await loadRoleOverrides(db, organisationId);
-  return { role, capabilities: overrides[role] };
+  return { role, capabilities: overrides[role], siteRestricted: siteScope !== null };
 }
 
 /**
@@ -616,7 +675,27 @@ export function requireCapability(
   actor: PermissionSubject,
   capability: Capability,
 ): Response | null {
-  return can(actor, capability) ? null : capabilityDenied(capability, actor.role);
+  if (can(actor, capability)) return null;
+  /* Refused by the site ceiling rather than by the role: say which, in the
+     site-scope refusal shape (`outsideSiteScope`) the rest of #87 uses. */
+  if (
+    actor.siteRestricted &&
+    isForbiddenWhenSiteRestricted(capability) &&
+    can({ ...actor, siteRestricted: false }, capability)
+  ) {
+    return Response.json(
+      {
+        error:
+          "Your access is limited to some sites, and this acts on the whole workspace, so it needs a member with access to every site.",
+        capability,
+        role: actor.role,
+        denied: true,
+        outsideSiteScope: true,
+      },
+      { status: 403 },
+    );
+  }
+  return capabilityDenied(capability, actor.role);
 }
 
 /* ------------------------------------------------------------------ */

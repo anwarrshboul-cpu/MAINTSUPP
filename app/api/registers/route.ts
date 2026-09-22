@@ -63,6 +63,7 @@ import {
   unpinOtherRegisterColumns,
 } from "../../lib/register-columns";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import { boardStructureRefusal } from "../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -176,7 +177,7 @@ export async function GET(request: Request) {
     /* Resolved once and asked twice, rather than two `scopedDbWithCapability`
        probes: each of those re-resolves tenant access from scratch, and this is
        the read path every open of the register goes through. */
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     return Response.json({
       register: named.register,
       columns,
@@ -216,6 +217,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const scope = guard.scope;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -410,6 +414,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const scope = guard.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
 
@@ -680,6 +687,9 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const scope = guard.scope;
 
     const id = new URL(request.url).searchParams.get("id")?.trim() ?? "";

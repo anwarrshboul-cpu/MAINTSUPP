@@ -31,6 +31,7 @@ import {
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
 import { can, resolvePermissions } from "../../../lib/permissions";
+import { boardStructureRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -239,7 +240,7 @@ export async function GET(request: Request) {
      * scratch, and this is the read every open of the Form tab goes through.
      * The same shape `app/api/registers/route.ts` uses, for the same reason.
      */
-    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, guard.scope.actor.role, guard.scope.siteScope);
     const mayShare = can(subject, "board.edit");
 
     const boardId = await boardIdFrom(request, db, orgId);
@@ -321,6 +322,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
 
     const boardId = await boardIdFrom(request, db, orgId);
@@ -444,6 +448,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
 
     // The SAME board the GET above read. Without this a save from the Store

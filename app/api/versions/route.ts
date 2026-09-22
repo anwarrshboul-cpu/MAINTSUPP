@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     if (installation) {
       if (!platformStaff) return Response.json({ error: "The website is administered by MAINTSUPP platform staff." }, { status: 403 });
     } else {
-      const permissions = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+      const permissions = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
       const refusal = requireCapability(permissions, definition.capability as "settings.edit" | "navigation.edit");
       if (refusal) return refusal;
     }

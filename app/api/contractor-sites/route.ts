@@ -283,7 +283,7 @@ export async function GET(request: Request) {
     /* Resolved once and asked twice rather than two capability probes: each of
        those re-resolves tenant access from scratch, and this is the read every
        open of a site or contractor profile goes through. */
-    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, scope.actor.role, scope.siteScope);
     const canEdit = can(subject, "sites.edit");
     /*
      * The OTHER capability a contractor profile has to know about.

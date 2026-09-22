@@ -40,6 +40,7 @@ import {
   scopedDbWithCapability,
 } from "../../../lib/tenant-db";
 import { memberSiteCondition } from "../../../lib/member-site-scope";
+import { boardStructureRefusal } from "../../../lib/job-site-scope";
 
 /** The kinds this route will restore, and the table each one flips. */
 const RESTORABLE = new Set(["job", "group", "board"]);
@@ -275,6 +276,12 @@ export async function POST(request: Request) {
      * rows and still answered "restored", which reads like a success.
      */
     let touched: Array<{ id: string }> = [];
+    /* A group or a whole board comes back for every site: board structure,
+       refused for a site-restricted member (security review). */
+    if (kind !== "job") {
+      const structure = boardStructureRefusal(context.siteScope);
+      if (structure) return structure;
+    }
     if (kind === "job") {
       touched = await context.db
         .update(maintenanceRequests)

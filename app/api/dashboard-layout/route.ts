@@ -170,7 +170,7 @@ async function saveLayout(request: Request) {
    * a courtesy, this is the rule.
    */
   if (asWorkspaceDefault) {
-    const subject = await resolvePermissions(db, orgId, actor.role);
+    const subject = await resolvePermissions(db, orgId, actor.role, scope.siteScope);
     if (!can(subject, "settings.edit")) {
       return Response.json(
         {
@@ -358,7 +358,7 @@ async function removeWorkspaceDefault(
   surface: string,
 ) {
   const { db, orgId, session, actor } = scope;
-  const subject = await resolvePermissions(db, orgId, actor.role);
+  const subject = await resolvePermissions(db, orgId, actor.role, scope.siteScope);
   if (!can(subject, "settings.edit")) {
     return Response.json(
       {

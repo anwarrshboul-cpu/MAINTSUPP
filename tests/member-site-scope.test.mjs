@@ -251,7 +251,8 @@ test("the site-groups read no longer writes for somebody who may not write", asy
      a GET that took no capability, so a client caused writes by opening a page —
      the same defect GET /api/sites documents removing from its own handler. */
   const groups = await read("app/api/sites/groups/route.ts");
-  assert.match(groups, /const subject = await resolvePermissions\(db, orgId, actor\.role as WorkspaceRole\);/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(groups, /const subject = await resolvePermissions\(db, orgId, actor\.role as WorkspaceRole, siteScope\);/);
   assert.match(groups, /if \(scope === CANONICAL_REGISTER && can\(subject, "sites\.edit"\)\) \{\s*await seedStoreDocumentationGroups\(/);
 });
 

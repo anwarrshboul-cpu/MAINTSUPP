@@ -33,6 +33,7 @@ import { contractorNameAliases, contractors } from "../../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../../lib/tenant-db";
 import { contractorNameKey } from "../../../../lib/contractor-linking";
 import { auditActor, recordAudit } from "../../../../lib/audit";
+import { everySiteRefusal } from "../../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,9 @@ export async function POST(
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* An alias reassigns every site's jobs: not a site-restricted member's. */
+    const everySite = everySiteRefusal(guard.scope.siteScope, "the contractor register");
+    if (everySite) return everySite;
     const { actor, db, orgId } = guard.scope;
     const { id } = await params;
 
@@ -150,6 +154,9 @@ export async function DELETE(
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* An alias reassigns every site's jobs: not a site-restricted member's. */
+    const everySite = everySiteRefusal(guard.scope.siteScope, "the contractor register");
+    if (everySite) return everySite;
     const { db, orgId } = guard.scope;
     const { id } = await params;
 

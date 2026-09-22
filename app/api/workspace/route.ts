@@ -110,6 +110,10 @@ import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import {
+  contractorRegisterRefusal,
+  siteCreationRefusal,
+} from "../../lib/job-site-scope";
 import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
 import { recurrenceOnSave, todayUtc } from "../../lib/planned-recurrence";
 import {
@@ -1351,7 +1355,7 @@ export async function GET(request: Request) {
     if (viewGuard.denied) return viewGuard.denied;
     const { actor, db, orgId, siteScope } = viewGuard.scope;
     const snapshot = confineSnapshot(await readWorkspace(db, orgId), siteScope);
-    const subject = await resolvePermissions(db, orgId, actor.role);
+    const subject = await resolvePermissions(db, orgId, actor.role, siteScope);
     return Response.json({ workspace: withoutDirectory(snapshot, can(subject, "users.view")) });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
@@ -1499,6 +1503,9 @@ async function authoriseWorkspaceWrite(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
   actor: { role: string },
+  /* The caller's site restriction: a restricted member holds no workspace-wide
+     capability (`SITE_RESTRICTED_CEILING`), e.g. `users.edit` for a member. */
+  siteScope: readonly string[] | null,
   authenticated: boolean,
   entity: string | undefined,
   intent: "write" | "deactivate" = "write",
@@ -1513,7 +1520,7 @@ async function authoriseWorkspaceWrite(
   if (!capability) {
     return Response.json({ error: "Unknown record type." }, { status: 400 });
   }
-  const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole);
+  const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole, siteScope);
   return requireCapability(subject, capability);
 }
 
@@ -1532,11 +1539,18 @@ export async function POST(request: Request) {
      */
     const rawData = payload.data;
     const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
-    const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
+    const refusal = await authoriseWorkspaceWrite(db, orgId, actor, memberSiteScope, authenticated, entity);
     if (refusal) return refusal;
+    /* One contractor record serves every site: the register is refused to a
+       site-restricted member (security review) — see `everySiteRefusal`. */
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     let id = "";
 
     if (entity === "site") {
+      /* No invisible sites: a site-restricted member cannot create one. */
+      const creationRefusal = siteCreationRefusal(memberSiteScope);
+      if (creationRefusal) return creationRefusal;
       /* W2C — which register this site is being created in. Absent means the
          workspace's own, which is what this route has always meant and what
          every existing caller keeps getting. */
@@ -3169,8 +3183,12 @@ export async function PATCH(request: Request) {
     const rawData = payload.data;
     const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
     if (!entity || !id) return Response.json({ error: "A record type and ID are required." }, { status: 400 });
-    const refusal = await authoriseWorkspaceWrite(db, orgId, actor, authenticated, entity);
+    const refusal = await authoriseWorkspaceWrite(db, orgId, actor, memberSiteScope, authenticated, entity);
     if (refusal) return refusal;
+    /* One contractor record serves every site: the register is refused to a
+       site-restricted member (security review) — see `everySiteRefusal`. */
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     if (entity === "site") {
       /* Before anything is written, and before the record is described back:
          a store outside the member's sites is not found. See `siteScopeRefusal`. */
@@ -3807,11 +3825,14 @@ export async function DELETE(request: Request) {
       db,
       orgId,
       actor,
+      memberSiteScope,
       authenticated,
       entity,
       entity === "member" ? "deactivate" : "write",
     );
     if (refusal) return refusal;
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     /*
      * Archiving somebody else's contractor answered 200 `{ ok: true }`.
      *

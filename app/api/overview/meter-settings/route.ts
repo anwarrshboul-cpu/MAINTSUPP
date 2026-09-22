@@ -292,7 +292,7 @@ export async function GET(request: Request) {
     const guarded = await scopedDbWithCapability(request, "board.view");
     if (guarded.denied) return guarded.denied;
     const scope = guarded.scope;
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const payload = await buildPayload(
       scope,
       new URL(request.url),

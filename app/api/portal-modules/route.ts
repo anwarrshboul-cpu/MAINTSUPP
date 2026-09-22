@@ -118,7 +118,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "navigation.edit");
     if (refusal) return refusal;
 
@@ -127,7 +127,7 @@ export async function GET(request: Request) {
       canEdit: true,
       modules: describe(
         overrides,
-        effectiveCapabilities(scope.actor.role, subject.capabilities),
+        effectiveCapabilities(scope.actor.role, subject.capabilities, subject.siteRestricted),
         scope.actor.role,
       ),
       organisation: { id: scope.orgId, name: scope.organisation?.name ?? null },
@@ -141,7 +141,7 @@ export async function PUT(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "navigation.edit");
     if (refusal) return refusal;
 
@@ -284,7 +284,7 @@ export async function PUT(request: Request) {
       canEdit: true,
       modules: describe(
         after,
-        effectiveCapabilities(scope.actor.role, subject.capabilities),
+        effectiveCapabilities(scope.actor.role, subject.capabilities, subject.siteRestricted),
         scope.actor.role,
       ),
       organisation: { id: scope.orgId, name: scope.organisation?.name ?? null },

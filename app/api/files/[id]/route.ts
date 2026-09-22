@@ -342,7 +342,7 @@ export async function GET(
    * form, because `scope` is resolved here with `allowAnonymous` for the link.
    */
   if (!linkScope) {
-    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "board.view");
     if (refusal) return refusal;
   }

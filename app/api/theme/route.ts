@@ -120,7 +120,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const overrides = await readThemeOverrides(scope.db, scope.orgId);
 
     return Response.json({
@@ -138,7 +138,7 @@ export async function PUT(request: Request) {
   try {
     await ensureDatabase();
     const scope = await scopedDb(request);
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "settings.edit");
     if (refusal) return refusal;
 

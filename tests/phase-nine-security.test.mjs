@@ -344,7 +344,8 @@ test("#5 new short links carry 64 bits; existing ones keep working", async () =>
 
 test("#6 billing.manage is answered by the workspace's matrix, and the ceilings still hold", async () => {
   const route = code(await read("app/api/finance/settings/route.ts"));
-  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role\);\s*return can\(subject, "billing\.manage"\);/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role, scope\.siteScope\);\s*return can\(subject, "billing\.manage"\);/);
   assert.doesNotMatch(route, /Only a workspace owner/, "an Owner is the one role the ceilings bar from it");
   const permissions = await read("app/lib/permissions.ts");
   assert.match(permissions, /owner: new Set<Capability>\(\["billing\.manage", "data\.delete"\]\)/);

@@ -939,11 +939,7 @@ async function referencesTo(context: ScopedDatabase, key: string) {
  * `/api/trash` and `/api/files/[id]` already read it exactly this way.
  */
 async function mayPurge(context: ScopedDatabase) {
-  const subject = await resolvePermissions(
-    context.db,
-    context.orgId,
-    context.actor.role,
-  );
+  const subject = await resolvePermissions(context.db, context.orgId, context.actor.role, context.siteScope);
   return can(subject, "data.delete");
 }
 
