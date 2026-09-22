@@ -110,7 +110,10 @@ import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
 import { compliancePolicyFromBlob } from "../../lib/compliance-policy";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
-import { siteCreationRefusal } from "../../lib/job-site-scope";
+import {
+  contractorRegisterRefusal,
+  siteCreationRefusal,
+} from "../../lib/job-site-scope";
 import { mergeWorkspaceSettingsBlob } from "../../lib/workspace-settings";
 import { recurrenceOnSave, todayUtc } from "../../lib/planned-recurrence";
 import {
@@ -1538,6 +1541,10 @@ export async function POST(request: Request) {
     const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, memberSiteScope, authenticated, entity);
     if (refusal) return refusal;
+    /* One contractor record serves every site: the register is refused to a
+       site-restricted member (security review) — see `everySiteRefusal`. */
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     let id = "";
 
     if (entity === "site") {
@@ -3178,6 +3185,10 @@ export async function PATCH(request: Request) {
     if (!entity || !id) return Response.json({ error: "A record type and ID are required." }, { status: 400 });
     const refusal = await authoriseWorkspaceWrite(db, orgId, actor, memberSiteScope, authenticated, entity);
     if (refusal) return refusal;
+    /* One contractor record serves every site: the register is refused to a
+       site-restricted member (security review) — see `everySiteRefusal`. */
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     if (entity === "site") {
       /* Before anything is written, and before the record is described back:
          a store outside the member's sites is not found. See `siteScopeRefusal`. */
@@ -3820,6 +3831,8 @@ export async function DELETE(request: Request) {
       entity === "member" ? "deactivate" : "write",
     );
     if (refusal) return refusal;
+    const everySite = contractorRegisterRefusal(memberSiteScope, entity);
+    if (everySite) return everySite;
     /*
      * Archiving somebody else's contractor answered 200 `{ ok: true }`.
      *

@@ -57,7 +57,7 @@ import {
   requireCapability,
   type Capability,
 } from "../../../lib/permissions";
-import { roleInOrganisation } from "../../../lib/tenant-access";
+import { roleInOrganisation, siteScopeInOrganisation } from "../../../lib/tenant-access";
 import type { WorkspaceRole } from "../../../lib/workspace-actor";
 import {
   isMembershipRole,
@@ -128,7 +128,16 @@ async function mayGrantIn(
     const actorRole = roleInOrganisation(context, id);
     return (
       actorRole !== null &&
-      can({ role: actorRole, capabilities: overrides.get(id)?.[actorRole] ?? {} }, capability) &&
+      /* The ceiling too: a member restricted to some sites THERE grants nothing
+         there — or they could hand a new account unrestricted access (review). */
+      can(
+        {
+          role: actorRole,
+          capabilities: overrides.get(id)?.[actorRole] ?? {},
+          siteRestricted: siteScopeInOrganisation(context, id) !== null,
+        },
+        capability,
+      ) &&
       canAssignRole(actorRole, role)
     );
   });
@@ -1225,6 +1234,10 @@ export async function PATCH(request: Request) {
      * crosses a company boundary from this screen.
      */
     if (action === "workspace_access") {
+      /* Access management here first — a site-restricted member never holds it
+         (SITE_RESTRICTED_CEILING) — then each workspace's own rule below. */
+      const deniedHere = requireCapability(context.subject, "users.edit");
+      if (deniedHere) return deniedHere;
       const workspaceId = trimmed(body.workspaceId, 100);
       const access = trimmed(body.access, 20);
       const workspace = context.activeOrganisations.find((item) => item.id === workspaceId);
@@ -1332,7 +1345,11 @@ export async function PATCH(request: Request) {
       const mayRemove =
         removerRole !== null &&
         can(
-          { role: removerRole, capabilities: overrides.get(workspace.id)?.[removerRole] ?? {} },
+          {
+            role: removerRole,
+            capabilities: overrides.get(workspace.id)?.[removerRole] ?? {},
+            siteRestricted: siteScopeInOrganisation(context, workspace.id) !== null,
+          },
           "users.edit",
         ) &&
         canManageRole(removerRole, existingRole);

@@ -454,7 +454,9 @@ export async function resolveTenantAccess(
 
   const grantHere = grants.find((grant) => grant.organisationId === organisation.id);
   const ownerHere = !platformAdmin && ownsWorkspace(organisation);
-  const siteScope = ownerHere ? null : (grantHere?.siteScope ?? null);
+  /* Neither an Owner of the company nor a Platform Super Admin is confined to
+     sites: the same rule as `siteScopeInOrganisation` (security review). */
+  const siteScope = platformAdmin || ownerHere ? null : (grantHere?.siteScope ?? null);
 
   /*
    * THE ROLE IS THE ONE HELD IN THE SELECTED WORKSPACE.

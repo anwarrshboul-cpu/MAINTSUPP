@@ -220,3 +220,74 @@ test("the bin and the restore both ask before they mutate anything", async () =>
   assert.ok(restore.indexOf("subitemsOutsideMemberScope(db, orgId, siteScope, [entry.entityId], true)") > 0, "the restore asks");
   assert.ok(restore.indexOf("subitemsOutsideMemberScope(") < restore.indexOf("restoreFromBin(db, orgId, id)"), "before it restores");
 });
+
+/* ── 5. The independent security review's findings (2026-09-22) ─────────── */
+
+test("the admin console's hand-built subjects carry the ceiling, and workspace access needs users.edit first", async () => {
+  const users = code(await read("app/api/admin/users/route.ts"));
+  const grant = users.slice(users.indexOf("async function mayGrantIn"), users.indexOf("function companyWorkspaces"));
+  assert.match(grant, /siteRestricted: siteScopeInOrganisation\(context, id\) !== null,/, "mayGrantIn");
+  const access = users.slice(users.indexOf('if (action === "workspace_access") {'));
+  assert.match(access, /^if \(action === "workspace_access"\) \{\s*const deniedHere = requireCapability\(context\.subject, "users\.edit"\);\s*if \(deniedHere\) return deniedHere;/);
+  assert.match(access, /siteRestricted: siteScopeInOrganisation\(context, workspace\.id\) !== null,/, "the remove check");
+  const admin = code(await read("app/api/admin/admin-context.ts"));
+  assert.match(admin, /siteRestricted: siteScopeInOrganisation\(context, row\.organisationId\) !== null,/, "accountWideRefusal (password reset, profile, deactivate)");
+});
+
+test("the audit log reads only the workspaces where audit.read holds under their own site scope", async () => {
+  const audit = code(await read("app/api/audit/route.ts"));
+  assert.match(audit, /const readable = scope\.crossOrganisation \? scope\.organisationIds : await auditReadable\(scope\);/);
+  assert.match(audit, /resolvePermissions\(scope\.db, id, role, siteScopeInOrganisation\(scope, id\)\);\s*if \(can\(subject, "audit\.read"\)\) readable\.push\(id\);/);
+});
+
+test("the bin: restoring or purging structure is refused, and a purge's subitems are checked first", async () => {
+  const trash = code(await read("app/api/trash/route.ts"));
+  const restore = trash.slice(trash.indexOf("export async function POST"), trash.indexOf("export async function DELETE"));
+  assert.ok(restore.indexOf('["group", "column", "board_view"].includes(entry.entityType)') < restore.indexOf("restoreFromBin(db, orgId, id)"));
+  const purge = trash.slice(trash.indexOf("export async function DELETE"));
+  const confine = purge.indexOf("const all = await confineBinEntries(db, orgId, siteScope, unconfined);");
+  assert.ok(confine > 0);
+  const after = purge.slice(confine);
+  assert.match(after, /if \(siteScope\) \{\s*if \(all\.some\(\(entry\) => \["group", "column", "board_view"\]\.includes\(entry\.entityType\)\)\)/);
+  assert.match(after, /subitemsOutsideMemberScope\(db, orgId, siteScope, jobIds, true\)/);
+});
+
+test("un-archiving a group or a board is structure", async () => {
+  const archive = code(await read("app/api/account/archive/route.ts"));
+  const post = archive.slice(archive.indexOf("export async function POST"));
+  assert.ok(post.indexOf('if (kind !== "job") {\n      const structure = boardStructureRefusal(context.siteScope);') > 0);
+  assert.ok(post.indexOf("boardStructureRefusal(") < post.indexOf(".update("), "before anything is un-archived");
+});
+
+test("what covers every site — the ledger, report documents, the contractor register — is refused to a restricted member", async () => {
+  assert.equal(scope.everySiteRefusal(null, "x"), null);
+  const refused = scope.everySiteRefusal(["s1"], "the finance ledger");
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).outsideSiteScope, true);
+  const finance = code(await read("app/lib/finance/access.ts"));
+  assert.match(finance, /if \(guard\.denied\) return guard;\s*const everySite = everySiteRefusal\(guard\.scope\.siteScope, "the finance ledger"\);\s*if \(everySite\) return \{ denied: everySite \};/);
+  const search = code(await read("app/api/search/route.ts"));
+  assert.match(search, /can\(subject, FINANCE_CAPABILITIES\["ledger\.read"\]\)\s*&& !scope\.siteScope;/);
+  const helpers = code(await read("app/lib/reporting/route-helpers.ts"));
+  assert.match(helpers, /everySiteRefusal\(guarded\.scope\.siteScope, "a report document"\)/);
+  const exports = code(await read("app/api/reports/exports/route.ts"));
+  assert.equal((exports.match(/everySiteRefusal\(scope\.siteScope, "a report document"\)/g) ?? []).length, 2);
+  const schedules = code(await read("app/api/reports/schedules/route.ts"));
+  assert.equal((schedules.match(/everySiteRefusal\(guard\.scope\.siteScope, "a scheduled report"\)/g) ?? []).length, 4);
+  const workspace = code(await read("app/api/workspace/route.ts"));
+  assert.equal((workspace.match(/const everySite = contractorRegisterRefusal\(memberSiteScope, entity\);\s*if \(everySite\) return everySite;/g) ?? []).length, 3, "POST, PATCH, DELETE");
+  assert.equal(scope.contractorRegisterRefusal(["s1"], "contractor").status, 403);
+  assert.equal(scope.contractorRegisterRefusal(["s1"], "site"), null);
+  assert.equal(scope.contractorRegisterRefusal(null, "contractor"), null);
+  const aliases = code(await read("app/api/contractors/[id]/aliases/route.ts"));
+  assert.equal((aliases.match(/everySiteRefusal\(guard\.scope\.siteScope, "the contractor register"\)/g) ?? []).length, 2);
+  const values = code(await read("app/api/registers/values/route.ts"));
+  assert.match(values, /if \(register === "contractors"\) \{\s*const everySite = everySiteRefusal\(scope\.siteScope, "the contractor register"\);/);
+});
+
+test("a restricted member's store rename rewrites only that store's jobs; a Super Admin is never site-confined", async () => {
+  const board = code(await read("app/api/board/route.ts"));
+  assert.match(board, /eq\(maintenanceRequests\.location, previousName\),\s*siteScope \? eq\(maintenanceRequests\.siteId, siteOptionId\) : undefined,/);
+  const resolver = code(await read("app/lib/tenant-access.ts"));
+  assert.match(resolver, /const siteScope = platformAdmin \|\| ownerHere \? null : \(grantHere\?\.siteScope \?\? null\);/);
+});

@@ -195,7 +195,9 @@ export async function GET(request: Request) {
 
     /* ── Invoices and quotes: the Invoice Tracker's door, rank and capability ── */
     const financeReader =
-      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"]);
+      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"])
+      /* The ledger is every site's: not a site-restricted member's (security review). */
+      && !scope.siteScope;
     if (financeReader) {
       const term = raw.trim().slice(0, 80);
       const invoicePage = await listInvoices(db, orgId, { search: term, limit: PER_GROUP });
