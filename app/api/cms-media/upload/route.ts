@@ -80,6 +80,21 @@ const MAX_PART_SIZE = 5 * 1024 * 1024;
 const MAX_RENDITION_BYTES = 1_500_000;
 const KEY_SHAPE = /^cms\/(med_[a-f0-9]{32})\/(mv_[a-f0-9]{32})\/([a-z0-9][a-z0-9._-]{0,99})$/;
 
+/**
+ * Whether the caller has ALREADY SAID the body is too big, checked before a byte
+ * of it is held.
+ *
+ * `request.arrayBuffer()` buffers the whole body first, so refusing afterwards
+ * means having allocated whatever was sent in order to say no to it. A body with
+ * no `Content-Length`, or one that lies, is not refused here — the real length is
+ * still checked once the bytes are in hand, which is the check that decides. This
+ * only makes the honest oversized case cheap.
+ */
+function declaredOverLimit(request: Request, limit: number): boolean {
+  const declared = Number(request.headers.get("content-length"));
+  return Number.isFinite(declared) && declared > limit;
+}
+
 function forbidden() {
   return Response.json({ error: "The website is administered by MAINTSUPP platform staff." }, { status: 403 });
 }
@@ -367,6 +382,9 @@ export async function PUT(request: Request) {
         return Response.json({ error: "Only a still image has a web-sized copy." }, { status: 400 });
       }
       if (version.displayKey) return Response.json({ display: version.displayKey, kept: true });
+      if (declaredOverLimit(request, MAX_RENDITION_BYTES)) {
+        return Response.json({ error: "The web-sized copy is too large." }, { status: 413 });
+      }
       const bytes = new Uint8Array(await request.arrayBuffer());
       if (bytes.byteLength < 1 || bytes.byteLength > MAX_RENDITION_BYTES) {
         return Response.json({ error: "The web-sized copy is too large." }, { status: 413 });
@@ -394,6 +412,9 @@ export async function PUT(request: Request) {
     const refused = sessionRefusal(session, uploaderOf(scope));
     if (refused || !session || !Number.isInteger(partNumber) || partNumber < 1) {
       return Response.json({ error: refused?.error ?? "The upload part is invalid." }, { status: refused?.status ?? 400 });
+    }
+    if (declaredOverLimit(request, MAX_PART_SIZE)) {
+      return Response.json({ error: "Each upload part must be 5 MB or smaller." }, { status: 413 });
     }
     const bytes = await request.arrayBuffer();
     if (bytes.byteLength < 1 || bytes.byteLength > MAX_PART_SIZE) {

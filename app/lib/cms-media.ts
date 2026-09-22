@@ -147,6 +147,12 @@ export function mediaUrl(objectKey: string): string {
 }
 
 /**
+ * An asset named by its public address inside ordinary text — a `cta` block's
+ * href, a link in a body. Global, and the id is group 1. See `mediaIdsIn`.
+ */
+const MEDIA_PATH_IN_TEXT = /\/media\/(med_[a-f0-9]{32})\//g;
+
+/**
  * The key a public `/media/...` request names, or null. The three segments are
  * checked against their own shapes before any storage call, so nothing but a
  * well-formed website key can ever be read through the route.
@@ -295,12 +301,26 @@ export function titleFromFileName(originalName: string): string {
 /* Where an asset is used                                              */
 /* ------------------------------------------------------------------ */
 
-/** Every media id a block body names, at any depth — what "in use" is measured by. */
+/**
+ * Every media id a block body names, at any depth — what "in use" is measured by.
+ *
+ * TWO WAYS TO NAME ONE, because there are two ways to use one. An `image` or a
+ * `video` block EMBEDS an asset and carries its id in `mediaId`. Everything else
+ * can only LINK to one — a `cta` block's href, a link inside a body — and that is
+ * a `/media/med_…/mv_…/name.pdf` address sitting in an ordinary string. A PDF is
+ * in this library precisely so that it can be linked, so counting `mediaId` alone
+ * meant a brochure in use on a LIVE page read as "Not used yet": Delete stayed
+ * enabled, the 409 never fired, and the delete 404ed a link on a published page.
+ * Every string value is therefore scanned for the public address as well, under
+ * any key and at any depth — which also counts the next block kind that links
+ * rather than embeds, with no change here.
+ */
 export function mediaIdsIn(value: unknown): string[] {
   const found = new Set<string>();
   const visit = (node: unknown, key?: string) => {
     if (typeof node === "string") {
       if (key === "mediaId" && isMediaId(node)) found.add(node);
+      for (const match of node.matchAll(MEDIA_PATH_IN_TEXT)) found.add(match[1]);
       return;
     }
     if (Array.isArray(node)) node.forEach((entry) => visit(entry));
@@ -330,5 +350,7 @@ export const MEDIA_OMISSIONS: readonly string[] = [
   "Replacing a file keeps the same asset: every page that uses it shows the new file straight away, and the earlier file stays in its history until the asset is deleted, so a replacement can be undone. The previous file's own address keeps working until then.",
   "An asset used on any website page — live or draft — cannot be deleted; archive it instead. Archived assets keep working where they are used and leave the picker. A version of a page recorded in its history is not counted as a use, so restoring an old version that named a deleted asset is refused.",
   "A deleted file stops being served at once by the site, and within a day by the CDN's edge; a visitor's browser may keep a copy it already has.",
+  "A delete reads where the asset is used and then removes the files; the two are not one step. An asset put onto a page in the moment between them loses its file, and the page then shows a broken image until another is chosen. Only platform staff can do either, so the window is small — but it exists.",
+  "A delete removes the files first and the asset second. If it stops in between, the asset is still listed but its files are gone, so it shows as broken until the delete is run again — which finishes it. Nothing is ever left the other way round: an asset that is still listed has never had its files removed silently.",
   "Images are shown in a web-sized copy made in your browser at upload (up to 1600 pixels, WebP). A browser that cannot make one (Safari cannot encode WebP) uploads the original only, and pages show the original.",
 ];
