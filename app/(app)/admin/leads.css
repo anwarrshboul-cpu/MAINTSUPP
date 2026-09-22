@@ -119,3 +119,9 @@
   font-size: 13px;
   color: var(--muted);
 }
+
+/* The export sits beside the filter and never grows to fill the toolbar. */
+.leads-admin__export {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}

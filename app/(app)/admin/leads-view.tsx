@@ -175,6 +175,13 @@ export function LeadsInboxView() {
             ))}
           </select>
         </label>
+        {/* The list the reader is looking at, as a spreadsheet. A link rather than a
+            button, and `download`, so it is one request with no JavaScript between
+            the click and the file — the same shape the Assets export uses. The
+            filter travels in the query, so the download and the screen agree. */}
+        <a className="secondary-button leads-admin__export" href={`/api/leads/csv?status=${encodeURIComponent(filter)}`} download>
+          <Icon name="download" size={15} /> Export CSV
+        </a>
       </div>
 
       {/* The finding, stated on the screen rather than only in the code. It reads
