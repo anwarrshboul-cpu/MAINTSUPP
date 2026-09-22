@@ -69,6 +69,12 @@ export async function PATCH(request: Request) {
       );
     }
     const register = body.register;
+    /* The contractors register is every site's: refused to a site-restricted
+       member before anything about the row is looked at (security review). */
+    if (register === "contractors") {
+      const everySite = everySiteRefusal(scope.siteScope, "the contractor register");
+      if (everySite) return everySite;
+    }
     const entityId = typeof body.entityId === "string" ? body.entityId.trim() : "";
     const columnKey = typeof body.columnKey === "string" ? body.columnKey.trim() : "";
     if (!entityId || !columnKey) {
@@ -117,11 +123,6 @@ export async function PATCH(request: Request) {
        is not a site's, and is left as the read leaves it. */
     if (register === "sites" && siteOutsideMemberScope(scope.siteScope, entityId)) {
       return Response.json({ error: "Site not found." }, { status: 404 });
-    }
-    /* …and the contractors register is every site's (security review). */
-    if (register === "contractors") {
-      const everySite = everySiteRefusal(scope.siteScope, "the contractor register");
-      if (everySite) return everySite;
     }
 
     const raw = body.value;
