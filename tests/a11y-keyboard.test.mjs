@@ -10,7 +10,7 @@
  *    modal cannot arrive without either.
  * 3. A board picture whose bytes are missing draws a glyph, not the browser's
  *    broken-image mark.
- * 4. A sidebar count is spoken as part of the name ("Jobs, 158 urgent jobs"),
+ * 4. A sidebar count is spoken as part of the name ("Jobs, 158 open jobs"),
  *    not glued onto it ("Jobs158").
  * 5. The controls the keyboard walk found ringless get their ring back.
  * 6. No table header is left empty for axe's `empty-table-header`.
@@ -139,7 +139,15 @@ test("a sidebar count is part of the spoken name, not glued onto it", async () =
   const nav = code(await read("app/(app)/portal/sidebar-nav.tsx"));
   const badge = nav.slice(nav.indexOf('className="nav-count"'), nav.indexOf('className="nav-count"') + 600);
   assert.match(badge, /aria-hidden="true"/, "the drawn number is not read twice");
-  assert.match(nav, /<span className="visually-hidden">\s*\{`, \$\{count\}\$\{countLabel \? ` \$\{countLabel\}` : ""\}`\}/, "it is read as ', 158 urgent jobs'");
+  // Written out on the button. A visually-hidden ", 158 …" beside the label was
+  // tried first and measured on the Preview: Chrome named it "Jobs , 158 open
+  // jobs", spacing out the positioned child.
+  assert.match(
+    nav,
+    /aria-label=\{\s*!editing && count > 0\s*\? `\$\{item\.label\}, \$\{count\}\$\{countLabel \? ` \$\{countLabel\}` : ""\}`\s*: undefined\s*\}/,
+    "the button is named 'Jobs, 158 open jobs', beginning with its visible label",
+  );
+  assert.doesNotMatch(nav, /<span className="visually-hidden">\s*\{`, \$\{count\}/, "and the count is not spoken twice");
 });
 
 test("the controls the keyboard walk found ringless have their ring back", async () => {
