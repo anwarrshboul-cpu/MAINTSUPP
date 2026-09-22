@@ -129,11 +129,13 @@ export function blockDefinition(kind: string): BlockDefinition | null {
  * and a half-finished feature presented as a whole one.
  */
 export const CMS_OMISSIONS: readonly string[] = [
-  "A published page is not in sitemap.xml. That file is a committed artifact whose per-page lastmod comes from git history, so a database-driven URL has no date to put in it; a dynamic sitemap is its own change.",
+  "A published page is listed in /sitemap-pages.xml, not in sitemap.xml. That file is a committed artifact whose per-page lastmod comes from git history, so pages written here have their own sitemap, read live, and robots.txt names both. A page marked noindex, outside its publishing window, or whose canonical names another address is left out.",
   "There is no image block yet. Images need an upload path, and /api/files is portal-only — it brokers a private bucket behind a session, which a public page has none of.",
   "The existing marketing pages are untouched. The homepage and the five legal pages stay exactly as they are, by owner decision, until a later phase promotes their sections into blocks.",
-  "There is no draft preview URL. A page is either published and public, or a draft only the console can see.",
-  "Changing a page's address moves it, and the old address stops resolving: there are no redirects yet, so a link anyone saved to the old address will 404.",
+  "A preview (/p/<address>?preview=1) works only for signed-in MAINTSUPP platform staff. There is no shareable preview link: anyone else asking for one gets exactly what the public gets — the live page, or a 404.",
+  "Moving a page leaves a permanent (308) redirect at the old address, and more can be added by hand — but only from a /p/ address, and only to another /p/ address or a page on maintsupp.com. The built-in marketing pages cannot be redirected from here. Deleting a page leaves any redirect to it in place, so a page brought back gets its old links back; remove the redirect if it should not.",
+  "A publishing window is checked each time the page is read, not by a timer, so the page appears and disappears on time — but nothing is announced when it does. Times are stored in UTC and shown in your browser's time zone.",
+  "Page history records a page's words and whether it is published, not its publishing window, indexing or canonical. Restoring a version leaves those three as they are now.",
   "A page cannot carry a price, a VAT qualifier, or any of the six phrases the brief forbids. Those rules are enforced on the site's source text by three test files, which cannot see a database row — so they are enforced here instead, on the way in. See CONTENT_RULES for each rule and its reason.",
   "Every saved version of a page is kept and can be restored, including a deleted page — but a page brought back after deletion is a new row: its published date starts again from the restore, and anything that pointed at the old row id rather than the address is not reconnected.",
 ];

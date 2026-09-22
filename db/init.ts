@@ -393,6 +393,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      `ensureUploadSessions`. */
   await ensureUploadSessions(d1);
 
+  /* The website CMS's lifecycle and SEO: a publishing window, indexing and a
+     canonical per page, and redirects. Four guarded columns and one guarded
+     table; no seed. See `ensureSitePageLifecycle`. */
+  await ensureSitePageLifecycle(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6582,6 +6587,50 @@ async function ensureSitePages(d1: D1DatabaseLike) {
     /* Read together, always: every query is "the blocks of this page, in order". */
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS site_blocks_page_idx ON site_blocks(page_id, position)",
+    ),
+  ]);
+}
+
+/**
+ * THE CMS PAGE'S LIFECYCLE AND SEO — additive to `ensureSitePages`.
+ *
+ * On `site_pages`:
+ *   - `publish_at` / `unpublish_at`: an optional window, ISO text. A published
+ *     page is LIVE only inside it, and that is decided when the page is READ —
+ *     there is no cron to miss, and no "published" flag that lies for an hour.
+ *     Compared in JavaScript, not SQL (see `pageIsLive`), like every other
+ *     text timestamp in this schema.
+ *   - `robots`: 'index' | 'noindex'. TEXT, never a boolean: see BOOLEAN_COLUMNS
+ *     in db/sqlite-to-postgres.ts, which rewrites 0/1 by COLUMN NAME.
+ *   - `canonical_url`: an override, same-site only, or NULL for the page's own
+ *     address.
+ *
+ * `site_redirects`: one row per old address. `from_path` is a `/p/<slug>` path
+ * and UNIQUE — one address cannot point two ways. `to_target` is a `/p/<slug>`
+ * path or an https://maintsupp.com URL, stored already collapsed to its final
+ * destination (see `app/lib/cms-seo.ts`). `kind` says whether a page move wrote
+ * it ('moved') or a person did ('manual').
+ */
+async function ensureSitePageLifecycle(d1: D1DatabaseLike) {
+  await addColumns(d1, "site_pages", [
+    ["publish_at", "TEXT"],
+    ["unpublish_at", "TEXT"],
+    ["robots", "TEXT NOT NULL DEFAULT 'index'"],
+    ["canonical_url", "TEXT"],
+  ]);
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS site_redirects (
+         id TEXT PRIMARY KEY,
+         from_path TEXT NOT NULL,
+         to_target TEXT NOT NULL,
+         kind TEXT NOT NULL DEFAULT 'manual',
+         created_by_email TEXT,
+         created_at TEXT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS site_redirects_from_idx ON site_redirects(from_path)",
     ),
   ]);
 }

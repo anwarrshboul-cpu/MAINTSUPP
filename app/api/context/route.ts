@@ -31,6 +31,7 @@ import { availableModules } from "../../lib/portal-modules.ts";
 import { readModuleOverrides } from "../../lib/portal-module-repository.ts";
 import { type WorkspaceRole } from "../../lib/workspace-actor";
 import { isWorkspaceRole } from "../../lib/roles";
+import { memberSiteCondition } from "../../lib/member-site-scope";
 
 function clean(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -180,6 +181,8 @@ async function contextPayload(request: Request) {
         and(
           eq(sites.organisationId, context.orgId),
           registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+          // The request form offers only the member's own sites.
+          memberSiteCondition(sites.id, context.siteScope),
         ),
       )
       .orderBy(asc(sites.name)),

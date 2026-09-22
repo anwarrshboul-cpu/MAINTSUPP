@@ -68,6 +68,7 @@ import {
   requestFieldEvents,
 } from "../../lib/automations";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
+import { memberSiteCondition } from "../../lib/member-site-scope";
 function databaseError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   if (process.env.NODE_ENV === "development") {
@@ -210,7 +211,7 @@ export async function GET(request: Request) {
     // `app/api/board/route.ts`.
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     await seedMaintenanceIfEmpty(db, orgId);
     const requestId = trimString(
       new URL(request.url).searchParams.get("id"),
@@ -227,6 +228,8 @@ export async function GET(request: Request) {
             eq(maintenanceRequests.organisationId, orgId),
             // Stage 23 — a job in the recycle bin is a 404 here, not a row.
             isNull(maintenanceRequests.deletedAt),
+            // A job at a site outside the member's scope is the same 404.
+            memberSiteCondition(maintenanceRequests.siteId, siteScope),
           ),
         )
         .limit(1);
@@ -332,6 +335,8 @@ export async function GET(request: Request) {
           // Stage 23 — the main job feed. Without this the dashboard keeps
           // counting and listing jobs that are sitting in the recycle bin.
           isNull(maintenanceRequests.deletedAt),
+          // The member's sites only — in SQL, so the paging stays exact.
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
         ),
       )
       .orderBy(desc(maintenanceRequests.requestedAt))

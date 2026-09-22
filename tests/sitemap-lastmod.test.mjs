@@ -63,10 +63,11 @@ test("it lists exactly the STATIC marketing pages that exist", async () => {
    * artifact whose per-route `lastmod` comes from `git log` over that route's
    * source files; a database-driven URL has no source file and no commit, so it
    * has no date to put there. Emitting one would mean either a fabricated
-   * `lastmod` or a build that reads the production database. Until a dynamic
-   * sitemap exists, a CMS page is deliberately not listed — `CMS_OMISSIONS` in
-   * `app/lib/cms-blocks.ts` says so in the console, and this asserts it in the
-   * file. When that changes, this is the assertion to change with it.
+   * `lastmod` or a build that reads the production database. So a CMS page is
+   * deliberately not listed HERE: since the CMS gained its own live sitemap,
+   * `/sitemap-pages.xml` (app/sitemap-pages.xml/route.ts, named in robots.txt),
+   * that is where a published page appears, with its own `updated_at` as its
+   * date. This file stays git-dated and static, and this asserts it.
    */
   const found = new Set();
   const dynamicRoutes = [];

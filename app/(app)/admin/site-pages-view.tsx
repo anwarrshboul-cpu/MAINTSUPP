@@ -51,6 +51,7 @@ import "./site-pages.css";
 import { VersionHistory } from "../portal/views/version-history";
 import { formatShortDateTime } from "../../lib/format-date";
 import { useUnsavedChanges } from "../../lib/use-unsaved-changes";
+import { SiteRedirectsPanel, type SiteRedirect } from "./site-redirects-panel";
 
 /* The server's shapes. Mirrored, not imported: `app/lib/cms-blocks.ts` is a server
    module and these are what crosses the wire. */
@@ -79,14 +80,30 @@ type Page = {
   publishedAt: string | null;
   updatedByEmail: string | null;
   updatedAt: string;
+  publishAt: string | null;
+  unpublishAt: string | null;
+  robots: "index" | "noindex";
+  canonicalUrl: string | null;
+  /* Decided by the server at the moment of the read — see `pageState`. */
+  state: "draft" | "scheduled" | "live" | "ended";
   blocks: Block[];
 };
 
 type Payload = {
   canEdit: boolean;
   pages: Page[];
+  redirects?: SiteRedirect[];
   catalogue: BlockDefinition[];
   omissions: string[];
+};
+
+/* Each state as a word, not only a tint: whether a page is public is the most
+   consequential fact on this screen. */
+const STATE_LABEL: Record<Page["state"], string> = {
+  draft: "Draft",
+  scheduled: "Scheduled",
+  live: "Live",
+  ended: "Ended",
 };
 
 /** A page being edited. Blocks carry a local key so a reorder does not remount. */
@@ -97,8 +114,29 @@ type Draft = {
   metaTitle: string;
   metaDescription: string;
   published: boolean;
+  /* `datetime-local` values, in the browser's own time zone; empty for none. */
+  publishAt: string;
+  unpublishAt: string;
+  noindex: boolean;
+  canonicalUrl: string;
   blocks: Array<{ key: string; kind: string; body: Record<string, unknown> }>;
 };
+
+/** An instant as a `datetime-local` value in this browser's zone, or "". */
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}T${pad(time.getHours())}:${pad(time.getMinutes())}`;
+}
+
+/** A `datetime-local` value (local time) as the instant the server stores, or null. */
+function fromLocalInput(value: string): string | null {
+  if (!value) return null;
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? value : time.toISOString();
+}
 
 let localKey = 0;
 const nextKey = () => `b${(localKey += 1)}`;
@@ -112,6 +150,10 @@ function draftOf(page: Page | null): Draft {
       metaTitle: "",
       metaDescription: "",
       published: false,
+      publishAt: "",
+      unpublishAt: "",
+      noindex: false,
+      canonicalUrl: "",
       blocks: [],
     };
   }
@@ -122,6 +164,10 @@ function draftOf(page: Page | null): Draft {
     metaTitle: page.metaTitle ?? "",
     metaDescription: page.metaDescription ?? "",
     published: page.published,
+    publishAt: toLocalInput(page.publishAt),
+    unpublishAt: toLocalInput(page.unpublishAt),
+    noindex: page.robots === "noindex",
+    canonicalUrl: page.canonicalUrl ?? "",
     blocks: page.blocks.map((block) => ({ key: nextKey(), kind: block.kind, body: { ...block.body } })),
   };
 }
@@ -214,12 +260,18 @@ export function SitePagesView() {
       metaDescription: draft.metaDescription || null,
       published: draft.published,
       blocks: draft.blocks.map((block) => ({ kind: block.kind, body: block.body })),
+      publishAt: fromLocalInput(draft.publishAt),
+      unpublishAt: fromLocalInput(draft.unpublishAt),
+      noindex: draft.noindex,
+      canonicalUrl: draft.canonicalUrl.trim() || null,
     });
     setSaving(false);
     const moved = result.ok && draft.original && draft.original !== draft.slug;
     setFlash({
       ok: result.ok,
-      message: moved ? `Moved to /p/${draft.slug}. The old address /p/${draft.original} no longer resolves.` : result.message,
+      message: moved
+        ? `Moved to /p/${draft.slug}. The old address /p/${draft.original} now redirects there.`
+        : result.message,
     });
     if (result.ok) {
       setDraft(null);
@@ -332,7 +384,7 @@ export function SitePagesView() {
               </thead>
               <tbody>
                 {data.pages.map((page) => (
-                  <tr className={page.published ? undefined : "admin-row--off"} key={page.id}>
+                  <tr className={page.state === "live" ? undefined : "admin-row--off"} key={page.id}>
                     <td>
                       <strong>{page.title}</strong>
                       <br />
@@ -341,18 +393,33 @@ export function SitePagesView() {
                       </small>
                     </td>
                     <td>
-                      {page.published ? (
+                      {page.state === "live" ? (
                         <a href={`/p/${page.slug}`} rel="noreferrer" target="_blank">
                           /p/{page.slug}
                         </a>
                       ) : (
                         <code>/p/{page.slug}</code>
-                      )}
+                      )}{" "}
+                      <a
+                        aria-label={`Preview /p/${page.slug}`}
+                        href={`/p/${page.slug}?preview=1`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        <small>Preview</small>
+                      </a>
                     </td>
                     <td>
-                      <span className={`cms-admin__state cms-admin__state--${page.published ? "live" : "draft"}`}>
-                        {page.published ? "Published" : "Draft"}
+                      <span className={`cms-admin__state cms-admin__state--${page.state}`}>
+                        {STATE_LABEL[page.state]}
                       </span>
+                      {page.state === "scheduled" && page.publishAt ? (
+                        <small> from {formatShortDateTime(page.publishAt)}</small>
+                      ) : null}
+                      {page.state === "live" && page.unpublishAt ? (
+                        <small> until {formatShortDateTime(page.unpublishAt)}</small>
+                      ) : null}
+                      {page.robots === "noindex" ? <small> · not indexed</small> : null}
                     </td>
                     <td>
                       <small>
@@ -378,6 +445,9 @@ export function SitePagesView() {
               </tbody>
             </table>
           )}
+
+          {/* Old addresses and where they lead — moves and manual redirects. */}
+          <SiteRedirectsPanel redirects={data.redirects ?? []} onChanged={reload} setFlash={setFlash} />
 
           {/* §38b — pages deleted since history began, each restorable from the
               version before its deletion. */}
@@ -498,7 +568,7 @@ function Editor({
           />
           <small>
             Lowercase letters, digits and single hyphens. The page is served at /p/ plus this. Changing it moves
-            the page when you save: the old address stops resolving, and there are no redirects yet.
+            the page when you save, and the old address redirects to the new one.
           </small>
         </label>
 
@@ -548,7 +618,70 @@ function Editor({
             <option value="no">Draft — only this console can see it</option>
             <option value="yes">Published — anyone with the address can read it</option>
           </select>
-          <small>There is no preview address for a draft. A draft is not reachable from the public website.</small>
+          <small>
+            A draft is not reachable from the public website.{" "}
+            {draft.original ? (
+              <a href={`/p/${draft.original}?preview=1`} rel="noreferrer" target="_blank">
+                Preview the saved page
+              </a>
+            ) : (
+              "Save once to preview it."
+            )}{" "}
+            A preview shows the page in any state, to MAINTSUPP platform staff only.
+          </small>
+        </label>
+
+        <label className="admin-field">
+          <span>Publish from</span>
+          <input
+            onChange={(event) =>
+              setDraft((current) => (current ? { ...current, publishAt: event.target.value } : current))
+            }
+            type="datetime-local"
+            value={draft.publishAt}
+          />
+          <small>Optional. A published page stays hidden until then. Your time zone.</small>
+        </label>
+
+        <label className="admin-field">
+          <span>Unpublish at</span>
+          <input
+            onChange={(event) =>
+              setDraft((current) => (current ? { ...current, unpublishAt: event.target.value } : current))
+            }
+            type="datetime-local"
+            value={draft.unpublishAt}
+          />
+          <small>Optional. The page disappears from the website then, without anyone saving it.</small>
+        </label>
+
+        <label className="admin-field">
+          <span>Search engines</span>
+          <select
+            onChange={(event) =>
+              setDraft((current) => (current ? { ...current, noindex: event.target.value === "noindex" } : current))
+            }
+            value={draft.noindex ? "noindex" : "index"}
+          >
+            <option value="index">Index this page</option>
+            <option value="noindex">Do not index (noindex) — reachable by link only</option>
+          </select>
+          <small>A noindex page carries a robots noindex tag and is left out of the sitemap.</small>
+        </label>
+
+        <label className="admin-field">
+          <span>Canonical address</span>
+          <input
+            onChange={(event) =>
+              setDraft((current) => (current ? { ...current, canonicalUrl: event.target.value } : current))
+            }
+            placeholder={draft.slug ? `/p/${draft.slug}` : "/p/how-we-work"}
+            value={draft.canonicalUrl}
+          />
+          <small>
+            Optional. Leave empty for the page&rsquo;s own address. Only a path or an https://maintsupp.com address
+            is accepted.
+          </small>
         </label>
       </div>
 

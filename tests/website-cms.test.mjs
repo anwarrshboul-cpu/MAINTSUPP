@@ -376,7 +376,10 @@ test("a published page is decided by the column, compared against 1", async () =
      dialects, and comparing explicitly means a NULL — which the column forbids but a
      hand-written row could carry — reads as unpublished. The safe direction. */
   assert.match(repository, /eq\(sitePages\.published, 1\)/);
-  assert.match(repository, /published: page\.published === 1/);
+  /* RE-POINTED when the CMS gained a publishing window: the two row readers
+     became one `toPage`, which decides `published` once, still explicitly
+     against 1, and derives the page's state from it. */
+  assert.match(repository, /const published = page\.published === 1;/);
 });
 
 test("a failed read is a 404, not a 500", async () => {
@@ -559,7 +562,12 @@ test("the public page declares its own canonical, because the root declares one"
      existing static marketing pages do exactly that today; a page whose address is
      its identity cannot afford to. */
   assert.match(layout, /alternates: \{\s*\n\s*canonical: "\/",/);
-  assert.match(page, /alternates: \{ canonical: `https:\/\/maintsupp\.com\/p\/\$\{page\.slug\}` \}/);
+  /* RE-POINTED when a page gained a canonical OVERRIDE: the page's own address
+     is now the fallback of a same-site override (`cleanCanonical` refuses any
+     other host), and is still what a page with none declares — never the
+     root's "/". */
+  assert.match(page, /const canonical = page\.canonicalUrl \?\? `https:\/\/maintsupp\.com\/p\/\$\{page\.slug\}`;/);
+  assert.match(page, /alternates: \{ canonical \}/);
 
   /* `absolute`, for the reason `/contractors` records: the root template is
      `%s | MAINTSUPP`, so a meta title carrying the suffix would ship it twice. */
@@ -579,7 +587,7 @@ test("a draft is indistinguishable from a page that never existed", async () => 
   assert.match(page, /robots: \{ index: false, follow: false \}/);
 });
 
-test("a CMS page is not in the sitemap, and the test that walks it knows", async () => {
+test("a CMS page is not in the static sitemap, and the test that walks it knows", async () => {
   const sitemapTest = await read("tests/sitemap-lastmod.test.mjs");
   const sitemap = await read("public/sitemap.xml");
 
@@ -589,12 +597,16 @@ test("a CMS page is not in the sitemap, and the test that walks it knows", async
      Re-pointed, with the reason written into that test. */
   assert.match(sitemapTest, /RE-POINTED when the website CMS added/);
   assert.match(sitemapTest, /dynamicRoutes/);
-  assert.doesNotMatch(sitemap, /\/p\//, "no CMS page is listed while the sitemap is a build artifact");
+  assert.doesNotMatch(sitemap, /\/p\//, "no CMS page is listed in the build artifact");
 
-  /* And the gap is stated where the person publishing a page will see it. */
+  /* RE-POINTED when CMS pages gained a sitemap of their own. They are listed in
+     `/sitemap-pages.xml`, read live, and robots.txt names it beside the static
+     one — the static file keeps its git-derived dates and never lists a /p/
+     address. Where a published page IS listed is stated in the console. */
+  assert.match(await read("public/robots.txt"), /^Sitemap: https:\/\/maintsupp\.com\/sitemap-pages\.xml$/m);
   assert.ok(
-    CMS_OMISSIONS.some((omission) => /sitemap\.xml/.test(omission)),
-    "the console must say that a published page is not in the sitemap",
+    CMS_OMISSIONS.some((omission) => /sitemap-pages\.xml/.test(omission) && /sitemap\.xml/.test(omission)),
+    "the console must say which sitemap a published page is in",
   );
 });
 
@@ -611,8 +623,9 @@ test("the console lists the screen because the screen has an API", async () => {
      only one landed. `platform-admin-shell.test.mjs` compares against its own
      ENTRIES list rather than a literal, so it needed no change.
      Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
-     API (`/api/contractor-applications/inbox`) — the same rule kept once more. */
-  assert.equal(PLATFORM_SECTIONS.length, 8);
+     API (`/api/contractor-applications/inbox`) — the same rule kept once more.
+     Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`. */
+  assert.equal(PLATFORM_SECTIONS.length, 9);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -633,12 +646,16 @@ test("the console lists the screen because the screen has an API", async () => {
    * And a third was: `applications`, the contractor applications inbox, for the
    * leads entry's own reason — an anonymous application used to be filed under a
    * client's workspace, and the rows belong to the platform either way.
+   *
+   * And a fourth: `backups` (§39), which is not in any workspace at all — it
+   * describes the deployment's database, storage and migrations, so no
+   * per-workspace capability could be right about it.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "leads", "pages"],
-    "only the three platform-owned surfaces answer to no capability",
+    ["applications", "backups", "leads", "pages"],
+    "only the four platform-owned surfaces answer to no capability",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

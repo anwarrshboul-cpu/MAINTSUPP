@@ -3,9 +3,7 @@ import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
   attachments,
-  contractorSites,
   maintenanceRequests,
-  units,
 } from "../../../../db/schema";
 import type { MaintenanceRequest } from "../../../lib/types";
 import { resolveJobToken } from "../../../lib/job-tokens";
@@ -25,6 +23,7 @@ import {
   attachmentPayload,
   documentFieldSnapshot,
   documentFieldUpdates,
+  outsideSiteScope,
   releaseComplianceLinks,
   type Anchors,
 } from "../documents";
@@ -580,114 +579,8 @@ async function archiveInstead(denied: Response) {
  *    audit event says which of the two happened.
  */
 /**
- * Whether this document belongs to a site the caller may not reach.
- *
- * THREE anchors, one question. `site_id` is the direct one; `unit_id` is
- * resolved through the asset, because an asset's photographs carry the asset
- * and often the site; and `request_id` is resolved through the job, because a
- * job happens AT a site.
- *
- * THE JOB ANCHOR WAS MISSING, AND THAT WAS THE HOLE.
- *
- * This function used to check two anchors, and both this call site and the
- * listing in `../route.ts` justified the omission the same way: a document
- * naming neither a site nor an asset — "a contractor's insurance certificate, a
- * job's evidence" — "is not about a site, and a restriction on sites has
- * nothing to say about it". Half of that was wrong, and `6b21a76` resolved the
- * job. **The other half was wrong too**, and that is the owner's decision Q5
- * (2026-09-21, option B):
- *
- *   A contractor document is allowed only when that contractor is genuinely
- *   linked to at least one site the member may access. Organisation
- *   membership alone is not sufficient. Absent or ambiguous linkage denies.
- *
- * So the rule is now the same one `withinMemberScope` states for every other
- * row — "nothing proves a site-less row is one of theirs" — applied to
- * documents:
- *
- *   1. EVERY anchor the document carries must resolve inside the scope. The
- *      first anchor present used to decide alone, so a document filed against
- *      a permitted site AND a job at a forbidden one was hidden from the
- *      listing (which ANDs its filters) and downloadable here. The bytes and
- *      the catalogue disagreed, and the weaker one decides.
- *   2. An asset or a job that does not resolve is not proof of permission.
- *   3. A job that names no site proves nothing about the member's stores —
- *      it used to be allowed on the grounds that "a restriction on sites has
- *      nothing to say about it". Under Q5 that is absent linkage, and denies.
- *   4. A document with none of the three is reachable only through its
- *      contractor, and only when `contractor_sites` — the table the product
- *      treats as the deliberate, current statement of who serves where — links
- *      that contractor to a site in the scope. Job history is not a link.
- *
- * `null` scope (an unrestricted member, an owner, a platform admin) never
- * reaches this function; the call sites test `siteScope && siteScope.length`.
- */
-async function outsideSiteScope(
-  db: Awaited<ReturnType<typeof scopedDb>>["db"],
-  orgId: string,
-  siteScope: string[],
-  record: {
-    siteId: string | null;
-    unitId: string | null;
-    requestId: string | null;
-    contractorId: string | null;
-  },
-): Promise<boolean> {
-  let anchored = false;
-  if (record.siteId) {
-    anchored = true;
-    if (!siteScope.includes(record.siteId)) return true;
-  }
-  if (record.unitId) {
-    anchored = true;
-    const [asset] = await db
-      .select({ siteId: units.siteId })
-      .from(units)
-      .where(and(eq(units.id, record.unitId), eq(units.organisationId, orgId)))
-      .limit(1);
-    /* An asset that does not resolve is not proof of permission. */
-    if (!asset) return true;
-    if (!siteScope.includes(asset.siteId)) return true;
-  }
-  if (record.requestId) {
-    anchored = true;
-    const [job] = await db
-      .select({ siteId: maintenanceRequests.siteId })
-      .from(maintenanceRequests)
-      .where(
-        and(
-          eq(maintenanceRequests.id, record.requestId),
-          eq(maintenanceRequests.organisationId, orgId),
-        ),
-      )
-      .limit(1);
-    /* A job that does not resolve is not proof of permission — the same rule
-       the asset branch applies, for the same reason. */
-    if (!job) return true;
-    /* Q5: a job with no site is absent linkage, not an exemption. */
-    if (!job.siteId) return true;
-    if (!siteScope.includes(job.siteId)) return true;
-  }
-  if (anchored) return false;
-
-  /* Q5: a contractor's document, reachable only through a real link. */
-  if (!record.contractorId) return true;
-  const [link] = await db
-    .select({ id: contractorSites.id })
-    .from(contractorSites)
-    .where(
-      and(
-        eq(contractorSites.organisationId, orgId),
-        eq(contractorSites.contractorId, record.contractorId),
-        inArray(contractorSites.siteId, siteScope),
-      ),
-    )
-    .limit(1);
-  return !link;
-}
-
-/**
- * The same restriction on the WRITE doors (Phase 9).
+ * The same restriction on the WRITE doors (Phase 9). `outsideSiteScope` itself
+ * lives in `../documents.ts` now, shared with the two upload doors.
  *
  * PATCH, PUT and DELETE checked the organisation and a capability, and never
  * the site restriction: a member confined to three stores who held

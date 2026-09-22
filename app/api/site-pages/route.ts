@@ -45,10 +45,21 @@ import {
 } from "../../lib/cms-blocks.ts";
 import {
   deletePage,
+  deleteRedirect,
   listPages,
+  listRedirects,
+  redirectMap,
+  saveRedirect,
   writePage,
   type PageInput,
 } from "../../lib/cms-repository.ts";
+import {
+  cleanCanonical,
+  cleanRedirectSource,
+  cleanRedirectTarget,
+  cleanWindow,
+  planRedirect,
+} from "../../lib/cms-seo.ts";
 import {
   pageShape,
   pageSnapshot,
@@ -135,6 +146,7 @@ export async function GET(request: Request) {
     return Response.json({
       canEdit: true,
       pages: await listPages(scope.db),
+      redirects: await listRedirects(scope.db),
       /* The catalogue and the honest gaps both travel, so the console shows what a
          block is and what this slice does not do without keeping its own copy of
          either — a second copy of the omissions list is how one of them becomes
@@ -163,9 +175,65 @@ export async function PUT(request: Request) {
       restoreVersion?: unknown;
       original?: unknown;
       duplicate?: unknown;
+      publishAt?: unknown;
+      unpublishAt?: unknown;
+      noindex?: unknown;
+      canonicalUrl?: unknown;
+      redirect?: unknown;
     } | null;
     if (!payload) {
       return Response.json({ error: "Send a page object." }, { status: 400 });
+    }
+
+    /*
+     * A MANUAL REDIRECT, from an old `/p/<slug>` address to another CMS address
+     * or a page on maintsupp.com — never another host (see `cleanRedirectTarget`:
+     * a redirect that could send a visitor off-site is an open redirect). An
+     * address a page still lives at cannot be redirected; the page would always
+     * win. The stored target is collapsed to its final destination and a loop is
+     * refused (`planRedirect`).
+     */
+    if (payload.redirect !== undefined) {
+      const wanted = (payload.redirect ?? {}) as { from?: unknown; to?: unknown };
+      const from = cleanRedirectSource(wanted.from);
+      if (!from) {
+        return Response.json({ error: "Redirect from a website page address, like /p/old-page." }, { status: 400 });
+      }
+      const to = cleanRedirectTarget(wanted.to);
+      if (!to) {
+        return Response.json(
+          { error: "Redirect to another /p/ address or a page on https://maintsupp.com — never another site." },
+          { status: 400 },
+        );
+      }
+      const pagesNow = await listPages(scope.db);
+      if (pagesNow.some((page) => `/p/${page.slug}` === from)) {
+        return Response.json(
+          { error: `A page lives at ${from}. Move or delete it first; a page always wins over a redirect.` },
+          { status: 409 },
+        );
+      }
+      const plan = planRedirect(await redirectMap(scope.db), from, to);
+      if ("error" in plan) return Response.json({ error: plan.error }, { status: 409 });
+      await saveRedirect(scope.db, from, plan.target, "manual", scope.identityEmail.toLowerCase());
+      await recordAudit({
+        db: scope.db,
+        organisationId: scope.orgId,
+        actor: auditActor(scope),
+        action: "site_redirect.added",
+        entityType: "site_redirect",
+        entityId: from,
+        summary: `Redirected ${from} to ${plan.target}.`,
+        detail: { from, to: plan.target },
+        request,
+      });
+      return Response.json({
+        canEdit: true,
+        pages: pagesNow,
+        redirects: await listRedirects(scope.db),
+        catalogue: BLOCK_CATALOGUE,
+        omissions: CMS_OMISSIONS,
+      });
     }
 
     /*
@@ -267,6 +335,29 @@ export async function PUT(request: Request) {
       blocks.push({ kind: checked.kind, body: checked.body });
     }
 
+    /*
+     * THE LIFECYCLE AND SEO FIELDS — a publishing window, indexing and a
+     * canonical (see `app/lib/cms-seo.ts`). A field the request does not carry
+     * keeps the page's current value: a restore replays a version recorded
+     * before these existed, and it must not quietly clear a canonical.
+     */
+    const pages = await listPages(scope.db);
+    const current = pages.find(
+      (page) => page.slug === (typeof payload.original === "string" ? cleanSlug(payload.original) : slug),
+    );
+    const span = cleanWindow(
+      "publishAt" in payload ? payload.publishAt : (current?.publishAt ?? null),
+      "unpublishAt" in payload ? payload.unpublishAt : (current?.unpublishAt ?? null),
+    );
+    if ("error" in span) return Response.json({ error: span.error }, { status: 400 });
+    const canonical = cleanCanonical("canonicalUrl" in payload ? payload.canonicalUrl : (current?.canonicalUrl ?? null));
+    if ("error" in canonical) return Response.json({ error: canonical.error }, { status: 400 });
+    if ("noindex" in payload && typeof payload.noindex !== "boolean") {
+      return Response.json({ error: "noindex must be true or false." }, { status: 400 });
+    }
+    const robots: "index" | "noindex" =
+      "noindex" in payload ? (payload.noindex ? "noindex" : "index") : (current?.robots ?? "index");
+
     const input: PageInput = {
       slug,
       title,
@@ -274,6 +365,11 @@ export async function PUT(request: Request) {
       metaDescription: text(payload.metaDescription, 320),
       published: payload.published,
       blocks,
+      /* A copy starts as a plain draft: no window, no borrowed canonical. */
+      publishAt: duplicatedFrom ? null : span.value.publishAt,
+      unpublishAt: duplicatedFrom ? null : span.value.unpublishAt,
+      robots,
+      canonicalUrl: duplicatedFrom ? null : canonical.value,
     };
 
     /*
@@ -294,11 +390,10 @@ export async function PUT(request: Request) {
      * WHICH PAGE THIS SAVE IS FOR. The console says: `original` is the address the
      * editor opened, or null for a new page. That is what makes an address edit a
      * MOVE — the page at the old address takes the new one, and the old address
-     * stops resolving — and what stops a new page landing on an existing address,
+     * redirects to it — and what stops a new page landing on an existing address,
      * which used to overwrite the other page's content without a word. A caller
      * that states no intent (a restore, an older client) keeps upsert-by-address.
      */
-    const pages = await listPages(scope.db);
     const intent = "original" in payload ? payload.original : undefined;
     let fromSlug = slug;
     if (intent === null && pages.some((page) => page.slug === slug)) {
@@ -332,6 +427,20 @@ export async function PUT(request: Request) {
     const result = await writePage(scope.db, input, scope.identityEmail.toLowerCase(), fromSlug);
     if (!result.ok) {
       return Response.json({ error: result.reason }, { status: 503 });
+    }
+    /*
+     * REDIRECTS FOLLOW THE PAGE. A page now lives at `/p/<slug>`, so any
+     * redirect FROM that address is gone (a page always wins). A move leaves a
+     * redirect behind at the old address — so a saved link, a search result or a
+     * shared URL keeps working — and every redirect that led to the old address
+     * is re-pointed at the new one (`saveRedirect` collapses the chain).
+     */
+    await deleteRedirect(scope.db, `/p/${slug}`);
+    if (renaming) {
+      const plan = planRedirect(await redirectMap(scope.db), `/p/${fromSlug}`, `/p/${slug}`);
+      if (!("error" in plan)) {
+        await saveRedirect(scope.db, `/p/${fromSlug}`, plan.target, "moved", scope.identityEmail.toLowerCase());
+      }
     }
     {
       /* A page that does not exist right now is being created — or, by a
@@ -408,7 +517,7 @@ export async function PUT(request: Request) {
       entityType: "site_page",
       entityId: slug,
       summary: renaming
-        ? `Moved the website page /p/${fromSlug} to /p/${slug}; the old address no longer resolves.`
+        ? `Moved the website page /p/${fromSlug} to /p/${slug}; the old address now redirects there.`
         : duplicatedFrom
           ? `Duplicated the website page /p/${duplicatedFrom} as the draft /p/${slug}.`
           : `${before ? "Updated" : "Created"} the website page /p/${slug}${
@@ -431,6 +540,7 @@ export async function PUT(request: Request) {
       /* The address this save landed at — a copy's is chosen by the server. */
       saved: slug,
       pages: await listPages(scope.db),
+      redirects: await listRedirects(scope.db),
       catalogue: BLOCK_CATALOGUE,
       omissions: CMS_OMISSIONS,
     });
@@ -444,6 +554,33 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const scope = await platformScope(request);
     if (!scope) return forbidden();
+
+    /* Removing a REDIRECT (`?redirect=/p/old`) rather than a page. */
+    const redirectParam = new URL(request.url).searchParams.get("redirect");
+    if (redirectParam !== null) {
+      const from = cleanRedirectSource(redirectParam);
+      if (!from || !(await deleteRedirect(scope.db, from))) {
+        return Response.json({ error: "There is no redirect from that address." }, { status: 404 });
+      }
+      await recordAudit({
+        db: scope.db,
+        organisationId: scope.orgId,
+        actor: auditActor(scope),
+        action: "site_redirect.removed",
+        entityType: "site_redirect",
+        entityId: from,
+        summary: `Removed the redirect from ${from}; that address now answers 404.`,
+        detail: { from },
+        request,
+      });
+      return Response.json({
+        canEdit: true,
+        pages: await listPages(scope.db),
+        redirects: await listRedirects(scope.db),
+        catalogue: BLOCK_CATALOGUE,
+        omissions: CMS_OMISSIONS,
+      });
+    }
 
     const slug = cleanSlug(new URL(request.url).searchParams.get("slug"));
     if (!slug) {
@@ -486,6 +623,7 @@ export async function DELETE(request: Request) {
     return Response.json({
       canEdit: true,
       pages: await listPages(scope.db),
+      redirects: await listRedirects(scope.db),
       catalogue: BLOCK_CATALOGUE,
       omissions: CMS_OMISSIONS,
     });

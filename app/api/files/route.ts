@@ -45,6 +45,8 @@ import {
   resolveSiteId,
   restorePredecessor,
   standDownPredecessor,
+  UPLOAD_OUTSIDE_SCOPE,
+  uploadOutsideSiteScope,
 } from "./documents";
 import {
   pendingReview,
@@ -902,6 +904,18 @@ export async function POST(request: Request) {
     if (replacesId) {
       const missingAnchor = anchorRefusal(filedAgainst);
       if (missingAnchor) return missingAnchor;
+    }
+
+    /*
+     * THE MEMBER'S SITES, still before the put — see `uploadOutsideSiteScope`.
+     * Only a capability upload is the member's own; a link's grant decides the
+     * rest. Answered as a missing record, the same 404 a read would give.
+     */
+    if (
+      authority.via === "capability" &&
+      (await uploadOutsideSiteScope(db, orgId, scope.siteScope, filedAgainst, replacesId))
+    ) {
+      return Response.json({ error: UPLOAD_OUTSIDE_SCOPE }, { status: 404 });
     }
 
     /*

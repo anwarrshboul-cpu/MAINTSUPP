@@ -17,6 +17,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { memberships, users } from "../../db/schema";
 import { normaliseMembershipRole, type MembershipRole } from "./roles";
+import { SITE_OUTSIDE_SCOPE } from "./member-site-scope";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -26,15 +27,32 @@ export type MembershipGrant = {
   siteScope: string[] | null;
 };
 
-export function parseSiteScope(value: string | null): string[] | null {
-  if (!value) return null;
+/**
+ * `memberships.site_scope` → the member's permitted sites, FAILING CLOSED.
+ *
+ *   SQL NULL          → `null`: unrestricted. The column's only state today —
+ *                       nothing in the product writes it.
+ *   a JSON array of site ids → exactly those sites.
+ *   anything else     → restricted to NO sites: malformed JSON, a non-array,
+ *                       `[]`, an array of no usable ids, and even `""`.
+ *
+ * It used to answer `null` — every site — for all of "anything else", so a
+ * corrupted or half-written restriction silently lifted itself. A restriction
+ * that somebody wrote but that names no site is read as what it literally says:
+ * none. Returned as `[SITE_OUTSIDE_SCOPE]`, never `[]` — see that constant for
+ * why an empty restriction must not exist.
+ */
+export function parseSiteScope(value: string | null | undefined): string[] | null {
+  if (value === null || value === undefined) return null;
   try {
     const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    const ids = parsed.filter((item): item is string => typeof item === "string");
-    return ids.length ? ids : null;
+    if (!Array.isArray(parsed)) return [SITE_OUTSIDE_SCOPE];
+    const ids = parsed.filter(
+      (item): item is string => typeof item === "string" && item.trim().length > 0,
+    );
+    return ids.length ? ids : [SITE_OUTSIDE_SCOPE];
   } catch {
-    return null;
+    return [SITE_OUTSIDE_SCOPE];
   }
 }
 

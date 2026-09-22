@@ -28,8 +28,13 @@
 
 import { and, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
-import { reminderRules } from "../../../db/schema";
-import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
+import {
+  calendarEvents,
+  complianceDocuments,
+  maintenanceRequests,
+  reminderRules,
+} from "../../../db/schema";
+import { anonymousRefusal, scopedDbWithCapability, type ScopedDatabase } from "../../lib/tenant-db";
 import { databaseSafeFailure } from "../../lib/database-failure";
 import {
   createReminder,
@@ -40,6 +45,7 @@ import {
 } from "../../lib/reminders/repository";
 import { validateRecipientRows } from "../../lib/reminders/recipients";
 import { reminderOccurrenceUtc } from "../../lib/reminders/schedule";
+import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -115,12 +121,55 @@ function computeNextSendAt(
   return at.toISOString();
 }
 
+/**
+ * Whether a reminder's record stands at one of the member's sites.
+ *
+ * A reminder hangs off a calendar item — the manual-event dialog's certificates,
+ * visits and notes (`calendar_events`) — or, as the reminder cron reads them, a
+ * job or visit (`maintenance_requests`) or a register certificate
+ * (`compliance_documents`). All three carry a site; the rule is
+ * `withinMemberScope`'s, so a record with no site, or none at all, is outside a
+ * restricted scope.
+ */
+async function subjectWithinScope(
+  db: ScopedDatabase["db"],
+  orgId: string,
+  subjectType: string,
+  subjectId: string,
+  siteScope: string[],
+): Promise<boolean> {
+  const allowed = memberSiteSet(siteScope);
+  const [event] = await db
+    .select({ siteId: calendarEvents.siteId })
+    .from(calendarEvents)
+    .where(and(eq(calendarEvents.id, subjectId), eq(calendarEvents.organisationId, orgId)))
+    .limit(1);
+  if (event) return withinMemberScope(allowed, event.siteId);
+  if (subjectType === "job" || subjectType === "visit") {
+    const [job] = await db
+      .select({ siteId: maintenanceRequests.siteId })
+      .from(maintenanceRequests)
+      .where(and(eq(maintenanceRequests.id, subjectId), eq(maintenanceRequests.organisationId, orgId)))
+      .limit(1);
+    return Boolean(job) && withinMemberScope(allowed, job.siteId);
+  }
+  if (subjectType === "certificate") {
+    const [certificate] = await db
+      .select({ siteId: complianceDocuments.siteId })
+      .from(complianceDocuments)
+      .where(and(eq(complianceDocuments.id, subjectId), eq(complianceDocuments.organisationId, orgId)))
+      .limit(1);
+    return Boolean(certificate) && withinMemberScope(allowed, certificate.siteId);
+  }
+  return false;
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
-    const { db, orgId } = guard.scope;
+    const { db, orgId, siteScope } = guard.scope;
     const url = new URL(request.url);
     const subjectType = text(url.searchParams.get("subjectType"), 40);
     const subjectId = text(url.searchParams.get("subjectId"), 120);
@@ -129,6 +178,12 @@ export async function GET(request: Request) {
         { error: "Name the record these reminders belong to." },
         { status: 400 },
       );
+    }
+    /* A restricted member reads reminders only on records at their sites. A
+       record outside the scope — or one that does not exist — answers with no
+       reminders, so the reply says nothing about which of the two it is. */
+    if (siteScope && !(await subjectWithinScope(db, orgId, subjectType, subjectId, siteScope))) {
+      return Response.json({ reminders: [] });
     }
     const reminders = await listReminders(db, orgId, subjectType, subjectId);
     return Response.json({ reminders });
