@@ -119,3 +119,19 @@
   font-size: 13px;
   color: var(--muted);
 }
+
+/* The export sits beside the filter and never grows to fill the toolbar. */
+.leads-admin__export {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/*
+ * The list scrolls sideways inside its own strip rather than pushing the page.
+ * A figure and its enquiry have to stay on one row, so wrapping is not the
+ * answer on a phone; a scrollbar is. Same decision, and the same reason, as
+ * `.platform-table-wrap` in platform-shell.css.
+ */
+.leads-admin__scroll {
+  overflow-x: auto;
+}
