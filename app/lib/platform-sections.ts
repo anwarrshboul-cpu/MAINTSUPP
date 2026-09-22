@@ -139,6 +139,20 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     capability: null,
   },
   /*
+   * Website navigation (decision J, §77 item 11), added with its API
+   * (`/api/site-navigation`) — a real read, a real write, a restore — and next to
+   * Website pages because it is the same website. `capability: null` for the
+   * pages entry's reason: it is MAINTSUPP's own site, so no workspace capability
+   * can reach it; `platformAdmin` is the gate.
+   */
+  {
+    key: "navigation",
+    label: "Website navigation",
+    icon: "menu",
+    blurb: "The header menu and footer links of maintsupp.com: add, rename, reorder, hide and re-point them.",
+    capability: null,
+  },
+  /*
    * Website enquiries, added when its API arrived — the same rule, kept again.
    * `GET /api/leads` was a hard 501, so there genuinely was nothing behind a rail
    * entry; now there is a read, a status write and an audit trail.

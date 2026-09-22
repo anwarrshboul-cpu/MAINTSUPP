@@ -305,9 +305,14 @@ test("the homepage FAQ and /faqs render the same array, and neither owns a copy"
 
   /* And it is reachable by name from the footer, since the top nav stays five
      items — see the note beside the footer list. */
+  /* RE-POINTED (decision J): the footer's links are data now, and the footer
+     as shipped lives in `app/lib/site-navigation.ts` — the same two entries,
+     rendered by the chrome through `SectionLink`. */
+  const navigation = await read("app/lib/site-navigation.ts");
+  assert.match(navigation, /href: "#faq", label: "FAQs on this page"/, "the footer links the section");
+  assert.match(navigation, /href: "\/faqs", label: "All FAQs"/, "and the standalone page keeps its link");
   const chrome = await read(`${SECTIONS_DIR}/chrome.tsx`);
-  assert.match(chrome, /href="#faq"/, "the footer links the section");
-  assert.match(chrome, /href="\/faqs"/, "and the standalone page keeps its link");
+  assert.match(chrome, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/, "and the chrome renders them");
 });
 
 /* ── 8, 9. Report a Job at the bottom, submitting exactly as it did ──────── */
@@ -407,6 +412,25 @@ test("every in-page link on the homepage lands on an id the homepage renders", a
     for (const [, href] of rendered(source).matchAll(/href="#([^"{}]+)"/g)) {
       if (!hrefs.has(href)) hrefs.set(href, file);
     }
+  }
+
+  /*
+   * RE-POINTED (decision J): the header's and the footer's links moved out of
+   * chrome.tsx into the navigation platform staff edit. Two things are read for
+   * them now, and together they are stronger than the literal hrefs were:
+   *   - the navigation AS SHIPPED (`app/lib/site-navigation.ts`), harvested
+   *     like any other file — its `["#x", …]` and `href: "#x"` entries;
+   *   - `HOMEPAGE_ANCHORS`, the only anchors a stored navigation may use at all
+   *     (`cleanNavHref` refuses any other) — every one must be an id the
+   *     homepage renders, so an edit cannot create a dead link either.
+   */
+  const navigation = await read("app/lib/site-navigation.ts");
+  for (const [, href] of navigation.matchAll(/(?:\["|href: ")#([a-z0-9-]+)"/g)) {
+    if (!hrefs.has(href)) hrefs.set(href, "app/lib/site-navigation.ts");
+  }
+  const { HOMEPAGE_ANCHORS } = await import("../app/lib/site-navigation.ts");
+  for (const anchor of HOMEPAGE_ANCHORS) {
+    assert.ok(ids.has(anchor.id), `#${anchor.id} is offered to the navigation editor but the homepage renders no such id`);
   }
 
   const dead = [...hrefs].filter(([href]) => !ids.has(href));

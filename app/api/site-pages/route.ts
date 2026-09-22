@@ -35,6 +35,7 @@
 import { ensureDatabase } from "../../../db/init";
 import { auditActor, recordAudit } from "../../lib/audit";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { invalidatePublicNavigation } from "../../lib/site-navigation-public.ts";
 import {
   BLOCK_CATALOGUE,
   CMS_OMISSIONS,
@@ -535,6 +536,10 @@ export async function PUT(request: Request) {
       request,
     });
 
+    /* A menu link to this page shows only while the page is live (decision J),
+       so the public navigation re-reads the pages' states on this instance. */
+    invalidatePublicNavigation();
+
     return Response.json({
       canEdit: true,
       /* The address this save landed at — a copy's is chosen by the server. */
@@ -619,6 +624,8 @@ export async function DELETE(request: Request) {
       detail: { slug },
       request,
     });
+    /* A menu link to a page that is gone stops showing (decision J). */
+    invalidatePublicNavigation();
 
     return Response.json({
       canEdit: true,

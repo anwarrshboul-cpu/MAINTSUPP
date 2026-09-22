@@ -34,6 +34,9 @@ export const VERSION_SUBJECTS = {
   dashboard: { label: "Workspace default dashboard", scope: "workspace", capability: "settings.edit", keys: ["overview", "reports"] },
   /* §38b — a website page, keyed by its slug, so history follows the address. */
   site_page: { label: "Website page", scope: "installation", capability: "platform", keys: "slug" },
+  /* Decision J — the public website's header menu and footer links. One of
+     them, installation-wide, keyed "public". */
+  site_navigation: { label: "Website navigation", scope: "installation", capability: "platform", keys: ["public"] },
 } as const satisfies Record<string, VersionSubjectDefinition>;
 
 export type VersionSubject = keyof typeof VERSION_SUBJECTS;
@@ -76,6 +79,22 @@ export type ThemeSnapshot = { tokens: Record<string, string> };
 export type ModulesSnapshot = { disabled: string[] };
 export type NavigationSnapshot = { present: boolean; items: unknown[]; locked: string[] };
 export type DashboardSnapshot = { present: boolean; surface: string; items: unknown[] };
+/**
+ * Decision J — the website's navigation: the whole stored document, or
+ * `present: false` for "no row" (the built-in navigation, after a reset).
+ * `navigation` is typed loosely here because this module imports nothing;
+ * `app/lib/site-navigation.ts` owns the shape.
+ */
+export type SiteNavigationSnapshot = { present: boolean; navigation: SiteNavigationShape | null };
+type SiteNavigationShape = {
+  primary: Array<{ id: string; label: string; href: string; hidden: boolean }>;
+  footer: Array<{ id: string; heading: string; links: Array<{ id: string; label: string; href: string; hidden: boolean }> }>;
+};
+
+export function siteNavigationSnapshot(navigation: SiteNavigationShape | null): SiteNavigationSnapshot {
+  return navigation ? { present: true, navigation } : { present: false, navigation: null };
+}
+
 /** §38b — exactly what the page editor saves (`PageInput`), so a restore is that save again. */
 export type PageSnapshot = {
   slug: string;
@@ -177,6 +196,7 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
     if (!state.present) return "Reset to the built-in order.";
     return `Saved the default sidebar: ${state.items.length} item${state.items.length === 1 ? "" : "s"}, ${state.locked.length} locked.`;
   }
+  if (subject === "site_navigation") return summariseNavigation(before as SiteNavigationSnapshot | null, after as SiteNavigationSnapshot);
   if (subject === "site_page") {
     const from = before as PageSnapshot | null;
     const to = after as PageSnapshot;
@@ -193,6 +213,55 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
   if (!state.present || state.items.length === 0) return `The built-in ${state.surface} layout.`;
   const hidden = state.items.filter((item) => (item as { hidden?: unknown })?.hidden === true).length;
   return `Saved the default ${state.surface} dashboard: ${state.items.length} widget${state.items.length === 1 ? "" : "s"}${hidden ? `, ${hidden} hidden` : ""}.`;
+}
+
+/**
+ * A navigation save in one line: what moved, by link label, then the shape.
+ * "Added Careers; renamed Pricing; hid Case Study — header 5 links shown, footer 21; 1 hidden."
+ */
+function summariseNavigation(before: SiteNavigationSnapshot | null, after: SiteNavigationSnapshot): string {
+  if (!after.present || !after.navigation) return "Reset to the built-in navigation.";
+  const linksOf = (shape: SiteNavigationShape | null) =>
+    shape ? [...shape.primary.map((link) => ({ ...link, list: "header" })), ...shape.footer.flatMap((group) => group.links.map((link) => ({ ...link, list: group.id })))] : [];
+  const now = linksOf(after.navigation);
+  const was = new Map(linksOf(before?.present ? before.navigation : null).map((link) => [link.id, link]));
+  const parts: string[] = [];
+  const say = (verb: string, labels: string[]) => {
+    if (labels.length) parts.push(`${verb} ${listed(labels)}`);
+  };
+  if (before?.present && before.navigation) {
+    const kept = now.filter((link) => was.has(link.id));
+    say("added", now.filter((link) => !was.has(link.id)).map((link) => link.label));
+    say("removed", [...was.values()].filter((link) => !now.some((entry) => entry.id === link.id)).map((link) => link.label));
+    say("renamed", kept.filter((link) => was.get(link.id)?.label !== link.label).map((link) => link.label));
+    say("re-pointed", kept.filter((link) => was.get(link.id)?.href !== link.href).map((link) => link.label));
+    say("hid", kept.filter((link) => link.hidden && !was.get(link.id)?.hidden).map((link) => link.label));
+    say("showed", kept.filter((link) => !link.hidden && was.get(link.id)?.hidden).map((link) => link.label));
+    say("moved", kept.filter((link) => was.get(link.id)?.list !== link.list).map((link) => link.label));
+    /* A list is "reordered" when the links it had before and still has now come
+       in a different order — an addition or a removal alone does not count. */
+    const beforeLinks = [...was.values()];
+    const sequence = (links: Array<{ id: string; list: string }>, list: string, keep: Set<string>) =>
+      links.filter((link) => link.list === list && keep.has(link.id)).map((link) => link.id).join(",");
+    const reordered = ["header", ...after.navigation.footer.map((group) => group.id)].filter((list) => {
+      const inBoth = new Set(
+        now.filter((link) => link.list === list && beforeLinks.some((entry) => entry.id === link.id && entry.list === list)).map((link) => link.id),
+      );
+      return sequence(beforeLinks, list, inBoth) !== sequence(now, list, inBoth);
+    });
+    if (reordered.length) parts.push(`reordered ${listed(reordered)}`);
+    const headings = after.navigation.footer.filter((group) => before.navigation?.footer.find((entry) => entry.id === group.id)?.heading !== group.heading).map((group) => group.heading);
+    say("renamed the heading", headings);
+  } else {
+    parts.push("Saved the website navigation");
+  }
+  const every = [...after.navigation.primary, ...after.navigation.footer.flatMap((group) => group.links)];
+  const header = after.navigation.primary.filter((link) => !link.hidden).length;
+  const footer = every.length - after.navigation.primary.length - after.navigation.footer.flatMap((group) => group.links).filter((link) => link.hidden).length;
+  const hidden = every.filter((link) => link.hidden).length;
+  const shape = `header ${header} link${header === 1 ? "" : "s"} shown, footer ${footer}${hidden ? `; ${hidden} hidden` : ""}.`;
+  const said = parts.length ? parts.join("; ") : "Saved with no change";
+  return `${said[0].toUpperCase()}${said.slice(1)} — ${shape}`;
 }
 
 /* ── The request a Restore button sends ────────────────────────────────────── */
@@ -214,6 +283,8 @@ export function restoreRequest(subject: VersionSubject, key: string, version: nu
       return { url: "/api/dashboard-layout", body: { scope: "workspace", surface: key, restoreVersion: version } };
     case "site_page":
       return { url: "/api/site-pages", body: { slug: key, restoreVersion: version } };
+    case "site_navigation":
+      return { url: "/api/site-navigation", body: { restoreVersion: version } };
   }
 }
 

@@ -674,7 +674,25 @@ body.slots-enabled .slotbtn{display:inline-flex}
    the one whose full name survives in its `aria-label`; the other would just
    be a wrapped label. Measured on the deployed build, not resized into: a
    resize leaves the header laid out at its previous width. */
-@media(min-width:1120px) and (max-width:1219px){.cta-long{display:none}.cta-short{display:inline}}
+/* And it now ends at 1365, not 1219 (decision J). The 1219 edge was measured
+   with five destinations; with six, `Report a Job` folded to two lines at every
+   width from 1120 to 1300 on Production and the row ran up to 82px past the
+   screen. From 1366 the long label and all six fit on one line with room over;
+   below it the short label buys the room, as it already did up to 1219. */
+@media(min-width:1120px) and (max-width:1365px){.cta-long{display:none}.cta-short{display:inline}}
+/* SIX DESTINATIONS, AND THE BAND THEY DID NOT FIT IN.
+   The comments above were measured with five. The sixth (Contractors) made the
+   row 42px wider than the screen at 1120 and 14px at 1220 — measured on
+   Production, where `body{overflow-x:hidden}` hid it by clipping the right-hand
+   edge of the booking button — and at 1280 it fitted with 0px to spare. The
+   header's links are now edited by platform staff (decision J), within a label
+   budget that is only honest if the row the budget is for actually has room.
+   So between the nav's first width and the next breakpoint the row is packed a
+   little tighter: less padding on each nav link, a slightly smaller nav label,
+   a narrower gap, and the two small header buttons at the padding they already
+   use on a phone. Nothing wraps, nothing is hidden, and every accessible name is
+   unchanged. From 1280 the nav itself is exactly as it was. */
+@media(min-width:1120px) and (max-width:1279px){.hdr__inner{gap:10px}.nav__link{padding:10px 3px;font-size:.86rem}.hdr__actions{gap:6px}.hdr__actions .btn--sm{padding:9px 12px}}
 @media(max-width:500px){.hdr__cta{display:none}.hdr__inner{gap:12px}}
 @media(max-width:360px){.logo__text em{display:none}.logo__text strong{font-size:1.12rem}}
 /* Portal Login and Report a Job ride with the nav.

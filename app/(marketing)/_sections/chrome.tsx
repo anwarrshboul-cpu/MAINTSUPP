@@ -9,6 +9,15 @@
  * focus and closes on Escape, and the cookie choice is stored under
  * `mt_cookie`.
  *
+ * THE MENU IS DATA NOW (decision J). The header's links and the footer's link
+ * lists are edited by MAINTSUPP platform staff and arrive as the `navigation`
+ * prop, already filtered on the server — hidden links and links to website
+ * pages that are not live never reach this file. The rules (safe destinations,
+ * the five locked links, the header's width budget) and the built-in lists
+ * live in `app/lib/site-navigation.ts`. What stays here is the FRAME: the logo,
+ * the utility bar, the header's own three buttons, the contact details and the
+ * company line — see `FIXED_CHROME` there.
+ *
  * THREE DELIBERATE DIFFERENCES, all noted inline where they occur:
  *  1. The logo is a link to "/" rather than a `#top` scroll anchor, so it also
  *     works from /faqs, /privacy, /terms and /cookies.
@@ -20,6 +29,7 @@
  */
 
 import Link from "next/link";
+import type { PublicNavigation } from "../../lib/site-navigation";
 import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
 import { usePathname } from "next/navigation";
 import {
@@ -33,53 +43,25 @@ import {
 } from "react";
 
 /*
- * Five links, and every one of them lands on a section that exists.
+ * THE HEADER'S LINKS ARE NO LONGER A CONSTANT IN THIS FILE.
  *
- * The old list pointed at `#trades`, `#packages`, `#calculator`, `#evidence`
- * and `#faq` — five anchors whose sections this rebuild removes. An anchor with
- * no target does not error; it silently does nothing, which is the worst
- * possible behaviour for the top-level navigation of a page.
+ * They were `const NAV = [...]` here — six destinations, each a section that
+ * exists or the /contractors route. That list is now the BUILT-IN navigation in
+ * `app/lib/site-navigation.ts` (same entries, same order, same reasons written
+ * beside them), and what this file renders is `navigation.primary`: the stored
+ * menu, or that built-in one when nothing is stored or the database cannot
+ * answer. A client component cannot be where the server reads its fallback
+ * from, which is the whole reason it moved.
  *
- * The drawer carried nine of these. It now carries the same five as the
- * desktop bar: a phone menu that lists more destinations than the desktop nav
- * was never a decision anybody made.
- *
- * "Contact Us" points at `#contact`, which names the same section the footer's
- * "Contact" link has always gone to — the page's only form that asks who you
- * are and how to reach you. It used to point at `#review`, the anchor the
- * "Book a Portfolio Review" buttons use; that worked, but a nav item called
- * Contact Us landing on an anchor called review, under a heading that only
- * offered a portfolio review, read as a mistake. The section now carries both
- * names and says both things, so every existing link still resolves. No new
- * phone number, email or address is invented here: the ones the site already
- * publishes live in the utility bar and the footer.
+ * One list still feeds both bars: the desktop nav and the drawer both render
+ * `NAV`, below, so a link cannot be in one and missing from the other.
  */
-/**
- * The primary nav.
- *
- * FIVE OF THESE SIX ARE ANCHORS ON THIS PAGE; "Contractors" is a ROUTE.
- * `/contractors` is a real page — the application form for the contractor
- * network — and until now the only way to it was a single line in the footer,
- * which is where links go to not be found. It is rendered with `next/link`
- * rather than a bare `<a>` so it navigates client-side like every other route
- * on the site, and the drawer does NOT hand it the anchor handler, which
- * exists to defer a hash until the body-scroll lock releases and has nothing
- * to defer for a page change.
- *
- * It sits before "Contact Us" so that contacting stays the last thing in the
- * row, which is where the footer and the utility bar also put it.
- */
-const NAV = [
-  ["#services", "Services"],
-  ["#how", "How It Works"],
-  ["#pricing", "Pricing"],
-  ["#case-study", "Case Study"],
-  ["/contractors", "Contractors"],
-  ["#contact", "Contact Us"],
-] as const;
 
 /** Whether a nav target is a hash on this page rather than another route. */
 const isAnchor = (href: string) => href.startsWith("#");
+
+/** Whether a destination is another site — a stored menu link may be one. */
+const isOutbound = (href: string) => href.startsWith("https:") || href.startsWith("http:");
 
 /**
  * A section hash, resolved against the page it is being rendered on.
@@ -136,9 +118,15 @@ function SectionLink({
       </a>
     );
   }
+  /* Another site, from the editable menu: its own tab, no opener, and said
+     so to a screen reader. A caller that sets its own `target` (the booking
+     button) keeps it, and its accessible name already comes from aria-label. */
+  const outbound = isOutbound(resolved) && rest.target === undefined;
+  const newTab = outbound ? { target: "_blank", rel: "noopener noreferrer" } : {};
   return (
-    <Link className={className} href={resolved} onClick={onNavigate} {...rest}>
+    <Link className={className} href={resolved} onClick={onNavigate} {...newTab} {...rest}>
       {children}
+      {outbound ? <span className="vh"> (opens in a new tab)</span> : null}
     </Link>
   );
 }
@@ -233,7 +221,13 @@ export function UtilityBar() {
   );
 }
 
-export function SiteHeader() {
+/**
+ * The header. `navigation.primary` is the header menu as the server resolved
+ * it, and it is rendered twice — the desktop bar and the drawer — from this
+ * one list.
+ */
+export function SiteHeader({ navigation }: { navigation: PublicNavigation }) {
+  const NAV = navigation.primary;
   const [stuck, setStuck] = useState(false);
   const [open, setOpen] = useState(false);
   const drawer = useRef<HTMLDivElement>(null);
@@ -372,8 +366,8 @@ export function SiteHeader() {
 
           <nav className="nav" aria-label="Primary">
             <ul className="nav__list">
-              {NAV.map(([href, label]) => (
-                <li key={href}>
+              {NAV.map(({ id, href, label }) => (
+                <li key={id}>
                   <SectionLink className="nav__link" href={href}>
                     {label}
                   </SectionLink>
@@ -490,8 +484,8 @@ export function SiteHeader() {
             </Link>
             <nav aria-label="Mobile">
               <ul className="drawer__list">
-                {NAV.map(([href, label]) => (
-                  <li key={href}>
+                {NAV.map(({ id, href, label }) => (
+                  <li key={id}>
                     <SectionLink
                       href={href}
                       onAnchorClick={onDrawerLink}
@@ -521,7 +515,14 @@ export function SiteHeader() {
   );
 }
 
-export function SiteFooter() {
+/**
+ * The footer. The link columns come in their stored order, then Legal, which
+ * the footer draws under the Contact column rather than as a column of its
+ * own. A column whose every link is hidden is not drawn as an empty heading.
+ */
+export function SiteFooter({ navigation }: { navigation: PublicNavigation }) {
+  const columns = navigation.footer.filter((group) => group.id !== "legal" && group.links.length > 0);
+  const legal = navigation.footer.find((group) => group.id === "legal" && group.links.length > 0);
   return (
     <footer className="ftr">
       {/* The column headings below are <h3>s, which is right under a page's own
@@ -548,59 +549,32 @@ export function SiteFooter() {
           </div>
         </div>
 
-        <div>
-          <h3>Services</h3>
-          <ul>
-            <li><SectionLink href="#services">Reactive Maintenance</SectionLink></li>
-            <li><SectionLink href="#services">Planned Maintenance</SectionLink></li>
-            <li><SectionLink href="#services">Compliance Coordination</SectionLink></li>
-            <li><SectionLink href="#services">Projects &amp; Store Works</SectionLink></li>
-          </ul>
-        </div>
+        {/*
+          THE THREE LINK COLUMNS AND THE LEGAL LIST ARE THE EDITABLE FOOTER.
 
-        <div>
-          <h3>Company</h3>
-          <ul>
-            <li><SectionLink href="#how">How It Works</SectionLink></li>
-            <li><SectionLink href="#pricing">Pricing</SectionLink></li>
-            <li><SectionLink href="#case-study">Case Study</SectionLink></li>
-            <li><SectionLink href="#sectors">Who We Help</SectionLink></li>
-            {/*
-              THE THREE V3 SECTIONS ARE REACHABLE FROM HERE, NOT FROM THE NAV.
-
-              The top nav is five items and stays five. It collapses into the
-              drawer at 1119px and already drops the CTA's long label between
-              1120 and 1219 to fit what is there — a sixth item would be
-              spending the one place on the page that has no room left. The
-              footer has columns to spare, and these are destinations a reader
-              looks for by name after they have read the page rather than
-              before.
-            */}
-            <li><SectionLink href="#replaces">What This Replaces</SectionLink></li>
-            <li><SectionLink href="#your-contractors">Your Contractors or Ours</SectionLink></li>
-            {/* Footer only, deliberately — the top nav is for the people the
-                site is selling to, and a contractor looking for work is not
-                that reader. */}
-            <li><Link href="/contractors">Join our contractor network</Link></li>
-            <li><SectionLink href="#contact">Contact</SectionLink></li>
-          </ul>
-        </div>
-
-        <div>
-          <h3>Clients</h3>
-          <ul>
-            <li><SectionLink href="#report">Report a Job</SectionLink></li>
-            {/* Same door, same name as the header and the utility bar. */}
-            <li><Link href="/portal">Portal Login</Link></li>
-            {/* Two FAQ destinations, and they are not a duplicate: the anchor
-                is the accordion further up THIS page, the link is the standalone
-                page that renders every answer open and carries the FAQPage
-                markup. Named so the difference is visible before the click. */}
-            <li><SectionLink href="#faq">FAQs on this page</SectionLink></li>
-            <li><Link href="/faqs">All FAQs</Link></li>
-            <li><SectionLink href="#portal">Client portal</SectionLink></li>
-          </ul>
-        </div>
+          Services, Company and Clients are columns here; Legal sits under
+          Contact, below. Their entries used to be written out in this file —
+          the three V3 sections reachable from here rather than from the nav,
+          the two FAQ destinations named so the difference is visible before
+          the click, "Join our contractor network" in the footer only — and they
+          are now the built-in footer in `app/lib/site-navigation.ts`, with the
+          same reasons beside them. Every entry goes through `SectionLink`, so a
+          section hash resolves against whichever page the footer is drawn on.
+          Privacy, Terms, Cookies, Report a Job and Portal Login are LOCKED
+          there: they cannot be removed, hidden or pointed anywhere else.
+        */}
+        {columns.map((group) => (
+          <div key={group.id}>
+            <h3>{group.heading}</h3>
+            <ul>
+              {group.links.map((link) => (
+                <li key={link.id}>
+                  <SectionLink href={link.href}>{link.label}</SectionLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
 
         <div>
           <h3>Contact</h3>
@@ -616,13 +590,20 @@ export function SiteFooter() {
             </li>
           </ul>
           {/* Not in the source. The lead form asks people to accept a privacy
-              notice, so the notice has to be reachable from the page. */}
-          <h3 className="ftr__h3--legal">Legal</h3>
-          <ul>
-            <li><Link href="/privacy">Privacy notice</Link></li>
-            <li><Link href="/terms">Terms</Link></li>
-            <li><Link href="/cookies">Cookies</Link></li>
-          </ul>
+              notice, so the notice has to be reachable from the page — which is
+              why its three links are locked in the editable footer. */}
+          {legal ? (
+            <>
+              <h3 className="ftr__h3--legal">{legal.heading}</h3>
+              <ul>
+                {legal.links.map((link) => (
+                  <li key={link.id}>
+                    <SectionLink href={link.href}>{link.label}</SectionLink>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
         </div>
       </div>
 

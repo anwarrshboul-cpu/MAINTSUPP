@@ -430,8 +430,10 @@ test("the console lists the inbox because the inbox now has a server side", asyn
      ENTRIES list rather than a literal, so it needed no change.
      Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
      API (`/api/contractor-applications/inbox`) — the same rule kept once more.
-     Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`. */
-  assert.equal(PLATFORM_SECTIONS.length, 9);
+     Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`.
+     Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
+     `/api/site-navigation`. */
+  assert.equal(PLATFORM_SECTIONS.length, 10);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the
