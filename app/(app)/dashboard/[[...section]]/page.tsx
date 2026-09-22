@@ -1,3 +1,5 @@
+import type { Metadata } from "next";
+
 import { requireModuleAccess, requirePageSession } from "../../../lib/page-guard";
 import PortalApp, { type Section } from "../../portal/portal-app";
 
@@ -39,6 +41,50 @@ const routes: Record<string, Section> = {
   "admin/roles": "admin-roles",
   "admin/clients": "admin-clients",
 };
+
+/*
+ * The tab title for each section: the sidebar's own label, so a row of browser
+ * tabs says which screen each one is instead of all reading the site's
+ * strapline. `sectionMeta` in portal-app.tsx holds these labels, but it lives in
+ * a client module whose values a server file cannot read, so they are restated
+ * here — `tests/phase10-a11y-fixes.test.mjs` holds the two level. A section
+ * missing from this table (a workspace's own `s/<slug>`, which this file
+ * resolves without a database) keeps the default title rather than a wrong one.
+ */
+const titles: Partial<Record<Section, string>> = {
+  overview: "Overview",
+  maintenance: "Jobs",
+  calendar: "Planned",
+  assets: "Assets",
+  units: "Assets",
+  stores: "Sites",
+  "store-documentation": "Store Documentation",
+  contractors: "Contractors",
+  compliance: "Compliance",
+  documents: "Documents",
+  "invoice-tracker": "Invoice Tracker",
+  reports: "Reports",
+  settings: "Settings",
+  team: "Team",
+  "admin-users": "Users",
+  audit: "Audit",
+  reconcile: "Reconcile",
+  "recycle-bin": "Recycle Bin",
+  "admin-roles": "Roles",
+  "admin-clients": "All clients",
+};
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ section?: string[] }>;
+}): Promise<Metadata> {
+  const { section } = await params;
+  const slug = section?.join("/") || "overview";
+  const resolved = routes[slug] ?? routes[section?.[0] ?? ""];
+  const title = resolved ? titles[resolved] : undefined;
+  return title ? { title } : {};
+}
 
 export default async function DashboardPage({
   params,

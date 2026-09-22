@@ -43,7 +43,9 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--teal);
+  /* `--teal-text`, not `--teal`: the eyebrow sits on the white legal, FAQ and
+     CMS pages, where #0DA1A9 is 3.1:1 — the palette note below says as much. */
+  color: var(--teal-text);
 }
 
 .m-lead { margin: 0 0 20px; font-size: 17px; color: #33454e; max-width: 58ch; }

@@ -31,6 +31,7 @@ import {
   useModuleAvailable,
   usePlatformAdmin,
 } from "../../lib/client-capabilities";
+import { CHIP_INK_LIGHT, chipInk } from "./chip-ink";
 import { LayerPortal, useAnchoredPosition } from "./overlay/anchored";
 import "./account-menu.css";
 
@@ -730,11 +731,16 @@ export function AccountMenu({
          * The chosen avatar colour, applied. `Avatar` is a shared component this
          * work does not own, so the value is handed down as a custom property
          * the menu's own stylesheet consumes — the setting is visible rather
-         * than merely stored.
+         * than merely stored. The initials' ink travels with it: white is kept
+         * wherever it clears AA and swapped for the dark ink where it does not
+         * (white on the default teal is 2.58:1).
          */
         style={
           snapshot?.profile.avatarColour
-            ? ({ "--account-avatar": snapshot.profile.avatarColour } as React.CSSProperties)
+            ? ({
+                "--account-avatar": snapshot.profile.avatarColour,
+                "--account-avatar-ink": chipInk(snapshot.profile.avatarColour, CHIP_INK_LIGHT),
+              } as React.CSSProperties)
             : undefined
         }
         type="button"

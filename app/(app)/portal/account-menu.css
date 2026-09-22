@@ -47,6 +47,9 @@ a.topbar-icon.icon-button {
      lightens in dark so it can be read on a teal wash, and as a ground it put
      the white initials at 2.57:1. */
   background: var(--account-avatar, var(--brand-solid));
+  /* And the ink that belongs to that fill: a chosen colour brings its own
+     (chipInk), the teal fallback its paired label. White on #12b4a8 is 2.58:1. */
+  color: var(--account-avatar-ink, var(--on-brand-solid));
   transition: box-shadow 0.15s ease;
 }
 

@@ -589,7 +589,9 @@ export function ReportJob() {
           </p>
         </div>
 
-        <aside className="qj reveal">
+        {/* A <div>, not an <aside>: this is the section's main content (the
+            form itself), and a complementary landmark inside <main> is an axe fault. */}
+        <div className="qj reveal">
           <form className="qj__form" id="rjForm" noValidate onSubmit={onSubmit}>
             <div className="qj__row">
               <div className={fieldClass("rjSite")}>
@@ -1078,7 +1080,7 @@ export function ReportJob() {
               {status.text}
             </p>
           </form>
-        </aside>
+        </div>
       </div>
     </section>
   );

@@ -100,11 +100,14 @@ const PUBLIC_PAGES = new Map([
     "the sign-in form itself — guarding it would be a redirect loop. It does " +
       "the opposite check: a live session is sent on rather than shown a form.",
   ],
-  [
-    "app/(app)/request/page.tsx",
-    "the public job-request form. The visitor is a store manager with no " +
-      "account at all, so there is no session to require.",
-  ],
+  /*
+   * `app/(app)/request/page.tsx` used to be listed here as "the public
+   * job-request form" for a store manager with no account. It never worked for
+   * one — its lists come from `/api/context` and it submits to
+   * `/api/maintenance` (board.edit), both session-only — so a signed-out
+   * visitor got an empty form that could not be sent. It is guarded now; the
+   * account-less doors are `/api/report-job` and `/f/<token>`.
+   */
 ]);
 
 /** Strings that only exist inside the authenticated shell. */
@@ -237,9 +240,11 @@ test("the public list has not quietly grown", async () => {
   // A second lock on the same door. The list above is only meaningful if
   // adding to it is a visible act; pinning the size makes an addition show up
   // in a diff even when the walk finds no new page.
-  assert.equal(PUBLIC_PAGES.size, 2);
+  assert.equal(PUBLIC_PAGES.size, 1);
   assert.ok(PUBLIC_PAGES.has("app/(app)/login/page.tsx"));
-  assert.ok(PUBLIC_PAGES.has("app/(app)/request/page.tsx"));
+  // Re-pointed, not dropped: the request form LEFT this list (it needs a
+  // session to load and to submit), so the lock now pins that it stays off it.
+  assert.ok(!PUBLIC_PAGES.has("app/(app)/request/page.tsx"), "the request form needs a session; it is guarded");
   for (const [page, reason] of PUBLIC_PAGES) {
     assert.ok(reason.length > 40, `${page} needs a real reason, not a label`);
   }

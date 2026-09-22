@@ -189,7 +189,10 @@ export function PortalModulesPanel() {
               key={module.key}
             >
               <label className="portal-module__switch" htmlFor={`pm-${module.key}`}>
+                {/* The label holds only the switch and its track, so it names
+                    nothing; the module's own name is the switch's name. */}
                 <input
+                  aria-label={module.label}
                   id={`pm-${module.key}`}
                   type="checkbox"
                   checked={enabled}
