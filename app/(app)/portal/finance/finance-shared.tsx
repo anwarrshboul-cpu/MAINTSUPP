@@ -30,9 +30,7 @@
 
 import {
   useCallback,
-  useEffect,
   useId,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -59,6 +57,7 @@ import {
   type StatusMapEntry,
   type StatusPresentation,
 } from "./finance-status";
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 
 /* ── Fetching ─────────────────────────────────────────────────────────────── */
 
@@ -818,19 +817,10 @@ export function SidePanel({
   children: ReactNode;
 }) {
   const headingId = useId();
-  const closeRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    closeRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  /* What `aria-modal` promises — Escape, focus in (the close button,
+     `data-autofocus`) and back, the Tab trap, the scroll lock — from the one
+     shared implementation. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
 
   return (
     <>
@@ -840,14 +830,22 @@ export function SidePanel({
         aria-label="Close this record"
         onClick={onClose}
       />
-      <div className="fin-panel" role="dialog" aria-modal="true" aria-labelledby={headingId}>
+      <div
+        ref={surface}
+        className="fin-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
+      >
         <div className="fin-panel__head">
           <div className="fin-panel__title">
             <h2 id={headingId}>{title}</h2>
             {subtitle ? <div className="fin-card__note">{subtitle}</div> : null}
           </div>
           <button
-            ref={closeRef}
+            data-autofocus
             type="button"
             className="fin-panel__close"
             onClick={onClose}

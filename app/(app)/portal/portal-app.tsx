@@ -4804,7 +4804,7 @@ function RequestTable({
             <th>Status</th>
             <th>Assigned to</th>
             <th>Next update</th>
-            <th aria-label="Actions" />
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -5696,7 +5696,7 @@ function DocumentsView({
                   <th>Size</th>
                   <th>Expiry</th>
                   <th>Status</th>
-                  <th aria-label="Actions" />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>

@@ -19,6 +19,7 @@
  * product ends up with two answers again.
  */
 
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 import { useOpsQuery } from "./ops-url-state";
 import { EmptyState, SkeletonRow } from "./ops-primitives";
 import type { RecordsPayload, RecordsQuery } from "./overview-contract";
@@ -60,13 +61,19 @@ export function OverviewRecordsPanel({
   );
   const data = state.data;
   const title = data?.title ?? FALLBACK_TITLE[query];
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
 
   return (
     <div
+      ref={surface}
       className="ops-sheet ovw-records"
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

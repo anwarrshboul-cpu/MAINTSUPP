@@ -198,7 +198,7 @@ export function AccountApiTokensCard({ onNotify }: { onNotify?: (message: string
                 <th>Expires</th>
                 <th>Last used</th>
                 <th>State</th>
-                <th aria-label="Actions" />
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>

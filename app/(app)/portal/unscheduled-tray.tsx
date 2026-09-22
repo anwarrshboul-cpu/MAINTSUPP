@@ -70,6 +70,7 @@ import {
 } from "./job-side-panel";
 import { visitScheduleTarget, type VisitScheduleTarget } from "./planned-visit";
 import "./unscheduled-tray.css";
+import { useDialogBehaviour } from "./overlay/dialog-behaviour";
 
 /* ── The DOM contract the grid publishes ─────────────────────────────────── */
 
@@ -622,19 +623,20 @@ export function ScheduleConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  /* What `aria-modal` promises — Escape (cancels), focus in and back, the Tab
+     trap, the scroll lock — from the one shared implementation
+     (`dialog-behaviour.ts`). `autoFocus` below still chooses the first focus. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onCancel);
   return (
-    <div
-      className="tray-confirm__scrim"
-      role="presentation"
-      onKeyDown={(pressed) => {
-        if (pressed.key === "Escape") onCancel();
-      }}
-    >
+    <div className="tray-confirm__scrim" role="presentation">
       <div
+        ref={surface}
         className="tray-confirm"
         role="dialog"
         aria-modal="true"
         aria-labelledby="tray-confirm-title"
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
       >
         <h2 id="tray-confirm-title">Past the response deadline</h2>
         <p>

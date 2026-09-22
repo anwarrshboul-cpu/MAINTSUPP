@@ -848,13 +848,25 @@ export function SidebarNav({
                           </span>
                         )}
                         {!editing && count > 0 && (
-                          <span
-                            className="nav-count"
-                            title={countLabel ? count + " " + countLabel : undefined}
-                            aria-label={countLabel ? count + " " + countLabel : undefined}
-                          >
-                            {count}
-                          </span>
+                          <>
+                            {/*
+                             * The number is drawn for the eye and SPOKEN from the
+                             * hidden text beside it. An `aria-label` on a plain
+                             * span is ignored when a button's name is built from
+                             * its content, so the button read "Jobs158"; now it
+                             * reads "Jobs, 158 urgent jobs".
+                             */}
+                            <span
+                              className="nav-count"
+                              title={countLabel ? count + " " + countLabel : undefined}
+                              aria-hidden="true"
+                            >
+                              {count}
+                            </span>
+                            <span className="visually-hidden">
+                              {`, ${count}${countLabel ? ` ${countLabel}` : ""}`}
+                            </span>
+                          </>
                         )}
                       </button>
                     )}
