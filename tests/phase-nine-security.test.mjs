@@ -304,7 +304,10 @@ test("#4 the throttles share sign-in's table without sharing its key space", asy
   /* Re-pointed 3 → 4 for the direct-upload batch: `REPORT_JOB_SUBMISSIONS`
      throttles the home page's anonymous report door, whose upload token is now
      worth up to 90 MB of storage. The lock still makes every addition visible. */
-  assert.equal(windows.length, 4);
+  /* Re-pointed 4 → 6 for the public intake batch: `LEAD_SUBMISSIONS` and
+     `CONTRACTOR_APPLICATIONS` throttle the marketing site's other two anonymous
+     doors, which had a honeypot and nothing respectively. */
+  assert.equal(windows.length, 6);
   for (const minutes of windows) assert.ok(minutes <= 60, "within the sweep's hour");
   /* Keyed per address, never per form alone — a per-form cap is a way to close
      a client's fault form to everybody. */

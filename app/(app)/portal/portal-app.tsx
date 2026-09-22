@@ -3998,6 +3998,7 @@ export default function PortalApp({
                  portfolio is empty while the fetch is still in flight. */
               jobsReady={dataMode === "live"}
               onNavigate={setSection}
+              canSetWorkspaceDefault={runtimeContext?.capabilities?.["settings.edit"] === true}
             />
           )}
           {activeSurface === "team" && (
@@ -6365,7 +6366,10 @@ function ReportsView({
   jobsReady,
   sectionKey,
   onNavigate,
+  canSetWorkspaceDefault = false,
 }: {
+  /* `settings.edit`: offers the workspace default layout — save, remove, history. */
+  canSetWorkspaceDefault?: boolean;
   requests: MaintenanceRequest[];
   stores: StoreRecord[];
   /**
@@ -6586,6 +6590,7 @@ function ReportsView({
       <DashboardWidgets
         surface="reports"
         barSlot={layoutSlot}
+        canSetWorkspaceDefault={canSetWorkspaceDefault}
         widgets={[
           {
             /*

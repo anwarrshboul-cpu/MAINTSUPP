@@ -210,6 +210,9 @@ export async function loadRestoreSnapshot(
   if (row.changeKind === "deleted") {
     return { ok: false, status: 409, error: `Version ${version} records a deletion; restore the version before it.` };
   }
+  if (row.changeKind === "renamed") {
+    return { ok: false, status: 409, error: `Version ${version} records a move to another address; the page's history continues there.` };
+  }
   return { ok: true, snapshot: JSON.parse(row.snapshot) };
 }
 

@@ -74,6 +74,7 @@ import {
   platformSection,
   platformSectionPath,
 } from "../../lib/platform-sections";
+import { ApplicationsInboxView } from "./applications-view";
 import { LeadsInboxView } from "./leads-view";
 import { PlatformOverview } from "./platform-overview";
 import { SitePagesView } from "./site-pages-view";
@@ -136,6 +137,8 @@ export function PlatformShell({
         return <SitePagesView />;
       case "leads":
         return <LeadsInboxView />;
+      case "applications":
+        return <ApplicationsInboxView />;
       default:
         return <PlatformOverview />;
     }

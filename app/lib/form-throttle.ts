@@ -50,6 +50,29 @@ export const REPORT_JOB_SUBMISSIONS: PublicThrottle = {
   lockoutMs: 10 * 60_000,
 };
 
+/*
+ * `/api/leads` and `/api/contractor-applications` — the marketing site's other two
+ * anonymous doors. The lead form had only a honeypot, which stops a bot driving
+ * the page and nothing about a script posting to the route; the application
+ * form had nothing at all. Every accepted submission writes a row and queues an
+ * email to a real inbox, so both are counted per address, before anything is
+ * read or written. Ten per ten minutes is far above what one company filling
+ * in a form needs.
+ */
+export const LEAD_SUBMISSIONS: PublicThrottle = {
+  name: "lead-submit",
+  windowMs: 10 * 60_000,
+  max: 10,
+  lockoutMs: 10 * 60_000,
+};
+
+export const CONTRACTOR_APPLICATIONS: PublicThrottle = {
+  name: "contractor-application",
+  windowMs: 10 * 60_000,
+  max: 10,
+  lockoutMs: 10 * 60_000,
+};
+
 export const FORM_PASSWORD_FAILURES: PublicThrottle = {
   name: "form-password",
   windowMs: 15 * 60_000,

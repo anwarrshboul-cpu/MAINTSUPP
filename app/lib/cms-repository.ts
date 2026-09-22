@@ -166,18 +166,25 @@ export type PageInput = {
  * `published_at` is set once, on the first publish, and never cleared. It records
  * when the page first went public, which is a fact about history; unpublishing does
  * not un-happen it.
+ *
+ * `from` is the address the page has NOW. When it differs from `input.slug` the
+ * page MOVES: the same row takes the new address, and the old one stops resolving.
+ * This used to look the page up by the new address only, so a slug edit created a
+ * second page and left the first one published. The route has already refused a
+ * move onto an address another page holds; `site_pages_slug_idx` is the backstop.
  */
 export async function writePage(
   db: Database,
   input: PageInput,
   actorEmail: string,
+  from: string = input.slug,
 ): Promise<{ ok: true; id: string } | { ok: false; reason: string }> {
   const now = new Date().toISOString();
   try {
     const existing = await db
       .select({ id: sitePages.id, publishedAt: sitePages.publishedAt })
       .from(sitePages)
-      .where(eq(sitePages.slug, input.slug))
+      .where(eq(sitePages.slug, from))
       .limit(1);
 
     const id = existing[0]?.id ?? `pg_${crypto.randomUUID().replace(/-/g, "")}`;
@@ -188,6 +195,7 @@ export async function writePage(
       await db
         .update(sitePages)
         .set({
+          slug: input.slug,
           title: input.title,
           metaTitle: input.metaTitle,
           metaDescription: input.metaDescription,

@@ -95,7 +95,11 @@ test("the page route: gate first, restore before every content rule, baseline be
   assert.match(put, /organisationId: null, subject: "site_page", key/);
   /* An undelete is compared with nothing, not with the deletion marker's copy
      of the page — which would read "Saved with no change". */
-  assert.match(put, /const previous = before \? await latestSnapshot\(scope\.db, versionTarget\) : null;/);
+  /* Re-pointed for the page-move fix: the previous state is read from the address
+     the page HAD (`fromTarget`, which is `versionTarget` unless the page moved) —
+     the contract is unchanged: a page that does not exist is compared with nothing. */
+  assert.match(put, /const previous = before \? await latestSnapshot\(scope\.db, fromTarget\) : null;/);
+  assert.match(put, /const fromTarget: VersionTarget = \{ \.\.\.versionTarget, key: fromSlug \};/);
   assert.match(put, /`Brought back from version \$\{restoring\} after its deletion — \$\{pageShape\(after\)\}`/);
   const del = route.slice(route.indexOf("export async function DELETE"));
   assert.ok(del.indexOf("const doomed = (await listPages(scope.db))") < del.indexOf("await deletePage("), "the page is read before it goes");
