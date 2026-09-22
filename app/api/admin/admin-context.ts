@@ -37,6 +37,7 @@ import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenan
 import {
   companyOfOrganisation,
   roleInOrganisation as grantedRoleIn,
+  siteScopeInOrganisation,
 } from "../../lib/tenant-access";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 // The role vocabulary, from the module that defines it.
@@ -111,6 +112,7 @@ export async function adminContext(
     access.db,
     targetOrganisationId,
     effectiveRole,
+    siteScopeInOrganisation(access, targetOrganisationId),
   );
 
   return {
@@ -257,7 +259,13 @@ export async function accountWideRefusal(
     const allowed =
       actorRole !== null &&
       can(
-        { role: actorRole, capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {} },
+        {
+          role: actorRole,
+          capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {},
+          /* The site ceiling in THAT workspace too (review): restricted there,
+             no account-wide change — a password reset included. */
+          siteRestricted: siteScopeInOrganisation(context, row.organisationId) !== null,
+        },
         capability,
       ) &&
       canManageRole(actorRole, targetRole);

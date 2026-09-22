@@ -166,7 +166,7 @@ export async function GET(request: Request) {
      * Losing the history matches what a manager already gets from `/api/audit`;
      * losing the recovery instructions would not.
      */
-    const subject = await resolvePermissions(context.db, orgId, context.actor.role);
+    const subject = await resolvePermissions(context.db, orgId, context.actor.role, context.siteScope);
     const mayReadAudit = can(subject, "audit.read");
 
     const [activityRows, auditRows] = await Promise.all([

@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     if (!scope.authenticated || !scope.session) {
       return Response.json({ error: "Sign in with your own account to issue an API token." }, { status: 401 });
     }
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const checked = validateTokenRequest(body, subject);
     if (!checked.ok) return Response.json({ error: checked.error }, { status: 400 });

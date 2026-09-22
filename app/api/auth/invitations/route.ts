@@ -19,7 +19,7 @@ import { COMPANY_KIND } from "../../../lib/company-authority";
 import { can, canAssignRole, resolvePermissions } from "../../../lib/permissions";
 import { withArticle } from "../../../lib/roles";
 import { publicUrl } from "../../../lib/public-origin";
-import { roleInOrganisation } from "../../../lib/tenant-access";
+import { roleInOrganisation, siteScopeInOrganisation } from "../../../lib/tenant-access";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import {
   createInvitation,
@@ -379,7 +379,7 @@ export async function POST(request: Request) {
     for (const target of targets) {
       const actingRole = roleInOrganisation(scope, target.id);
       if (!actingRole) return Response.json({ error: REFUSED }, { status: 403 });
-      const subject = await resolvePermissions(db, target.id, actingRole);
+      const subject = await resolvePermissions(db, target.id, actingRole, siteScopeInOrganisation(scope, target.id));
       if (!can(subject, "users.invite")) {
         return Response.json({ error: REFUSED }, { status: 403 });
       }

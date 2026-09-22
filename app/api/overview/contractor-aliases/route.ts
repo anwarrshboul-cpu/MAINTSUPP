@@ -301,7 +301,7 @@ export async function GET(request: Request) {
         .where(eq(contractorNameAliases.organisationId, scope.orgId)),
       readIgnored(scope),
       readNamedJobs(scope),
-      resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
     ]);
 
     const contractorName = new Map(register.map((row) => [row.id, row.name]));

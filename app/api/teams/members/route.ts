@@ -107,7 +107,7 @@ export async function POST(request: Request) {
     if (guard.denied) return guard.denied;
     const scope = guard.scope;
     const refusal = requireCapability(
-      await resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
       MANAGE,
     );
     if (refusal) return refusal;
@@ -230,7 +230,7 @@ export async function DELETE(request: Request) {
     if (guard.denied) return guard.denied;
     const scope = guard.scope;
     const refusal = requireCapability(
-      await resolvePermissions(scope.db, scope.orgId, scope.actor.role),
+      await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope),
       MANAGE,
     );
     if (refusal) return refusal;

@@ -292,7 +292,7 @@ export async function scopedDbWithCapability(
     };
   }
 
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   const refusal = requireCapability(subject, capability);
   return refusal ? { denied: refusal } : { scope };
 }

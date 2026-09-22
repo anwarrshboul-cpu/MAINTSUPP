@@ -774,7 +774,8 @@ test("the board's CSV is produced by a route that holds data.export", async () =
 test("/api/context publishes the caller's own effective capabilities", async () => {
   const route = await read("app/api/context/route.ts");
   assert.match(route, /capabilities: effectiveCapabilities\(/);
-  assert.match(route, /resolvePermissions\(context\.db, context\.orgId, context\.actor\.role\)/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(route, /resolvePermissions\(context\.db, context\.orgId, context\.actor\.role, context\.siteScope\)/);
 });
 
 test("structural board changes record who made them", async () => {

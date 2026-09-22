@@ -142,7 +142,7 @@ export async function scopedDbWithApiToken(
       ),
     };
   }
-  const subject = await resolvePermissions(db, row.organisationId, access.role);
+  const subject = await resolvePermissions(db, row.organisationId, access.role, access.siteScope);
   if (!effectiveTokenScopes(readScopes(row.scopes), subject).includes(scope)) {
     return {
       denied: Response.json(

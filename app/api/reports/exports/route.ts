@@ -56,6 +56,7 @@ import { XLSX_CONTENT_TYPE, renderXlsx } from "../../../lib/exports/xlsx";
 import { recordExportHistory } from "./history";
 import type { DocumentBranding } from "../../../lib/exports/document-model";
 import { documentLogo } from "../../../lib/organisation-logo";
+import { everySiteRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -321,6 +322,8 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const { denied, scope } = await scopedDbWithCapability(request, "data.export");
     if (denied) return denied;
+    const everySite = everySiteRefusal(scope.siteScope, "a report document");
+    if (everySite) return everySite;
 
     const url = new URL(request.url);
     const format = url.searchParams.get("format");
@@ -346,6 +349,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const { denied, scope } = await scopedDbWithCapability(request, "data.export");
     if (denied) return denied;
+    const everySite = everySiteRefusal(scope.siteScope, "a report document");
+    if (everySite) return everySite;
 
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const format = body["format"];

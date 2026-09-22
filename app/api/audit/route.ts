@@ -22,8 +22,9 @@
 import { and, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { auditEvents, organisations } from "../../../db/schema";
-import { requireCapability, resolvePermissions } from "../../lib/permissions";
+import { can, requireCapability, resolvePermissions } from "../../lib/permissions";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { roleInOrganisation, siteScopeInOrganisation } from "../../lib/tenant-access";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +113,18 @@ function parseDetail(value: string | null) {
  * Query: `organisationId`, `actor`, `action`, `entityType`, `entityId`,
  * `from`, `to`, `page`, `pageSize`, `q`. Newest first, always.
  */
+/** The workspaces whose audit log this reader may read — `audit.read` in each, under its own site scope. */
+async function auditReadable(scope: Awaited<ReturnType<typeof scopedDb>>): Promise<string[]> {
+  const readable: string[] = [];
+  for (const id of scope.organisationIds) {
+    const role = roleInOrganisation(scope, id);
+    if (!role) continue;
+    const subject = await resolvePermissions(scope.db, id, role, siteScopeInOrganisation(scope, id));
+    if (can(subject, "audit.read")) readable.push(id);
+  }
+  return readable;
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
@@ -120,7 +133,7 @@ export async function GET(request: Request) {
     // Checked against the actor's *current* workspace. A super admin bypasses
     // overrides by construction (see `can()`), so the cross-workspace read
     // below cannot be reached by anyone whose capability was withdrawn here.
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "audit.read");
     if (refusal) return refusal;
 
@@ -130,7 +143,10 @@ export async function GET(request: Request) {
     // The organisations this reader may see. A requested workspace outside the
     // set is ignored rather than honoured — the same rule `scopedDb` applies to
     // the organisation cookie, for the same reason.
-    const readable = scope.organisationIds;
+    /* Only the workspaces where THIS reader holds `audit.read`, each judged
+       with its own role and site scope — not every workspace they belong to on
+       the strength of the selected one's permission (security review). */
+    const readable = scope.crossOrganisation ? scope.organisationIds : await auditReadable(scope);
     const requested = text(params.get("organisationId"), 80);
     const organisationIds =
       requested && readable.includes(requested) ? [requested] : readable;

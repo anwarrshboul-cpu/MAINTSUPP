@@ -12,6 +12,7 @@ import {
   listColumnTypes,
   summariesFor,
 } from "../../../lib/column-types";
+import { boardStructureRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -107,6 +108,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const body = await request.json().catch(() => ({}));
 
@@ -200,6 +204,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const body = await request.json().catch(() => ({}));
 
@@ -418,6 +425,9 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 64);

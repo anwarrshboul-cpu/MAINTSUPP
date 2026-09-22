@@ -14,6 +14,7 @@ import type { InvoiceStatus, IsoDate, ReportPeriod, ReportPeriodPreset } from ".
 import { REPORT_PERIOD_PRESETS } from "./contract";
 import { visibleStatusesFor } from "./access";
 import { dateOnly, resolveReportPeriod } from "./period";
+import { everySiteRefusal } from "../job-site-scope";
 
 /**
  * Today, as a UTC calendar date.
@@ -51,7 +52,13 @@ export async function guard(
   capability: Capability,
 ): Promise<{ denied: Response; scope?: never } | { denied?: never; scope: ScopedDatabase }> {
   await ensureDatabase();
-  return scopedDbWithCapability(request, capability);
+  const guarded = await scopedDbWithCapability(request, capability);
+  if (guarded.denied) return guarded;
+  /* Report documents are built from every site's jobs: refused to a
+     site-restricted member (security review). The dashboards' metrics are
+     confined instead, in `/api/reports/metrics`. */
+  const everySite = everySiteRefusal(guarded.scope.siteScope, "a report document");
+  return everySite ? { denied: everySite } : guarded;
 }
 
 /**
@@ -95,7 +102,7 @@ export function clientMismatch(
  * a deploy — the same rule `/api/audit` applies to `audit.read`.
  */
 export async function visibleStatuses(scope: ScopedDatabase): Promise<InvoiceStatus[]> {
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   return visibleStatusesFor(can(subject, "board.edit"));
 }
 

@@ -59,9 +59,8 @@ import {
   signatureMatches,
   typeAgreesWithExtension,
 } from "../../../lib/file-signature";
+import { maxUploadSize, uploadSizeRefusal } from "../../../lib/upload-policy";
 
-const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
-const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
 const MAX_PART_SIZE = 5 * 1024 * 1024;
 const allowedKinds = new Set<AttachmentKind>([
   "issue",
@@ -697,17 +696,11 @@ export async function POST(request: Request) {
           { status: 415 },
         );
       }
-      const video = isVideo(originalName, contentType);
-      const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
-      if (byteSize > maxSize) {
-        return Response.json(
-          {
-            error: video
-              ? "Videos must be 90 MB or smaller."
-              : "Files must be 25 MB or smaller.",
-          },
-          { status: 413 },
-        );
+      /* Refused at `start`, before a session, an upload id or one byte: the
+         one size policy — `upload-policy.ts` (50 MB video, 25 MB otherwise). */
+      const tooLarge = uploadSizeRefusal(isVideo(originalName, contentType), byteSize);
+      if (tooLarge) {
+        return Response.json({ error: tooLarge }, { status: 413 });
       }
 
       /*
@@ -772,7 +765,7 @@ export async function POST(request: Request) {
        * this person, this workspace, this key, this exact size and part plan.
        * `transport` is "direct" when the storage driver can sign part URLs (S3 —
        * the deployed bucket), so the browser sends the bytes straight to the
-       * private bucket and a 90 MB video never passes through this function;
+       * private bucket and a 50 MB video never passes through this function;
        * "proxy" keeps the parts on `PUT` below (Miniflare R2, the filesystem).
        * If the row cannot be written the reserved upload is abandoned at once,
        * rather than left for the daily sweep to find.
@@ -1020,8 +1013,7 @@ export async function POST(request: Request) {
           );
         }
         const byteSize = Number(completed.metadata.byteSize);
-        const video = isVideo(completed.originalName, completed.contentType);
-        const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
+        const maxSize = maxUploadSize(isVideo(completed.originalName, completed.contentType));
         if (
           !Number.isInteger(byteSize) ||
           byteSize !== completed.head.size ||

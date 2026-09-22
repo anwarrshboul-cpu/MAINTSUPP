@@ -13,6 +13,7 @@ import { listOptionValues } from "../../lib/options-repository";
 import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
 import { complianceCompletion } from "../../lib/compliance-status";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
+import { siteCreationRefusal } from "../../lib/job-site-scope";
 import {
   complianceProfileGap,
   ensureComplianceProfile,
@@ -1112,6 +1113,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* No invisible sites: a site-restricted member cannot create one. */
+    const creationRefusal = siteCreationRefusal(guard.scope.siteScope);
+    if (creationRefusal) return creationRefusal;
     const { actor, db, orgId } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,

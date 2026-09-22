@@ -6,7 +6,7 @@
  * part straight into the private bucket on a write-only URL the route signs
  * for exactly that part; elsewhere (Miniflare R2 locally, the filesystem driver
  * on Railway) the parts still travel through `PUT /api/files/multipart`. Either
- * way the bytes of a 90 MB video never pass through a Vercel function, whose
+ * way the bytes of a 50 MB video never pass through a Vercel function, whose
  * request body is capped at 4.5 MB.
  *
  * Because the server may never see those bytes, it remembers at `start`:
@@ -28,7 +28,7 @@ export type UploadSession = typeof uploadSessions.$inferSelect;
 
 /** S3's floor for every part except the last, and the size each part is planned at. */
 export const UPLOAD_PART_SIZE = 5 * 1024 * 1024;
-/** A whole upload must finish within this; a 90 MB video on a slow phone takes minutes. */
+/** A whole upload must finish within this; a 50 MB video on a slow phone takes minutes. */
 export const UPLOAD_SESSION_LIFETIME_MS = 6 * 60 * 60 * 1000;
 /** One part URL is good for this long, and is signed only when the browser asks. */
 export const PART_URL_LIFETIME_SECONDS = 15 * 60;

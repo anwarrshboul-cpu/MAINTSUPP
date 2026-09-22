@@ -80,7 +80,7 @@ export async function GET(request: Request) {
      * own token counts away from managers permanently to withhold something
      * that is not about the workspace at all.
      */
-    const subject = await resolvePermissions(context.db, orgId, context.actor.role);
+    const subject = await resolvePermissions(context.db, orgId, context.actor.role, context.siteScope);
     const mayReadPosture = can(subject, "settings.edit");
 
     const [

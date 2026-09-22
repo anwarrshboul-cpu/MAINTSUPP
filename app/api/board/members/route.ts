@@ -78,7 +78,7 @@ export async function GET(request: Request) {
     const ownerIds = new Set(ownerRows.map((row) => row.id));
     const rows = [...ownerRows, ...memberRows.filter((row) => !ownerIds.has(row.id))];
 
-    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, scope.actor.role, scope.siteScope);
     /*
      * `board.view` AT THE DOOR (Phase 9). This is the board's roster — the
      * Assigned-To picker, the header's avatar stack, the board's Invite dialog

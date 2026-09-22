@@ -16,6 +16,7 @@ import {
   scopeRefusal,
   CANONICAL_REGISTER,
 } from "../../../lib/register-scope";
+import { boardStructureRefusal } from "../../../lib/job-site-scope";
 
 function text(value: unknown, max = 120) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -64,7 +65,7 @@ export async function GET(request: Request) {
      * `sites.edit` (which is every administrator, and how the groups get built
      * at all); a reader without it is simply served what exists.
      */
-    const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole);
+    const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole, siteScope);
     if (scope === CANONICAL_REGISTER && can(subject, "sites.edit")) {
       await seedStoreDocumentationGroups(await getD1(), orgId);
     }
@@ -99,6 +100,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
@@ -157,6 +161,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,
@@ -214,6 +221,9 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const resolved = await resolveRegisterScope(
       db,

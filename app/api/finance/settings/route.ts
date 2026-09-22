@@ -125,7 +125,7 @@ async function payload(scope: ScopedDatabase, unmasked: boolean) {
  * and only when a Super Admin chose to.
  */
 async function mayManageBanking(scope: ScopedDatabase): Promise<boolean> {
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   return can(subject, "billing.manage");
 }
 

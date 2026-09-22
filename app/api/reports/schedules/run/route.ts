@@ -13,6 +13,7 @@ import { databaseSafeFailure } from "../../../../lib/database-failure";
 import { publicOrigin } from "../../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../../lib/report-delivery";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../../lib/tenant-db";
+import { everySiteRefusal } from "../../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,8 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
+    if (everySite) return everySite;
     const scope = guard.scope;
     const body = (await request.json().catch(() => ({}))) as { id?: unknown };
     const id = typeof body.id === "string" ? body.id.slice(0, 80) : "";

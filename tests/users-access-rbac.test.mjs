@@ -495,7 +495,9 @@ test("the acting role is the role in the selected workspace", async () => {
   // Re-pointed: the per-workspace question moved to the pure `access-scope.ts`,
   // which tenant-access.ts re-exports.
   const resolver = await read("app/lib/tenant-access.ts");
-  assert.match(resolver, /export \{ administersCompany, companyOfOrganisation, roleInOrganisation \} from "\.\/access-scope";/);
+  /* Re-pointed 2026-09-22: the re-export gained `siteScopeInOrganisation`, the companion that answers a named
+     workspace's site scope for resolvePermissions' new required argument. */
+  assert.match(resolver, /export \{\s*administersCompany,\s*companyOfOrganisation,\s*roleInOrganisation,\s*siteScopeInOrganisation,\s*\} from "\.\/access-scope";/);
   const access = await read("app/lib/access-scope.ts");
   assert.match(access, /export function roleInOrganisation\(/);
   // Re-pointed: platform authority is `platformAdmin`, not a membership.

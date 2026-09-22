@@ -306,7 +306,7 @@ test("#4 the throttles share sign-in's table without sharing its key space", asy
   const windows = [...throttles.matchAll(/windowMs: (\d+) \* 60_000/g)].map((m) => Number(m[1]));
   /* Re-pointed 3 → 4 for the direct-upload batch: `REPORT_JOB_SUBMISSIONS`
      throttles the home page's anonymous report door, whose upload token is now
-     worth up to 90 MB of storage. The lock still makes every addition visible. */
+     worth up to 50 MB of storage. The lock still makes every addition visible. */
   /* Re-pointed 4 → 6 for the public intake batch: `LEAD_SUBMISSIONS` and
      `CONTRACTOR_APPLICATIONS` throttle the marketing site's other two anonymous
      doors, which had a honeypot and nothing respectively. */
@@ -344,7 +344,8 @@ test("#5 new short links carry 64 bits; existing ones keep working", async () =>
 
 test("#6 billing.manage is answered by the workspace's matrix, and the ceilings still hold", async () => {
   const route = code(await read("app/api/finance/settings/route.ts"));
-  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role\);\s*return can\(subject, "billing\.manage"\);/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role, scope\.siteScope\);\s*return can\(subject, "billing\.manage"\);/);
   assert.doesNotMatch(route, /Only a workspace owner/, "an Owner is the one role the ceilings bar from it");
   const permissions = await read("app/lib/permissions.ts");
   assert.match(permissions, /owner: new Set<Capability>\(\["billing\.manage", "data\.delete"\]\)/);

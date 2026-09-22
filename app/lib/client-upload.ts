@@ -5,6 +5,7 @@ import type {
   AttachmentRecord,
   MaintenanceRequest,
 } from "./types";
+import { uploadSizeRefusal } from "./upload-policy";
 import { md5Hex } from "./md5";
 
 /*
@@ -96,7 +97,7 @@ const PROXY_REQUEST_BODY_LIMIT = 4_500_000;
  *      one part, at the exact size planned, for fifteen minutes;
  *   2. a PUT of the part's bytes to that URL, straight into the PRIVATE bucket,
  *      with no cookie and no header of ours — `XMLHttpRequest`, because `fetch`
- *      cannot report upload progress and a 90 MB video on a phone needs it;
+ *      cannot report upload progress and a 50 MB video on a phone needs it;
  *   3. retried on a dropped connection or an expired URL, with a fresh URL.
  *
  * `complete` then asks the bucket which parts it holds (the browser's word is
@@ -111,8 +112,6 @@ const PROXY_REQUEST_BODY_LIMIT = 4_500_000;
  * `partUploadError` below still explains a proxy's 413 if one is ever hit.
  */
 const MULTIPART_CHUNK_SIZE = STORAGE_MINIMUM_PART_SIZE;
-const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
-const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
 const videoExtensions = new Set(["mp4", "webm", "mov", "m4v", "mkv"]);
 
 type UploadResponse = {
@@ -137,7 +136,7 @@ type SignedPartResponse = {
 };
 
 /**
- * Where an upload is, in words a person can be shown. A 90 MB video on a phone
+ * Where an upload is, in words a person can be shown. A 50 MB video on a phone
  * takes minutes; "Uploading 37%" and "Finishing…" are the difference between a
  * control that is working and one that looks frozen. `complete` is reported
  * only once the server has CONFIRMED the document exists.
@@ -275,15 +274,10 @@ async function readApi<T>(
 }
 
 function validateFile(file: File) {
-  const video = isVideo(file);
-  const maxSize = video ? MAX_VIDEO_FILE_SIZE : MAX_STANDARD_FILE_SIZE;
-  if (file.size > maxSize) {
-    throw new Error(
-      video
-        ? "Videos must be 90 MB or smaller."
-        : "Files must be 25 MB or smaller.",
-    );
-  }
+  /* Before any request: a file the provider would refuse never costs the
+     person a single part. The routes check again. See `upload-policy.ts`. */
+  const refusal = uploadSizeRefusal(isVideo(file), file.size);
+  if (refusal) throw new Error(refusal);
 }
 
 /**

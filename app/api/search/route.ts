@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     }
     const scope = await scopedDb(request);
     const { db, orgId, siteScope } = scope;
-    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, scope.actor.role, scope.siteScope);
     /* The search box lives in the board's shell; a reader who cannot open the
        board cannot use it — the same answer every board read gives. */
     const refusal = requireCapability(subject, "board.view");
@@ -195,7 +195,9 @@ export async function GET(request: Request) {
 
     /* ── Invoices and quotes: the Invoice Tracker's door, rank and capability ── */
     const financeReader =
-      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"]);
+      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"])
+      /* The ledger is every site's: not a site-restricted member's (security review). */
+      && !scope.siteScope;
     if (financeReader) {
       const term = raw.trim().slice(0, 80);
       const invoicePage = await listInvoices(db, orgId, { search: term, limit: PER_GROUP });

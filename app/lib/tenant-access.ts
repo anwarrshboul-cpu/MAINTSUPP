@@ -454,7 +454,9 @@ export async function resolveTenantAccess(
 
   const grantHere = grants.find((grant) => grant.organisationId === organisation.id);
   const ownerHere = !platformAdmin && ownsWorkspace(organisation);
-  const siteScope = ownerHere ? null : (grantHere?.siteScope ?? null);
+  /* Neither an Owner of the company nor a Platform Super Admin is confined to
+     sites: the same rule as `siteScopeInOrganisation` (security review). */
+  const siteScope = platformAdmin || ownerHere ? null : (grantHere?.siteScope ?? null);
 
   /*
    * THE ROLE IS THE ONE HELD IN THE SELECTED WORKSPACE.
@@ -517,7 +519,12 @@ export async function resolveTenantAccess(
  * `access-scope.ts`, which imports nothing that needs a request, so the unit
  * tests can load them. They are re-exported here, where callers look.
  */
-export { administersCompany, companyOfOrganisation, roleInOrganisation } from "./access-scope";
+export {
+  administersCompany,
+  companyOfOrganisation,
+  roleInOrganisation,
+  siteScopeInOrganisation,
+} from "./access-scope";
 import { reachableOrganisationIds } from "./access-scope";
 
 /** True when `organisationId` is one this access grant may read. */

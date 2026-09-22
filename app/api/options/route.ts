@@ -14,6 +14,7 @@ import { recordJobStatusChanges } from "../../lib/job-status-history";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidateOptionCache, listOptionSets, listOptionValues } from "../../lib/options-repository";
 import { csvResponse, parseCsvObjects, toCsv } from "../../lib/csv";
+import { boardStructureRefusal } from "../../lib/job-site-scope";
 
 type ScopedDb = Awaited<ReturnType<typeof scopedDb>>["db"];
 
@@ -353,6 +354,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { actor, db, orgId } = guard.scope;
     const body = (await request.json()) as {
       key?: string;
@@ -468,6 +472,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const body = (await request.json()) as {
       key?: string;
@@ -551,6 +558,9 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const body = (await request.json()) as {
       key?: string;

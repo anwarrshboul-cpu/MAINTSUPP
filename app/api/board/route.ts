@@ -110,10 +110,12 @@ import { confineBoardPayload } from "../../lib/board-site-scope";
 import {
   anyJobOutsideMemberScope,
   beyondMemberScope,
+  boardActionStructureRefusal,
   jobWithinMemberScope,
   jobsWithinMemberScope,
   siteOutsideMemberScope,
   siteRequired,
+  subitemsOutsideMemberScope,
 } from "../../lib/job-site-scope";
 
 /*
@@ -1863,6 +1865,10 @@ export async function POST(request: Request) {
       );
     }
     const action = trimString(payload.action, 40);
+    /* Board structure is shared by every site: a site-restricted member may
+       work their own jobs here, never reshape the board. See job-site-scope.ts. */
+    const structureRefusal = boardActionStructureRefusal(siteScope, action, payload.optionId);
+    if (structureRefusal) return structureRefusal;
     const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 
@@ -2375,6 +2381,13 @@ export async function POST(request: Request) {
         );
       }
       const requestIds = await jobsWithinMemberScope(db, orgId, siteScope, named);
+      /* Binning a job bins its subitems too; one at another site fails the
+         whole operation. See `subitemsOutsideMemberScope`. */
+      if (await subitemsOutsideMemberScope(db, orgId, siteScope, requestIds, false)) {
+        return beyondMemberScope(
+          "some of these jobs have subitems outside your sites, and binning a job bins its subitems with it",
+        );
+      }
       /*
        * STAGE 23 — THIS USED TO BE THE HARD DELETE, AND IS NOW THE BIN.
        *
@@ -2499,6 +2512,10 @@ export async function PATCH(request: Request) {
       );
     }
     const action = trimString(payload.action, 40);
+    /* Board structure is shared by every site: a site-restricted member may
+       work their own jobs here, never reshape the board. See job-site-scope.ts. */
+    const structureRefusal = boardActionStructureRefusal(siteScope, action, payload.optionId);
+    if (structureRefusal) return structureRefusal;
     const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 
@@ -3431,7 +3448,7 @@ export async function PATCH(request: Request) {
         ? optionId.slice("site-option-".length)
         : "";
       if (siteOptionId) {
-        const subject = await resolvePermissions(db, orgId, actor.role);
+        const subject = await resolvePermissions(db, orgId, actor.role, siteScope);
         const denied = requireCapability(subject, "sites.edit");
         if (denied) return denied;
         if (!label) {
@@ -3478,6 +3495,10 @@ export async function PATCH(request: Request) {
             and(
               eq(maintenanceRequests.organisationId, orgId),
               eq(maintenanceRequests.location, previousName),
+              /* A site-restricted member's rename rewrites only THIS store's
+                 jobs, never another site's whose text happens to match
+                 (security review). Unrestricted: unchanged. */
+              siteScope ? eq(maintenanceRequests.siteId, siteOptionId) : undefined,
             ),
           );
         return Response.json({

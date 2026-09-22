@@ -20,7 +20,7 @@ export async function logoEditorScope(
   request: Request,
 ): Promise<{ denied: Response; scope?: never } | { denied?: never; scope: ScopedDatabase }> {
   const scope = await scopedDb(request);
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   const refusal = requireCapability(subject, "settings.edit");
   if (refusal) return { denied: refusal };
   if (!scope.authenticated) {
@@ -31,7 +31,7 @@ export async function logoEditorScope(
 
 /** Whether the caller may edit, for a read that answers either way. */
 export async function canEditLogo(scope: ScopedDatabase): Promise<boolean> {
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   return !requireCapability(subject, "settings.edit");
 }
 

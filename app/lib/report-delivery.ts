@@ -70,7 +70,7 @@ async function accessOf(db: Database, organisationId: string, userId: string): P
 
 async function may(db: Database, organisationId: string, access: Access, capability: "data.export" | "board.view") {
   if (!access) return false;
-  return can(await resolvePermissions(db, organisationId, access.role), capability);
+  return can(await resolvePermissions(db, organisationId, access.role, access.siteScope), capability);
 }
 
 function today(): string {

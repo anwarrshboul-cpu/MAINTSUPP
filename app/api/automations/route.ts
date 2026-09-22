@@ -32,6 +32,7 @@ import {
 } from "../../lib/automations/store";
 import { parseConfig } from "../../lib/automations/types";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
+import { boardStructureRefusal } from "../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,9 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
     const body = record(await request.json().catch(() => ({})));
     const boardId = await resolveBoardId(db, orgId, body.boardId);
@@ -160,6 +164,9 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
     const body = record(await request.json().catch(() => ({})));
     const id = text(body.id, 80);
@@ -242,6 +249,9 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.edit");
     if (guard.denied) return guard.denied;
+    /* Board structure is shared by every site — see `boardStructureRefusal`. */
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
     const { db, orgId, actor, identityEmail, session } = guard.scope;
     const id = text(new URL(request.url).searchParams.get("id"), 80);
     const existing = id ? await findRule(db, orgId, id) : null;

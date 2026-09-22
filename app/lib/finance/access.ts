@@ -31,6 +31,7 @@ import type { Capability } from "../permissions";
 import { ROLE_RANK } from "../roles";
 import { anonymousRefusal, busyRefusal, scopedDbWithCapability, type ScopedDatabase } from "../tenant-db";
 import { ensureDatabase } from "../../../db/init";
+import { everySiteRefusal } from "../job-site-scope";
 
 /** Every distinct thing a caller can ask the invoice tracker to do. */
 export type FinanceOperation =
@@ -98,6 +99,11 @@ export async function guardFinance(
   await ensureDatabase();
   const guard = await scopedDbWithCapability(request, FINANCE_CAPABILITIES[operation]);
   if (guard.denied) return guard;
+
+  /* The ledger is every site's books: refused to a site-restricted member
+     (security review) — see `everySiteRefusal`. */
+  const everySite = everySiteRefusal(guard.scope.siteScope, "the finance ledger");
+  if (everySite) return { denied: everySite };
 
   /*
    * THE INVOICE TRACKER IS INTERNAL, AND `board.view` IS NOT ENOUGH TO SAY SO.
