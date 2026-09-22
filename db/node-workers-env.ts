@@ -18,13 +18,16 @@
  * variables would make `hasBinding("BUCKET")` answer yes for a deployment that
  * has no object storage at all.
  *
- * Two bindings are present. `DB` is SQLite through `node-d1.ts`; `BUCKET` is a
- * directory on disk through `node-r2.ts`. Both are the same trade: the storage
+ * Three bindings are present. `DB` is SQLite through `node-d1.ts`; `BUCKET` is a
+ * directory on disk through `node-r2.ts`; `CMS_BUCKET` (decision K, the website's
+ * media) is Supabase Storage's `cms-media` bucket, or a directory of its own. All
+ * are the same trade: the storage
  * moves from Cloudflare's network to whatever filesystem this process can see,
  * and on Railway that must be a mounted volume — a container's own disk is
  * replaced on every deploy, which would silently discard every photograph and
  * certificate the portal holds.
  */
+import path from "node:path";
 import { nodeD1Database } from "./node-d1";
 import { nodePgD1Database } from "./node-pg-d1";
 import { createR2Bucket } from "./node-r2";
@@ -85,6 +88,29 @@ export const env: Record<string, unknown> = {
    * reads or writes an object, so there is nothing to defer and no boot cost.
    */
   BUCKET: createS3BucketFromEnv() ?? createR2Bucket(),
+
+  /**
+   * The WEBSITE's media (decision K) — a different bucket from `BUCKET`, on
+   * purpose. `BUCKET` holds customers' operational files and stays private and
+   * unreadable from the public site; this one holds MAINTSUPP's own website
+   * images, video and PDFs, served to the public through `/media/...`.
+   *
+   * Same credentials, different name: the S3 keys are project-wide, so the
+   * bucket is `S3_CMS_BUCKET` (default `cms-media`) with the other three S3_*
+   * variables unchanged. Where S3 is not configured it is its own directory
+   * beside the documents one — never the documents directory, and never
+   * `BUCKET` itself. A deployment whose `cms-media` bucket was never created
+   * gets S3's own "no such bucket" on the first upload, which the media routes
+   * report as exactly that; nothing falls back anywhere.
+   */
+  CMS_BUCKET:
+    createS3BucketFromEnv({
+      ...process.env,
+      S3_BUCKET: process.env.S3_CMS_BUCKET?.trim() || "cms-media",
+    }) ??
+    createR2Bucket({
+      dir: path.join(process.env.R2_LOCAL_DIR ?? path.join(process.cwd(), ".r2-local"), "cms-media"),
+    }),
 };
 
 /**

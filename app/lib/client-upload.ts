@@ -730,3 +730,223 @@ export async function uploadEvidenceFile(
     throw error;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* The website media library (decision K)                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the library answers once an upload is finished: the asset, as
+ * `/api/cms-media` describes it.
+ */
+export type WebsiteMediaResult = { item: Record<string, unknown> | null; versionId?: string };
+
+export type WebsiteMediaOptions = UploadProgress & {
+  file: File;
+  /** An existing asset to give a new file — it keeps its id, so every page updates. */
+  replaces?: string;
+  title?: string;
+  altText?: string;
+};
+
+/**
+ * THE WEBSITE'S UPLOADS GO THROUGH THE SAME MACHINERY AS EVERYTHING ELSE.
+ *
+ * A separate endpoint (`/api/cms-media/upload`) and a separate bucket, but the
+ * same session-bound multipart protocol as `multipartUpload` above, and the same
+ * pieces of it: `putPart` (straight to the bucket on a one-part, write-only URL,
+ * retried with a fresh URL), the MD5 of each part declared at `complete`, the
+ * proxied `PUT` where storage cannot sign URLs, and `abort` on any failure. The
+ * size policy is checked here first and again on the server.
+ *
+ * Every file is sent this way, one part or many: there is no single-shot form
+ * post, so there is no 1 MiB form ceiling to route around.
+ */
+export async function uploadWebsiteMedia(options: WebsiteMediaOptions): Promise<WebsiteMediaResult> {
+  const { file, onStage, onProgress, signal } = options;
+  const endpoint = "/api/cms-media/upload";
+  try {
+    validateFile(file);
+  } catch (error) {
+    onStage?.({ phase: "failed", message: error instanceof Error ? error.message : "The file could not be uploaded." });
+    throw error;
+  }
+  onStage?.({ phase: "preparing" });
+  onProgress?.(0);
+  const measured = file.type.startsWith("video/") ? await videoMetadata(file) : null;
+
+  const post = (body: Record<string, unknown>) =>
+    fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+  let start: MultipartStartResponse & { mediaId: string; versionId: string };
+  try {
+    start = await readApi<MultipartStartResponse & { mediaId: string; versionId: string }>(
+      await post({
+        action: "start",
+        originalName: file.name,
+        contentType: file.type || "application/octet-stream",
+        byteSize: file.size,
+        ...(options.replaces ? { replaces: options.replaces } : {}),
+      }),
+    );
+  } catch (error) {
+    onStage?.({ phase: "failed", message: error instanceof Error ? error.message : "The file could not be uploaded." });
+    throw error;
+  }
+  const chunkSize = start.partSize ?? MULTIPART_CHUNK_SIZE;
+  const partCount = start.partCount ?? Math.ceil(file.size / chunkSize);
+  const direct = start.transport === "direct";
+  const parts: Array<{ partNumber: number; etag: string }> = [];
+  let sent = 0;
+  const report = (loaded: number) => {
+    const progress = Math.min(100, Math.round(((sent + loaded) / file.size) * 100));
+    onStage?.({ phase: "uploading", progress });
+    onProgress?.(Math.round(progress * 0.92));
+  };
+  report(0);
+
+  try {
+    for (let index = 0; index < partCount; index += 1) {
+      const chunk = file.slice(index * chunkSize, Math.min((index + 1) * chunkSize, file.size));
+      if (direct) {
+        const digest = md5Hex(new Uint8Array(await chunk.arrayBuffer()));
+        let status = 0;
+        for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
+          const signed = await readApi<SignedPartResponse>(
+            await post({ action: "sign-part", key: start.key, uploadId: start.uploadId, partNumber: index + 1 }),
+          );
+          status = await putPart(signed.url, chunk, report, signal);
+          if (status >= 200 && status < 300) break;
+          const retryable = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
+          if (!retryable || attempt === PART_ATTEMPTS) break;
+          await wait(1000 * 2 ** (attempt - 1));
+        }
+        if (status < 200 || status >= 300) {
+          throw new UploadApiError(
+            status === 0
+              ? "The connection dropped while the file was uploading. Check the signal and try again."
+              : status === 413
+                ? "The file store will not accept a file this large."
+                : `The file store refused part ${index + 1} of the upload (${status}).`,
+            status || 503,
+          );
+        }
+        parts.push({ partNumber: index + 1, etag: digest });
+      } else {
+        const uploaded = await readApi<MultipartPartResponse>(
+          await fetch(endpoint, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "X-Upload-Key": start.key,
+              "X-Upload-Id": start.uploadId,
+              "X-Upload-Part": String(index + 1),
+            },
+            body: chunk,
+          }),
+          partUploadError,
+        );
+        parts.push(uploaded.part);
+      }
+      sent += chunk.size;
+      report(0);
+    }
+
+    onStage?.({ phase: "finalizing" });
+    const completed = await readApi<WebsiteMediaResult>(
+      await post({
+        action: "complete",
+        key: start.key,
+        uploadId: start.uploadId,
+        parts,
+        ...(options.title !== undefined ? { title: options.title } : {}),
+        ...(options.altText !== undefined ? { altText: options.altText } : {}),
+        ...(measured ?? {}),
+      }),
+    );
+    if (file.type.startsWith("image/") && file.type !== "image/gif" && completed.versionId) {
+      await offerDisplayRendition(file, completed.versionId);
+    }
+    onProgress?.(100);
+    onStage?.({ phase: "complete" });
+    return completed;
+  } catch (error) {
+    onStage?.({
+      phase: "failed",
+      message:
+        error instanceof UploadCancelledError
+          ? "Upload cancelled."
+          : error instanceof Error
+            ? error.message
+            : "The file could not be uploaded.",
+    });
+    post({ action: "abort", key: start.key, uploadId: start.uploadId }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/** A video's frame size and length, as the browser's own player reads them. Best effort. */
+function videoMetadata(file: File): Promise<{ width?: number; height?: number; durationMs?: number } | null> {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const video = document.createElement("video");
+      let settled = false;
+      const done = (value: { width?: number; height?: number; durationMs?: number } | null) => {
+        if (settled) return;
+        settled = true;
+        URL.revokeObjectURL(url);
+        resolve(value);
+      };
+      video.preload = "metadata";
+      video.muted = true;
+      video.onloadedmetadata = () =>
+        done({
+          width: video.videoWidth || undefined,
+          height: video.videoHeight || undefined,
+          durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : undefined,
+        });
+      video.onerror = () => done(null);
+      window.setTimeout(() => done(null), 8000);
+      video.src = url;
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * THE WEB-SIZED COPY, made where the pixels already are.
+ *
+ * The server has no image pipeline, and a 12-megapixel phone photograph is a
+ * 5 MB hero. So the browser draws the image at most 1600 pixels on its long
+ * edge (orientation applied, as `createImageBitmap` does by default), encodes
+ * it as WebP, and stores it beside the original; pages then show the copy.
+ * BEST EFFORT, like the board thumbnail: Safari cannot encode WebP (`toBlob`
+ * answers PNG or null), and nothing here may fail the upload itself — the
+ * page simply shows the original.
+ */
+const DISPLAY_EDGE = 1600;
+
+async function offerDisplayRendition(file: File, versionId: string) {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, DISPLAY_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.82));
+    if (!blob || !blob.type.includes("webp") || blob.size > 1_500_000) return;
+    await fetch(`/api/cms-media/upload?rendition=${encodeURIComponent(versionId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "image/webp" },
+      body: blob,
+    });
+  } catch {
+    /* The original is stored; a missing copy costs bytes, never correctness. */
+  }
+}

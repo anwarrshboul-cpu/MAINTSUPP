@@ -403,6 +403,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      navigation). See `ensureSiteNavigation`. */
   await ensureSiteNavigation(d1);
 
+  /* Decision K — the website's media library, in its own private bucket. Two
+     guarded tables, one guarded column on `upload_sessions`; no seed. See
+     `ensureCmsMedia`. */
+  await ensureCmsMedia(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6498,7 +6503,8 @@ async function ensureUploadSessions(d1: D1DatabaseLike) {
          state TEXT NOT NULL DEFAULT 'pending',
          created_at TEXT NOT NULL,
          expires_at TEXT NOT NULL,
-         finalized_at TEXT
+         finalized_at TEXT,
+         target TEXT NOT NULL DEFAULT 'documents'
        )`,
     ),
     d1.prepare(
@@ -6674,6 +6680,76 @@ async function ensureSiteNavigation(d1: D1DatabaseLike) {
        )`,
     )
     .run();
+}
+
+/**
+ * THE WEBSITE'S MEDIA LIBRARY — decision K.
+ *
+ * `cms_media` is one asset as staff think of it: a title, alt text, whether it is
+ * archived, and which of its files is current. `cms_media_versions` is every file
+ * it has ever had — a replacement is a new version, never a rewrite, so the bytes
+ * under a key never change and the public route may serve them `immutable`, and a
+ * replacement that turns out wrong is undone by pointing back at the old version.
+ *
+ * INSTALLATION-WIDE, like the pages and the navigation: these are MAINTSUPP's own
+ * website assets, administered by platform staff, never a workspace's files. The
+ * bytes live in a SEPARATE bucket (`cms-media`), not in the private `job-media`
+ * bucket that holds customers' operational files — logically and physically apart.
+ *
+ * `status` is TEXT ('active' | 'archived'), never a boolean — see BOOLEAN_COLUMNS
+ * in db/sqlite-to-postgres.ts, which rewrites 0/1 by bare column name. `byte_size`
+ * is BIGINT so the shim cannot narrow it. Times are ISO text written by the app.
+ *
+ * `upload_sessions.target` says which bucket an upload is going into, so the daily
+ * sweep aborts an abandoned website upload in the website bucket rather than
+ * looking for it among the customers' files. Every existing session is a document
+ * upload, which is what the default says.
+ */
+async function ensureCmsMedia(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS cms_media (
+         id TEXT PRIMARY KEY,
+         kind TEXT NOT NULL,
+         title TEXT NOT NULL,
+         alt_text TEXT,
+         current_version_id TEXT,
+         status TEXT NOT NULL DEFAULT 'active',
+         created_by_email TEXT,
+         created_at TEXT NOT NULL,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS cms_media_versions (
+         id TEXT PRIMARY KEY,
+         media_id TEXT NOT NULL REFERENCES cms_media(id),
+         version_no INTEGER NOT NULL,
+         object_key TEXT NOT NULL,
+         original_name TEXT NOT NULL,
+         content_type TEXT NOT NULL,
+         byte_size BIGINT NOT NULL,
+         width INTEGER,
+         height INTEGER,
+         duration_ms INTEGER,
+         display_key TEXT,
+         display_width INTEGER,
+         display_height INTEGER,
+         uploaded_by_email TEXT,
+         created_at TEXT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS cms_media_versions_media_idx ON cms_media_versions(media_id, version_no)",
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS cms_media_versions_key_idx ON cms_media_versions(object_key)",
+    ),
+  ]);
+  /* A table created before decision K has no `target`; one created since
+     already declares it (see `ensureUploadSessions`), and this is then a no-op. */
+  await addColumns(d1, "upload_sessions", [["target", "TEXT NOT NULL DEFAULT 'documents'"]]);
 }
 
 async function ensureThemeTokens(d1: D1DatabaseLike) {

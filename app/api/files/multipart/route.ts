@@ -917,7 +917,16 @@ export async function POST(request: Request) {
                 const value = part as Record<string, unknown>;
                 return {
                   partNumber: Number(value.partNumber),
-                  etag: String(value.etag ?? "").trim().toLowerCase(),
+                  /*
+                   * EXACTLY as sent. A proxied part's etag is the storage
+                   * driver's own opaque token, handed straight back to it at
+                   * assembly, and Miniflare's R2 tokens are case-sensitive:
+                   * lower-casing them made every local upload over 900 KB fail
+                   * `complete` with "one or more of the specified parts could
+                   * not be found" (measured, decision K). The direct path's MD5
+                   * comparison below lower-cases both sides itself.
+                   */
+                  etag: String(value.etag ?? "").trim(),
                 };
               })
               .filter(
@@ -951,7 +960,7 @@ export async function POST(request: Request) {
            * which nobody can declare without already holding the source — so a
            * copied part never gets past this line, whoever's object it names.
            */
-          const declared = new Map(claimed.map((part) => [part.partNumber, part.etag]));
+          const declared = new Map(claimed.map((part) => [part.partNumber, part.etag.toLowerCase()]));
           if (!listed.every((part) => declared.get(part.partNumber) === part.etag.toLowerCase())) {
             console.error("[/api/files/multipart] part contents do not match what was sent", {
               planned: plan.partCount,

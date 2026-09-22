@@ -78,6 +78,7 @@ import { ApplicationsInboxView } from "./applications-view";
 import { BackupsView } from "./backups-view";
 import { LeadsInboxView } from "./leads-view";
 import { PlatformOverview } from "./platform-overview";
+import { SiteMediaView } from "./site-media-view";
 import { SiteNavigationView } from "./site-navigation-view";
 import { SitePagesView } from "./site-pages-view";
 import "./platform-shell.css";
@@ -139,6 +140,8 @@ export function PlatformShell({
         return <SitePagesView />;
       case "navigation":
         return <SiteNavigationView />;
+      case "media":
+        return <SiteMediaView />;
       case "leads":
         return <LeadsInboxView />;
       case "applications":

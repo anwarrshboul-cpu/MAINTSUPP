@@ -48,10 +48,13 @@ export async function POST(request: Request) {
       return null;
     });
     const webhooks = await retryWebhookDeliveries(db, { limit: 200, budgetMs: 20_000 });
-    const uploads = await expireUploadSessions(db, async (objectKey, uploadId) => {
+    const uploads = await expireUploadSessions(db, async (objectKey, uploadId, target) => {
       const { env } = await import("cloudflare:workers");
-      if (!env.BUCKET) throw new Error("File storage is unavailable.");
-      await env.BUCKET.resumeMultipartUpload(objectKey, uploadId).abort();
+      /* The bucket the upload was going into: a website upload (decision K) is
+         aborted in the website's bucket, never looked for among the documents. */
+      const bucket = target === "cms-media" ? env.CMS_BUCKET : env.BUCKET;
+      if (!bucket) throw new Error("File storage is unavailable.");
+      await bucket.resumeMultipartUpload(objectKey, uploadId).abort();
     }).catch((error: unknown) => {
       console.error("[/api/cron/daily] upload sessions", error);
       return null;

@@ -44,6 +44,13 @@ const FINALIZING_GRACE_MS = 60 * 60 * 1000;
 export type Transport = "direct" | "proxy";
 
 /**
+ * Which bucket an upload is going into. `documents` is the private `job-media`
+ * bucket (every workspace file); `cms-media` is the website's own bucket
+ * (decision K). The sweep aborts an abandoned upload in the bucket it names.
+ */
+export type UploadTarget = "documents" | "cms-media";
+
+/**
  * What a storage driver's multipart handle must offer for the browser to send
  * parts straight to it. The S3 driver has both; Miniflare's R2 and the
  * filesystem driver have neither, and keep the proxied path.
@@ -166,6 +173,8 @@ export async function createUploadSession(
     contentType: string;
     originalName: string;
     byteSize: number;
+    /* Absent means `documents`, the column's default — every caller before K. */
+    target?: UploadTarget;
   },
   now = Date.now(),
 ): Promise<UploadSession> {
@@ -286,7 +295,7 @@ export function abandonUploadSession(db: Db, id: string, organisationId: string)
  */
 export async function expireUploadSessions(
   db: Db,
-  abortInStorage: (objectKey: string, uploadId: string) => Promise<void>,
+  abortInStorage: (objectKey: string, uploadId: string, target: UploadTarget) => Promise<void>,
   options: { now?: number; limit?: number } = {},
 ): Promise<{ considered: number; expired: number; failed: number }> {
   const now = options.now ?? Date.now();
@@ -303,7 +312,7 @@ export async function expireUploadSessions(
     const deadline = Date.parse(session.expiresAt) + (session.state === "finalizing" ? FINALIZING_GRACE_MS : 0);
     if (deadline > now) continue;
     try {
-      await abortInStorage(session.objectKey, session.uploadId);
+      await abortInStorage(session.objectKey, session.uploadId, session.target === "cms-media" ? "cms-media" : "documents");
       if (await transitionUploadSession(db, session.id, session.organisationId, ["pending", "finalizing"], "expired", now)) {
         expired += 1;
       }

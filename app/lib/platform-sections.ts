@@ -153,6 +153,19 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     capability: null,
   },
   /*
+   * Website media (decision K, §77 item 12), added with its API
+   * (`/api/cms-media` and its upload route) and beside the other two website
+   * screens. `capability: null` for the same reason: MAINTSUPP's own site, whose
+   * files live in a bucket of their own and belong to no workspace.
+   */
+  {
+    key: "media",
+    label: "Website media",
+    icon: "image",
+    blurb: "The images, video and PDFs the website uses: upload, describe, replace, archive and delete them.",
+    capability: null,
+  },
+  /*
    * Website enquiries, added when its API arrived — the same rule, kept again.
    * `GET /api/leads` was a hard 501, so there genuinely was nothing behind a rail
    * entry; now there is a read, a status write and an audit trail.
