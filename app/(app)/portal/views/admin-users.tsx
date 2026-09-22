@@ -42,6 +42,7 @@ import {
   type CompanyRef,
   type CompanyWorkspace,
 } from "./admin-company";
+import { SiteAccessDialog, siteAccessSummary, type SiteRef } from "./site-access-dialog";
 
 type MembershipSummary = {
   organisationId: string;
@@ -77,6 +78,8 @@ type AdminUser = {
   /** The company's only active Owner, who cannot be removed or switched off. */
   soleOwner?: boolean;
   platformAdmin?: boolean;
+  /** `memberships.site_scope`, parsed: null is every site, a list confines them. */
+  siteScope?: string[] | null;
 };
 
 type Invitation = {
@@ -105,6 +108,8 @@ type UsersPayload = {
   actor: AdminActor & { platformAdmin?: boolean; ownsCompany?: boolean };
   roles: Array<{ key: string; label: string; assignable: boolean }>;
   users: AdminUser[];
+  /** This workspace's sites, for the site-access picker. */
+  sites?: SiteRef[];
   invitations: Invitation[];
 };
 
@@ -132,6 +137,7 @@ export function AdminUsersView() {
   const [editing, setEditing] = useState<AdminUser | null>(null);
   const [inviting, setInviting] = useState(false);
   const [granting, setGranting] = useState<AdminUser | null>(null);
+  const [siteAccess, setSiteAccess] = useState<AdminUser | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   /*
    * The link, held until the admin has dismissed it.
@@ -424,6 +430,7 @@ export function AdminUsersView() {
                     <tr>
                       <th>Person</th>
                       <th>Role here</th>
+                      <th>Sites</th>
                       <th>Workspaces</th>
                       <th>Status</th>
                       <th>Last sign-in</th>
@@ -491,6 +498,23 @@ export function AdminUsersView() {
                           )}
                         </td>
                         <td>
+                          {(() => {
+                            /* An Owner's and a Super Admin's access is never a site list. */
+                            const summary = siteAccessSummary(
+                              user.companyOwner || user.platformAdmin ? null : user.siteScope,
+                              data.sites ?? [],
+                            );
+                            return (
+                              <span
+                                className={`admin-chip${summary.restricted ? " admin-chip--restricted" : ""}`}
+                                title={summary.title}
+                              >
+                                {summary.label}
+                              </span>
+                            );
+                          })()}
+                        </td>
+                        <td>
                           <span className="admin-workspaces">
                             {user.companyOwner ? (
                               <span className="admin-chip admin-chip--current">
@@ -545,6 +569,23 @@ export function AdminUsersView() {
                                 onClick={() => setEditing(user)}
                               >
                                 Edit
+                              </button>
+                            ) : null}
+                            {/* Site access: access management over a member —
+                                never yourself, an Owner or a Super Admin. The
+                                API refuses every one of these on its own. */}
+                            {can("users.edit") &&
+                            user.manageable !== false &&
+                            !user.isSelf &&
+                            !user.companyOwner &&
+                            !user.platformAdmin &&
+                            workspaceRoles.some((role) => role.key === user.role) ? (
+                              <button
+                                type="button"
+                                className="secondary-button admin-mini"
+                                onClick={() => setSiteAccess(user)}
+                              >
+                                Sites
                               </button>
                             ) : null}
                             {can("users.edit") &&
@@ -734,6 +775,18 @@ export function AdminUsersView() {
             setEditing(null);
             if (result.ok) await reload();
           }}
+        />
+      ) : null}
+
+      {siteAccess && data ? (
+        <SiteAccessDialog
+          person={siteAccess.fullName ?? siteAccess.email}
+          scope={siteAccess.siteScope ?? null}
+          sites={data.sites ?? []}
+          onClose={() => setSiteAccess(null)}
+          onSave={(next) =>
+            run({ userId: siteAccess.id, action: "site_scope", siteScope: next }, siteAccess.id)
+          }
         />
       ) : null}
 

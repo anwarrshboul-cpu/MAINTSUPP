@@ -39,8 +39,11 @@ import {
   invitations,
   memberships,
   platformAdmins,
+  sites,
   users,
 } from "../../../../db/schema";
+import { CANONICAL_REGISTER, registerScopeFilter } from "../../../lib/register-scope";
+import { parseSiteScope } from "../../../lib/tenant-grants";
 import { getD1 } from "../../../../db";
 import { platformAdminIds } from "../../../lib/company-authority";
 import { deactivateAccountGuarded } from "../../../lib/company-owners";
@@ -144,6 +147,24 @@ function companyWorkspaces(context: AdminContext) {
         context.organisationIds.includes(item.id),
     )
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * The workspace's sites, for the site-access picker — the canonical register
+ * only, the same set `/api/context` offers the request form. A member's scope
+ * may only name these (PATCH `site_scope` checks it again).
+ */
+async function workspaceSites(context: AdminContext) {
+  return context.db
+    .select({ id: sites.id, name: sites.name })
+    .from(sites)
+    .where(
+      and(
+        eq(sites.organisationId, context.targetOrganisationId),
+        registerScopeFilter(sites.boardId, CANONICAL_REGISTER),
+      ),
+    )
+    .orderBy(asc(sites.name));
 }
 
 async function roster(context: AdminContext) {
@@ -314,7 +335,8 @@ async function roster(context: AdminContext) {
         ? ROLE_LABELS[row.membershipRole]
         : row.membershipRole,
       membershipStatus: row.membershipStatus,
-      siteScope: row.siteScope,
+      /* Parsed by the one reader (fail-closed): null is every site, [] is none. */
+      siteScope: parseSiteScope(row.siteScope),
       approvalLimitPence: row.approvalLimitPence,
       memberships: byUser.get(row.id) ?? [],
       isSelf: row.email.toLowerCase() === self,
@@ -594,6 +616,8 @@ export async function GET(request: Request) {
       })),
       capabilityCatalogue: CAPABILITY_CATALOGUE,
       users: await roster(context),
+      /* For the site-access picker; drawn only where `users.edit` allows a change. */
+      sites: await workspaceSites(context),
       invitations: await pendingInvitations(context),
     });
   } catch (error) {
@@ -1033,6 +1057,7 @@ export async function PATCH(request: Request) {
       phone?: string;
       timezone?: string;
       avatarColour?: string;
+      siteScope?: unknown;
     }>(request);
 
     const context = await adminContext(request, body.organisationId ?? null);
@@ -1122,6 +1147,119 @@ export async function PATCH(request: Request) {
         detail: { fullName, jobTitle, phone, timezone },
       });
       return Response.json({ ok: true, userId: target.id });
+    }
+
+    /*
+     * SITE ACCESS — which of this workspace's sites a member may work
+     * (`memberships.site_scope`). Null is every site; a list confines them to
+     * those sites' jobs, documents and calendar, and withholds every
+     * workspace-wide capability (`SITE_RESTRICTED_CEILING`).
+     *
+     * The authority is access management, `users.edit` — which a restricted
+     * member never holds, so nobody confined can widen their own or anyone's
+     * scope — plus the same "may manage this person" rail every other change
+     * here passes (above). Refused outright:
+     *   · yourself, as with your own role: narrowing your own access is the
+     *     lockout, widening it the escalation;
+     *   · an Owner or a Platform Super Admin, whose access is the company's or
+     *     the platform's, never a site list;
+     *   · a site that is not one of this workspace's, and an empty list (a
+     *     member who can reach nothing is a deactivation — use that).
+     */
+    if (action === "site_scope") {
+      const denied = requireCapability(context.subject, "users.edit");
+      if (denied) return denied;
+      if (isSelf) {
+        return Response.json(
+          { error: "You cannot change your own site access. Ask another administrator.", denied: true },
+          { status: 403 },
+        );
+      }
+      const targetRole = await effectiveTargetRole(context, target.id, target.role);
+      if (targetRole === "owner" || targetRole === "super_admin" || target.role === "owner") {
+        return Response.json(
+          {
+            error:
+              "An Owner or a Platform Super Admin always has access to every site; their access cannot be limited to some.",
+          },
+          { status: 409 },
+        );
+      }
+      let next: string[] | null = null;
+      if (body.siteScope !== null) {
+        if (!Array.isArray(body.siteScope)) {
+          return Response.json(
+            { error: "Send null for every site, or a list of this workspace's sites." },
+            { status: 400 },
+          );
+        }
+        const named = [
+          ...new Set(
+            body.siteScope
+              .filter((value): value is string => typeof value === "string")
+              .map((value) => value.trim())
+              .filter(Boolean),
+          ),
+        ];
+        if (!named.length) {
+          return Response.json(
+            {
+              error:
+                "Choose at least one site. A member who may reach no site has no access at all — deactivate them instead.",
+            },
+            { status: 400 },
+          );
+        }
+        if (named.length > 1000) {
+          return Response.json({ error: "That is more sites than this workspace has." }, { status: 400 });
+        }
+        const known = new Set((await workspaceSites(context)).map((site) => site.id));
+        const unknown = named.filter((id) => !known.has(id));
+        if (unknown.length) {
+          return Response.json(
+            { error: "Only this workspace's own sites can be chosen.", unknownSites: unknown.length },
+            { status: 400 },
+          );
+        }
+        next = named;
+      }
+      const [current] = await context.db
+        .select({ siteScope: memberships.siteScope })
+        .from(memberships)
+        .where(
+          and(
+            eq(memberships.userId, target.id),
+            eq(memberships.organisationId, context.targetOrganisationId),
+          ),
+        )
+        .limit(1);
+      if (!current) {
+        return Response.json(
+          { error: "That person has no membership in this workspace to limit." },
+          { status: 409 },
+        );
+      }
+      const before = parseSiteScope(current.siteScope ?? null);
+      await context.db
+        .update(memberships)
+        .set({ siteScope: next === null ? null : JSON.stringify(next), updatedAt: new Date().toISOString() })
+        .where(
+          and(
+            eq(memberships.userId, target.id),
+            eq(memberships.organisationId, context.targetOrganisationId),
+          ),
+        );
+      await recordAudit(context, {
+        action: "user.site_scope_changed",
+        summary:
+          next === null
+            ? `Gave ${target.email} access to every site`
+            : `Limited ${target.email} to ${next.length} site${next.length === 1 ? "" : "s"}`,
+        entityType: "user",
+        entityId: target.id,
+        detail: { from: before, to: next },
+      });
+      return Response.json({ ok: true, userId: target.id, siteScope: next });
     }
 
     if (action === "role") {
