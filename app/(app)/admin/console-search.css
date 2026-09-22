@@ -1,0 +1,116 @@
+/**
+ * Search across workspaces: layout only.
+ *
+ * Built on the admin kit (`.admin-console`, `.admin-toolbar`, `.admin-field`,
+ * `.admin-notice`, `.admin-mini`), which is not restated here. Tokens only, and
+ * no breakpoint at all — every row is a flex line that wraps, so a phone gets
+ * the same list in a narrower column rather than a second layout.
+ */
+
+.console-search__bar {
+  gap: 10px;
+}
+
+.console-search__scope {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.console-search__group {
+  margin: 0 0 18px;
+}
+
+.console-search__group h2 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.console-search__group h2 small {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.console-search__group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.console-search__group li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-card);
+}
+
+.console-search__what {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.console-search__what strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.console-search__what span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* Whose data this is: the first thing a reader of a cross-tenant list needs. */
+.console-search__chip {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.console-search__chip--platform {
+  border-style: dashed;
+}
+
+.console-search__omissions {
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+
+.console-search__omissions h2 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.console-search__omissions ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.console-search__omissions li + li {
+  margin-top: 4px;
+}
