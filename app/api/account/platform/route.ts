@@ -14,12 +14,16 @@
 import { and, count, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import {
+  apiTokens,
   attachments,
   jobAccessTokens,
   maintenanceRequests,
   notificationLog,
 } from "../../../../db/schema";
 import { emailDeliveryStatus, notificationTargets } from "../../../lib/notifications";
+import { currentRuntime, databasePosture, storagePosture } from "../../../lib/integrations/posture";
+import { secretBoxStatus } from "../../../lib/secret-box";
+import { databaseSafeFailure } from "../../../lib/database-failure";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 import { can, resolvePermissions } from "../../../lib/permissions";
 
@@ -90,6 +94,7 @@ export async function GET(request: Request) {
       importedRows,
       fileRows,
       bucketBound,
+      apiTokenRows,
     ] = await Promise.all([
       context.db
         .select({ value: count() })
@@ -153,7 +158,24 @@ export async function GET(request: Request) {
         .from(attachments)
         .where(eq(attachments.organisationId, orgId)),
       hasBinding("BUCKET"),
+      /* §35 — the workspace's API tokens, counted in code: expiry is ISO text,
+         compared here rather than in SQL. */
+      context.db
+        .select({ expiresAt: apiTokens.expiresAt, revokedAt: apiTokens.revokedAt })
+        .from(apiTokens)
+        .where(eq(apiTokens.organisationId, orgId)),
     ]);
+    const nowMs = Date.now();
+    const apiTokenCounts = {
+      live: apiTokenRows.filter((row) => !row.revokedAt && Date.parse(row.expiresAt) > nowMs).length,
+      expired: apiTokenRows.filter((row) => !row.revokedAt && !(Date.parse(row.expiresAt) > nowMs)).length,
+      revoked: apiTokenRows.filter((row) => row.revokedAt).length,
+    };
+    const runtime = currentRuntime();
+    const secrets = await secretBoxStatus();
+    const processEnv =
+      ((globalThis as Record<string, unknown>).process as { env?: Record<string, string | undefined> } | undefined)
+        ?.env ?? {};
 
     const emailKey = Boolean(environmentValue("RESEND_API_KEY"));
     const smsKey = Boolean(environmentValue("SMS_API_KEY"));
@@ -165,9 +187,10 @@ export async function GET(request: Request) {
 
     const platform = {
         /**
-         * Developers. The one credential system that genuinely exists is the
-         * scoped job-access token a contractor receives — hashed at rest,
-         * expiring, revocable, and counted here from its own table.
+         * Developers. Two credential systems exist: the scoped job-access token
+         * a contractor receives, and (§35) the workspace API token an
+         * integration reads `/api/v1` with. Both hashed at rest, expiring,
+         * revocable, and counted here from their own tables.
          */
         developers: {
           credentials: [
@@ -187,26 +210,33 @@ export async function GET(request: Request) {
               endpoint: "/api/job-link/{token}",
             },
             {
-              key: "personal_api_keys",
-              name: "Personal API keys",
-              available: false,
+              key: "api_tokens",
+              name: "Workspace API tokens",
+              available: true,
               summary:
-                "There is no personal API key. Every route authenticates the browser's identity and resolves permissions from the caller's memberships, so there is no credential to issue or rotate.",
+                "Read-only tokens for another system to read this workspace's jobs and sites through /api/v1. Shown once, stored only as a hash, never able to read more than the person who issued them can now.",
+              stats: [
+                { label: "Live", value: apiTokenCounts.live },
+                { label: "Expired", value: apiTokenCounts.expired },
+                { label: "Revoked", value: apiTokenCounts.revoked },
+              ],
+              managedAt: "Account → Developers → API tokens",
+              endpoint: "/api/v1/jobs, /api/v1/sites",
             },
           ],
           webhooks: {
             outbound: {
               available: false,
               reason:
-                "No webhook registration table exists and nothing in the codebase posts to a subscriber URL. Outbound events are delivered by email and SMS through the notification log.",
+                "Outbound webhooks are not available yet: nothing posts to a subscriber URL. An integration can read jobs and sites through /api/v1 with an API token instead.",
             },
             inbound: {
               available: false,
               reason:
-                "No route accepts a signed third-party callback. The only externally reachable entry points are the public request form and a contractor's job-link token.",
+                "No route accepts a signed third-party callback. The externally reachable entry points are the public request form, a contractor's job-link token and the read-only /api/v1 (API token).",
             },
           },
-          /** The two endpoints that are genuinely reachable from outside. */
+          /** The endpoints that are genuinely reachable from outside. */
           publicEndpoints: [
             {
               method: "POST",
@@ -218,6 +248,16 @@ export async function GET(request: Request) {
               path: "/api/job-link/{token}",
               description:
                 "Contractor job access. Authenticated by the token in the path.",
+            },
+            {
+              method: "GET",
+              path: "/api/v1/jobs",
+              description: "This workspace's jobs, read-only. Authorization: Bearer <API token with jobs:read>.",
+            },
+            {
+              method: "GET",
+              path: "/api/v1/sites",
+              description: "This workspace's active sites, read-only. Authorization: Bearer <API token with sites:read>.",
             },
           ],
           notificationDelivery: notifications,
@@ -239,22 +279,10 @@ export async function GET(request: Request) {
                 : "No row in this workspace has been imported from monday yet.",
             action: { label: "Open importer", href: "/dashboard?manage=import" },
           },
-          {
-            key: "r2",
-            name: "Cloudflare R2 file storage",
-            category: "Storage",
-            configured: bucketBound,
-            detail: bucketBound
-              ? `Bucket binding attached. ${fileRows[0]?.value ?? 0} files stored for this workspace.`
-              : "The BUCKET binding is not attached to this Worker, so uploads cannot be stored.",
-          },
-          {
-            key: "d1",
-            name: "Cloudflare D1",
-            category: "Storage",
-            configured: true,
-            detail: "The workspace database. Bound as DB.",
-          },
+          /* §35 — what the runtime really uses, not a description of a Worker
+             this product no longer runs as. See `integrations/posture.ts`. */
+          storagePosture(processEnv, runtime, fileRows[0]?.value ?? 0, bucketBound),
+          databasePosture(processEnv, runtime),
           {
             key: "resend",
             name: "Resend email delivery",
@@ -274,6 +302,49 @@ export async function GET(request: Request) {
             detail: smsKey
               ? "SMS_API_KEY is set; SMS notifications are delivered and logged."
               : "SMS_API_KEY is not set, so SMS notifications are logged as skipped.",
+          },
+          {
+            key: "secrets",
+            name: "Encrypted credential storage",
+            category: "Security",
+            configured: secrets.configured,
+            /* Owner decision Q2: the architecture exists, no key is added. */
+            detail: secrets.configured
+              ? "Credentials this product must reuse (webhook secrets, Slack links) are stored encrypted with AES-256-GCM."
+              : `Not configured: ${secrets.reason} No third-party credential can be stored here, and features that need one say so.`,
+          },
+          {
+            key: "zapier_make",
+            name: "Zapier and Make",
+            category: "Automation",
+            configured: apiTokenCounts.live > 0,
+            detail:
+              apiTokenCounts.live > 0
+                ? "Connect through their HTTP step: GET /api/v1/jobs or /api/v1/sites with `Authorization: Bearer <API token>`."
+                : "Issue an API token (Developers) and use their HTTP step to read /api/v1/jobs or /api/v1/sites. No token is live yet.",
+          },
+          {
+            key: "slack",
+            name: "Slack",
+            category: "Notifications",
+            configured: false,
+            detail: "Not connected. MAINTSUPP does not post to Slack today.",
+          },
+          /* No button on either: there is no Microsoft or HubSpot connection in
+             this product, and a Connect button would be a promise. */
+          {
+            key: "microsoft365",
+            name: "Microsoft 365",
+            category: "Productivity",
+            configured: false,
+            detail: "Not connected — requires setup. Nothing is exchanged with Microsoft 365 today.",
+          },
+          {
+            key: "hubspot",
+            name: "HubSpot",
+            category: "CRM",
+            configured: false,
+            detail: "Not connected — requires setup. Nothing is exchanged with HubSpot today.",
           },
           {
             key: "job_links",
@@ -324,14 +395,9 @@ export async function GET(request: Request) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
     if (refusal) return refusal;
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "The platform status could not be loaded.",
-      },
-      { status: 503 },
-    );
+    /* Not `error.message`: a database error names tables and columns, and this
+       answer reaches any signed-in member. */
+    const safe = databaseSafeFailure(error, "The platform status could not be loaded.", 503);
+    return Response.json({ error: safe.message }, { status: safe.status });
   }
 }

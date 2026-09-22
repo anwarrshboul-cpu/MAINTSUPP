@@ -132,6 +132,10 @@ const EXPECTED = {
     "teams.manage",
     "audit.read",
     "settings.edit",
+    /* §35 (owner decision Q3, scoped REST API tokens): issuing a credential
+       that reads the workspace from outside is administration — Admin and
+       Owner by default, above a Manager's ceiling, closed to a client. */
+    "integrations.manage",
     "navigation.personalise",
   ],
   manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],

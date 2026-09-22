@@ -378,6 +378,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
      tables; no seed (no row means "on"). See `ensureNotificationPreferences`. */
   await ensureNotificationPreferences(d1);
 
+  /* §35 — workspace API tokens (hashed only). One guarded table; no seed. */
+  await ensureApiTokens(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6306,6 +6309,35 @@ async function ensureNotificationPreferences(d1: D1DatabaseLike) {
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS notification_cooldowns_last_idx ON notification_cooldowns(last_at)",
     ),
+  ]);
+}
+
+/**
+ * §35 — A WORKSPACE'S API TOKENS. One new table, no seed. Only a token's hash is
+ * stored; see `apiTokens` in db/schema.ts and `app/lib/integrations/api-auth.ts`
+ * for how a request presenting one is resolved to the creator's CURRENT access.
+ */
+async function ensureApiTokens(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS api_tokens (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL REFERENCES organisations(id),
+         name TEXT NOT NULL,
+         token_prefix TEXT NOT NULL,
+         token_hash TEXT NOT NULL,
+         scopes TEXT NOT NULL DEFAULT '[]',
+         created_by_user_id TEXT NOT NULL,
+         created_by_email TEXT NOT NULL,
+         expires_at TEXT NOT NULL,
+         last_used_at TEXT,
+         revoked_at TEXT,
+         revoked_by_email TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS api_tokens_hash_idx ON api_tokens(token_hash)"),
+    d1.prepare("CREATE INDEX IF NOT EXISTS api_tokens_organisation_idx ON api_tokens(organisation_id, revoked_at)"),
   ]);
 }
 
