@@ -120,7 +120,7 @@ export async function GET(request: Request) {
     // Checked against the actor's *current* workspace. A super admin bypasses
     // overrides by construction (see `can()`), so the cross-workspace read
     // below cannot be reached by anyone whose capability was withdrawn here.
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const refusal = requireCapability(subject, "audit.read");
     if (refusal) return refusal;
 

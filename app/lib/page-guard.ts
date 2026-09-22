@@ -196,12 +196,12 @@ export async function requireModuleAccess(
     }
     if (!governing) return;
 
-    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+    const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
     const overrides = await readModuleOverrides(scope.db, scope.orgId);
     available = resolveModuleAccess(
       governing,
       overrides,
-      effectiveCapabilities(scope.actor.role, subject.capabilities),
+      effectiveCapabilities(scope.actor.role, subject.capabilities, subject.siteRestricted),
       scope.actor.role,
     ).available;
   } catch {

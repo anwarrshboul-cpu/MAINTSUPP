@@ -82,7 +82,7 @@ export async function GET(request: Request) {
       .orderBy(desc(reportSchedules.createdAt));
     /* Colleagues' addresses follow the directory's rule (Phase 9): a name is
        enough to choose somebody; an address needs `users.view`. */
-    const mayReadAddresses = can(await resolvePermissions(scope.db, scope.orgId, scope.actor.role), "users.view");
+    const mayReadAddresses = can(await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope), "users.view");
     const people = await members(scope);
     return Response.json({
       schedules: rows.map(expose),

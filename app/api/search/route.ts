@@ -70,7 +70,7 @@ export async function GET(request: Request) {
     }
     const scope = await scopedDb(request);
     const { db, orgId, siteScope } = scope;
-    const subject = await resolvePermissions(db, orgId, scope.actor.role);
+    const subject = await resolvePermissions(db, orgId, scope.actor.role, scope.siteScope);
     /* The search box lives in the board's shell; a reader who cannot open the
        board cannot use it — the same answer every board read gives. */
     const refusal = requireCapability(subject, "board.view");

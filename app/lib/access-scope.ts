@@ -17,7 +17,7 @@ export type AccessShape = {
   organisationIds: string[];
   activeOrganisations: Array<{ id: string; clientCompanyId?: string | null }>;
   ownedCompanyIds: string[];
-  grants: Array<{ organisationId: string; role: MembershipRole }>;
+  grants: Array<{ organisationId: string; role: MembershipRole; siteScope?: string[] | null }>;
   unaffiliated: boolean;
   orgId: string;
   actor: { role: WorkspaceRole };
@@ -46,6 +46,22 @@ export function roleInOrganisation(access: AccessShape, organisationId: string):
   if (grant) return grant.role;
   if (access.unaffiliated && organisationId === access.orgId) return access.actor.role;
   return null;
+}
+
+/**
+ * The member's site restriction in one named workspace — the companion of
+ * `roleInOrganisation`, answered by the same rules as the tenancy resolver's
+ * `siteScope` for the selected workspace: none for a Platform Super Admin or an
+ * Owner of the workspace's company; otherwise whatever that workspace's
+ * membership says. Null (unrestricted) when there is no membership, because the
+ * role question has already refused that caller.
+ */
+export function siteScopeInOrganisation(access: AccessShape, organisationId: string): string[] | null {
+  if (access.platformAdmin) return null;
+  const organisation = access.activeOrganisations.find((item) => item.id === organisationId);
+  if (organisation?.clientCompanyId && access.ownedCompanyIds.includes(organisation.clientCompanyId)) return null;
+  const grant = access.grants.find((item) => item.organisationId === organisationId);
+  return grant?.siteScope ?? null;
 }
 
 /** The client company a workspace belongs to, if the access can see it. */

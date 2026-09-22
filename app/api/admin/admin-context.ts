@@ -37,6 +37,7 @@ import { anonymousRefusal, scopedDb, type ScopedDatabase } from "../../lib/tenan
 import {
   companyOfOrganisation,
   roleInOrganisation as grantedRoleIn,
+  siteScopeInOrganisation,
 } from "../../lib/tenant-access";
 import type { WorkspaceRole } from "../../lib/workspace-actor";
 // The role vocabulary, from the module that defines it.
@@ -111,6 +112,7 @@ export async function adminContext(
     access.db,
     targetOrganisationId,
     effectiveRole,
+    siteScopeInOrganisation(access, targetOrganisationId),
   );
 
   return {

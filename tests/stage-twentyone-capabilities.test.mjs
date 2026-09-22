@@ -115,7 +115,8 @@ test("the helper checks the capability against the resolved scope", async () => 
   // at a workspace whose overrides are more generous.
   assert.match(
     source,
-    /resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role\)/,
+    /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+    /resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role, scope\.siteScope\)/,
   );
   assert.match(source, /requireCapability\(subject, capability\)/);
 });

@@ -107,7 +107,8 @@ test("W07-01 both upload routes authorise through the one shared module", async 
 test("W07-01 the authority requires a real capability, not a session", async () => {
   const code = codeOnly(await source("app/api/files/upload-authority.ts"));
   assert.match(code, /requireCapability\(subject,\s*"board\.edit"\)/);
-  assert.match(code, /resolvePermissions\(scope\.db, orgId, scope\.actor\.role\)/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(code, /resolvePermissions\(scope\.db, orgId, scope\.actor\.role, scope\.siteScope\)/);
   /*
    * The authentication floor still has to be there: `resolvePermissions` would
    * otherwise resolve a role for a caller who proved nothing, and in production

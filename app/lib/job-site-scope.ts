@@ -39,7 +39,7 @@
  * array it was given.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { maintenanceRequests } from "../../db/schema";
 import { memberSiteSet, withinMemberScope } from "./member-site-scope";
 import { chunkIds } from "./sql-batching";
@@ -109,6 +109,118 @@ export async function anyJobOutsideMemberScope(
  */
 export function siteOutsideMemberScope(siteScope: SiteScope, siteId: string | null | undefined): boolean {
   return !withinMemberScope(memberSiteSet(siteScope), siteId);
+}
+
+/**
+ * BOARD STRUCTURE IS SHARED BY EVERY SITE (owner decision, 2026-09-22).
+ *
+ * A board's columns, its labels/options, its groups, its saved views, its
+ * request form, a register's columns, the automations that run on every job,
+ * and the site groups: one change reshapes the board for every site at once.
+ * They sit under `board.edit` (or `sites.edit`), which a site-restricted member
+ * holds so they can work their OWN jobs, so they cannot be withheld with the
+ * capability; they are refused per operation, here, in the site-scope refusal
+ * shape. An unrestricted member is never refused and costs nothing.
+ *
+ * The workspace-wide CAPABILITIES (settings, users, roles, teams, navigation,
+ * integrations, billing, import, the audit log) are withheld centrally instead
+ * — `SITE_RESTRICTED_CEILING` in `app/lib/permissions.ts`.
+ */
+export function boardStructureRefusal(siteScope: SiteScope): Response | null {
+  if (!siteScope) return null;
+  return beyondMemberScope(
+    "a board's structure — its columns, labels, groups, views, forms and automations — is shared by every site, so changing it needs a member with access to every site",
+  );
+}
+
+/**
+ * The `/api/board` actions that change structure rather than jobs. Renaming a
+ * STORE (a `site-option-…` option) is not among them: that is a site edit, and
+ * #87 already confines it to the member's own sites.
+ */
+export const BOARD_STRUCTURE_ACTIONS: ReadonlySet<string> = new Set([
+  "create_group",
+  "rename_group",
+  "update_group",
+  "move_group",
+  "delete_group",
+  "create_column",
+  "update_column",
+  "duplicate_column",
+  "delete_column",
+  "create_option",
+  "update_option",
+  "delete_option",
+]);
+
+/** A structural `/api/board` action by a restricted member, refused; null otherwise. */
+export function boardActionStructureRefusal(
+  siteScope: SiteScope,
+  action: string,
+  optionId: unknown,
+): Response | null {
+  if (!BOARD_STRUCTURE_ACTIONS.has(action)) return null;
+  if (action === "update_option" && typeof optionId === "string" && optionId.startsWith("site-option-")) return null;
+  return boardStructureRefusal(siteScope);
+}
+
+/**
+ * A SITE-RESTRICTED MEMBER CREATES NO SITE (owner decision, 2026-09-22).
+ *
+ * A new site is outside every existing `site_scope` the moment it exists, so a
+ * restricted member who created one would create a site they could never see
+ * again — an invisible store. Nothing assigns a new site into the creator's
+ * scope atomically, and adding it would be a member granting themselves wider
+ * access, so creation is refused outright; an unrestricted member adds the site
+ * and, if wanted, extends the member's scope through the access UI.
+ */
+export function siteCreationRefusal(siteScope: SiteScope): Response | null {
+  if (!siteScope) return null;
+  return beyondMemberScope(
+    "a new site would start outside your own sites, so adding one needs a member with access to every site",
+  );
+}
+
+/**
+ * A SUBITEM GOES WHERE ITS PARENT GOES — so a restricted member's bin or
+ * restore may not carry one from another site with it (owner decision,
+ * 2026-09-22).
+ *
+ * `sendJobsToBin` folds every live child of a binned job into the same bin
+ * operation, and `restoreFromBin` brings back the children that went down with
+ * a parent. A member confined to one store who binned their job would silently
+ * bin a subitem filed at another store. The rule is to FAIL THE WHOLE
+ * OPERATION: nothing is binned or restored, rather than a tree half-mutated or
+ * a record outside the member's scope touched.
+ *
+ * `includeBinned` asks about children already in the bin, which is what a
+ * restore would bring back. Unrestricted: false, and no query.
+ */
+export async function subitemsOutsideMemberScope(
+  db: Db,
+  orgId: string,
+  siteScope: SiteScope,
+  parentIds: readonly string[],
+  includeBinned: boolean,
+): Promise<boolean> {
+  if (!siteScope) return false;
+  const parents = [...new Set(parentIds.filter(Boolean))];
+  if (!parents.length) return false;
+  const children: string[] = [];
+  for (const chunk of chunkIds(parents)) {
+    const rows = await db
+      .select({ id: maintenanceRequests.id })
+      .from(maintenanceRequests)
+      .where(
+        and(
+          eq(maintenanceRequests.organisationId, orgId),
+          inArray(maintenanceRequests.parentId, chunk),
+          includeBinned ? undefined : isNull(maintenanceRequests.deletedAt),
+        ),
+      );
+    for (const row of rows) children.push(row.id);
+  }
+  return anyJobOutsideMemberScope(db, orgId, siteScope, children);
 }
 
 /** What a restricted member is told when a new record names no store. */

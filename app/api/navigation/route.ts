@@ -76,11 +76,7 @@ type LayoutRow = typeof navigationLayouts.$inferSelect;
  * throwing away your own customisation grants nothing.
  */
 async function sidebarPermissions(context: ScopedDatabase) {
-  const subject = await resolvePermissions(
-    context.db,
-    context.orgId,
-    context.actor.role,
-  );
+  const subject = await resolvePermissions(context.db, context.orgId, context.actor.role, context.siteScope);
   return {
     editDefault: can(subject, "navigation.edit"),
     personalise: can(subject, "navigation.personalise"),

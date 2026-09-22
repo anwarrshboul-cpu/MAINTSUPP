@@ -517,7 +517,12 @@ export async function resolveTenantAccess(
  * `access-scope.ts`, which imports nothing that needs a request, so the unit
  * tests can load them. They are re-exported here, where callers look.
  */
-export { administersCompany, companyOfOrganisation, roleInOrganisation } from "./access-scope";
+export {
+  administersCompany,
+  companyOfOrganisation,
+  roleInOrganisation,
+  siteScopeInOrganisation,
+} from "./access-scope";
 import { reachableOrganisationIds } from "./access-scope";
 
 /** True when `organisationId` is one this access grant may read. */

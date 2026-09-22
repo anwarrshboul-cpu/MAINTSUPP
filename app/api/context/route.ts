@@ -189,7 +189,7 @@ async function contextPayload(request: Request) {
     listOptionValues(context.db, context.orgId, "priority"),
     listOptionValues(context.db, context.orgId, "engineer_required"),
     listOptionValues(context.db, context.orgId, "maintenance_label"),
-    resolvePermissions(context.db, context.orgId, context.actor.role),
+    resolvePermissions(context.db, context.orgId, context.actor.role, context.siteScope),
   ]);
 
   return {
@@ -218,7 +218,7 @@ async function contextPayload(request: Request) {
      * no answer at all — `data.export` gated the Sites register and nothing on
      * the board. Guessing from a role is wrong the moment an admin narrows one.
      */
-    capabilities: effectiveCapabilities(context.actor.role, permissions.capabilities),
+    capabilities: effectiveCapabilities(context.actor.role, permissions.capabilities, permissions.siteRestricted),
     /*
      * WHICH PORTAL MODULES THIS ACTOR MAY REACH, decided by the server.
      *
@@ -235,7 +235,7 @@ async function contextPayload(request: Request) {
      */
     modules: availableModules(
       await readModuleOverrides(context.db, context.orgId),
-      effectiveCapabilities(context.actor.role, permissions.capabilities),
+      effectiveCapabilities(context.actor.role, permissions.capabilities, permissions.siteRestricted),
       context.actor.role,
     ),
     // Stage 19 — what the actor is allowed to see, and how it was decided.

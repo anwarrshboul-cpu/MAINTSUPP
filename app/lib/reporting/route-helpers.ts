@@ -95,7 +95,7 @@ export function clientMismatch(
  * a deploy — the same rule `/api/audit` applies to `audit.read`.
  */
 export async function visibleStatuses(scope: ScopedDatabase): Promise<InvoiceStatus[]> {
-  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   return visibleStatusesFor(can(subject, "board.edit"));
 }
 

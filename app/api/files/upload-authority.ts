@@ -262,7 +262,7 @@ export async function resolveUploadAuthority(options: {
     };
   }
 
-  const subject = await resolvePermissions(scope.db, orgId, scope.actor.role);
+  const subject = await resolvePermissions(scope.db, orgId, scope.actor.role, scope.siteScope);
   const refusal = requireCapability(subject, "board.edit");
   if (refusal) return { denied: refusal };
 

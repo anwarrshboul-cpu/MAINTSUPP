@@ -579,6 +579,7 @@ export async function GET(request: Request) {
         capabilities: effectiveCapabilities(
           context.actor.role,
           context.subject.capabilities,
+          context.subject.siteRestricted,
         ),
       },
       /*

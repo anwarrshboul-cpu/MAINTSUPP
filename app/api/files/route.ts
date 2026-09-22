@@ -303,7 +303,7 @@ async function listFiles(request: Request) {
    * property the upload path depends on.
    */
   const { db, orgId, siteScope, actor } = await scopedDb(request);
-  const subject = await resolvePermissions(db, orgId, actor.role);
+  const subject = await resolvePermissions(db, orgId, actor.role, siteScope);
   const refusal = requireCapability(subject, "board.view");
   if (refusal) return refusal;
 

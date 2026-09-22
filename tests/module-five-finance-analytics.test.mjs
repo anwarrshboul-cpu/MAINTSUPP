@@ -484,7 +484,8 @@ test("no payment credential is stored, returned or accepted", async () => {
      changed nothing. The contract is the same capability, answered from the
      workspace's own matrix; `ROLE_CEILINGS` still keeps it from Owner and
      Manager whatever a row says (asserted in client-companies). */
-  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role\);\s*return can\(subject, "billing\.manage"\);/);
+  /* Re-pointed 2026-09-22: resolvePermissions now takes the member's site scope (required 4th argument, for SITE_RESTRICTED_CEILING). */
+  assert.match(route, /const subject = await resolvePermissions\(scope\.db, scope\.orgId, scope\.actor\.role, scope\.siteScope\);\s*return can\(subject, "billing\.manage"\);/);
   assert.doesNotMatch(code(route), /capabilities: \{\} \}, "billing\.manage"/, "the overrides are no longer thrown away");
   /* A refusal, not a silent skip: a form that appears to save and does not is
      worse than one that says no. RE-POINTED from a literal `status: 403` to the
