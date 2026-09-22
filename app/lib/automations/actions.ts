@@ -24,6 +24,7 @@ import {
   maintenanceRequests,
   users,
 } from "../../../db/schema";
+import { recordJobMilestones } from "../job-milestones";
 import { recordJobStatusChanges, statusChangesBetween } from "../job-status-history";
 import { TRADE_FIELD, tradeWriteRefusal } from "../job-trade";
 import {
@@ -168,6 +169,16 @@ async function setSystemField(
     actorEmail: ctx.actor?.email ?? null,
     source: "automation",
     changes: statusChangesBetween(item.id, item, updated),
+  });
+  /* Decision N — a rule is not a person, so it never acknowledges; but a rule
+     that gives the job a person or an engineer has really assigned it. */
+  await recordJobMilestones(ctx.db, {
+    organisationId: ctx.orgId,
+    actorEmail: ctx.actor?.email ?? null,
+    source: "automation",
+    human: false,
+    handled: false,
+    changes: [{ requestId: item.id, before: item, after: updated }],
   });
   /*
    * An unresolvable contractor name is recorded, not hidden. The write stands —

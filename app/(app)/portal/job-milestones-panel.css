@@ -1,0 +1,68 @@
+/*
+ * The drawer's Response milestones — tokens only, and no media query: the rows
+ * are a single column that fits a phone as it is, and the buttons wrap.
+ */
+
+.job-milestones__list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.job-milestones__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.job-milestones__mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.job-milestones__row.is-recorded .job-milestones__mark {
+  background: var(--status-green-wash);
+  color: var(--status-green-fg);
+}
+
+.job-milestones__body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.job-milestones__body strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.job-milestones__body small {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.job-milestones__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.job-milestones__note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}

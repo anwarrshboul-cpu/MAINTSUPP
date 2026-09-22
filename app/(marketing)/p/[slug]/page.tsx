@@ -47,6 +47,8 @@ import {
   redirectTargetFor,
   type CmsPage,
 } from "../../../lib/cms-repository.ts";
+import { mediaIdsIn } from "../../../lib/cms-media.ts";
+import { resolveMediaForRender, type RenderableMedia } from "../../../lib/cms-media-repository.ts";
 import { scopedDb } from "../../../lib/tenant-db";
 import { Breadcrumbs } from "../../_components/breadcrumbs";
 import { CmsBlocks } from "../../_cms/blocks.tsx";
@@ -82,6 +84,21 @@ async function load(slugValue: string, preview = false): Promise<CmsPage | null>
     /* A page that cannot be read is a page that is not here. See the header of
        `cms-repository.ts`: a 404 is a better public answer than a 500. */
     return null;
+  }
+}
+
+/**
+ * The media library assets this page's blocks name (decision K), resolved once.
+ * A failure is an empty map: the image blocks then draw nothing, and the rest of
+ * the page renders — a missing picture is a better answer than a 500.
+ */
+async function mediaFor(page: CmsPage): Promise<Map<string, RenderableMedia>> {
+  const ids = page.blocks.flatMap((block) => mediaIdsIn(block.body));
+  if (!ids.length) return new Map();
+  try {
+    return await resolveMediaForRender(await getDb(), ids);
+  } catch {
+    return new Map();
   }
 }
 
@@ -192,6 +209,7 @@ export default async function CmsPageRoute({
      answer to a visitor. Anything else would let an outsider distinguish "this
      exists but is not published" from "this does not exist". */
   if (!page) notFound();
+  const media = await mediaFor(page);
 
   return (
     <main className="m-section">
@@ -216,7 +234,7 @@ export default async function CmsPageRoute({
         )}
         <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: page.title, path: `/p/${page.slug}` }]} />
         <h1>{page.title}</h1>
-        <CmsBlocks blocks={page.blocks} />
+        <CmsBlocks blocks={page.blocks} media={media} />
       </div>
     </main>
   );

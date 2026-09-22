@@ -49,6 +49,12 @@ const localBindingConfig = {
           binding: r2,
           bucket_name: "site-creator-r2",
         },
+        /* Decision K — the website's media, in a bucket of its own, never the
+           documents bucket above. See `CMS_BUCKET` in db/node-workers-env.ts. */
+        {
+          binding: "CMS_BUCKET",
+          bucket_name: "site-creator-cms-media",
+        },
       ]
     : [],
 };

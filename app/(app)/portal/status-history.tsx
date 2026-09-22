@@ -33,6 +33,21 @@ const SOURCE_LABELS: Record<string, string> = {
   automation: "an automation",
   "options.reassign": "a status option was retired",
   import: "a re-import",
+  "job.milestone": "recorded on the job",
+  "board.cell": "edited on the board",
+  "update.posted": "an update was posted",
+};
+
+/*
+ * DECISION N — a job's acknowledged, assigned and attended moments are written
+ * into this same history (`field = "milestone"`), once each, by the door that
+ * caused them. Drawn here as their own lines so the one history says both what
+ * the job's state was and when it was first answered, assigned and attended.
+ */
+const MILESTONE_LABELS: Record<string, string> = {
+  acknowledged: "Acknowledged",
+  assigned: "Assigned",
+  attended: "Attended",
 };
 
 function sourceLabel(source: string) {
@@ -54,24 +69,35 @@ export function StatusHistory({ entries, since }: { entries: StatusHistoryEntry[
     <div className="status-history">
       <div className="drawer-section__title">
         <span className="drawer-label">Stage and status history</span>
-        <span>{entries.length} change{entries.length === 1 ? "" : "s"}</span>
+        {/* "Entries", not "changes": since decision N this list also carries the
+            job's first acknowledgement, assignment and attendance, which are
+            recorded events rather than transitions. */}
+        <span>{entries.length} entr{entries.length === 1 ? "y" : "ies"}</span>
       </div>
       {entries.length === 0 ? (
-        <div className="drawer-history-state">No stage or status change has been recorded for this job yet.</div>
+        <div className="drawer-history-state">No stage, status or milestone has been recorded for this job yet.</div>
       ) : (
         <div className="activity-timeline">
           {entries.map((entry, index) => (
             <div key={entry.id}>
               <span className={`activity-dot${index === 0 ? " activity-dot--teal" : ""}`} />
               <p>
-                <strong>{entry.field === "stage" ? "Stage" : "Status"}</strong>{" "}
-                {entry.from ? (
+                {entry.field === "milestone" ? (
                   <>
-                    {entry.from} → <strong>{entry.to ?? "—"}</strong>
+                    <strong>{MILESTONE_LABELS[entry.to ?? ""] ?? entry.to}</strong> recorded
                   </>
                 ) : (
                   <>
-                    set to <strong>{entry.to ?? "—"}</strong>
+                    <strong>{entry.field === "stage" ? "Stage" : "Status"}</strong>{" "}
+                    {entry.from ? (
+                      <>
+                        {entry.from} → <strong>{entry.to ?? "—"}</strong>
+                      </>
+                    ) : (
+                      <>
+                        set to <strong>{entry.to ?? "—"}</strong>
+                      </>
+                    )}
                   </>
                 )}{" "}
                 <span className="status-history__who">

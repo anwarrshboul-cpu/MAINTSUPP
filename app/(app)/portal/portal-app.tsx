@@ -227,6 +227,7 @@ import { WorkspaceEmailPanel } from "./views/workspace-email-panel";
 import { GlobalSearch } from "./global-search";
 import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
+import { JobMilestonesPanel } from "./job-milestones-panel";
 import { AdminClientsView } from "./views/admin-clients";
 import { RecycleBinSection } from "./views/recycle-bin-section";
 import { AdminRolesView } from "./views/admin-roles";
@@ -8791,6 +8792,21 @@ function RequestDrawer({
 
           {/* The job's type, for a job on the Jobs board — the desktop drawer's only way to change it; see cells/job-type-cell.tsx. */}
           {isOnJobsBoard(request) ? <JobTypeDrawerField request={request} hidden={activeTab !== "columns"} onFieldsChange={onFieldsChange} onRequestChange={onRequestChange} onNotify={onNotify} /> : null}
+
+          {/* Decision N — acknowledged, assigned, attended; see job-milestones-panel.tsx. */}
+          {isOnJobsBoard(request) ? (
+            <JobMilestonesPanel
+              requestId={request.id}
+              hidden={activeTab !== "columns"}
+              /* The job's own state AND how many activity entries it has: a note
+                 acknowledges the job without moving any of the four, and the
+                 panel must not be left showing an Acknowledge button that would
+                 answer 409. `loadActivities` runs after every drawer write. */
+              refreshKey={`${request.stage}|${request.status}|${request.assignee ?? ""}|${request.contractor ?? ""}|${activities.length}|${statusHistory.length}`}
+              onRecorded={() => void loadActivities()}
+              onNotify={onNotify}
+            />
+          ) : null}
 
           <section
             className={`drawer-section desktop-request-columns${

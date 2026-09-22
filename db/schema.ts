@@ -891,7 +891,11 @@ export const jobStatusHistory = sqliteTable(
     id: text("id").primaryKey(),
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
     requestId: text("request_id").notNull(),
-    /** `stage` or `status`. */
+    /**
+     * `stage`, `status`, or `milestone` — decision N writes the job's first
+     * acknowledgement, assignment and attendance into this same history, with
+     * the milestone's name in `to_value` and no `from_value`.
+     */
     field: text("field").notNull(),
     /** NULL when the job was created in this state. */
     fromValue: text("from_value"),
@@ -2248,6 +2252,8 @@ export const uploadSessions = sqliteTable(
     createdAt: text("created_at").notNull(),
     expiresAt: text("expires_at").notNull(),
     finalizedAt: text("finalized_at"),
+    /** Which bucket: 'documents' (`job-media`) or 'cms-media' (decision K). */
+    target: text("target").notNull().default("documents"),
   },
   (table) => [
     uniqueIndex("upload_sessions_object_key_idx").on(table.objectKey),
@@ -4508,3 +4514,50 @@ export const siteNavigation = sqliteTable("site_navigation", {
   updatedByEmail: text("updated_by_email"),
   updatedAt: text("updated_at").notNull(),
 });
+
+/**
+ * The website's media library — decision K. One asset (`cms_media`) and every
+ * file it has had (`cms_media_versions`). Installation-wide; the bytes live in
+ * the separate `cms-media` bucket. See `ensureCmsMedia` in `db/init.ts`.
+ */
+export const cmsMedia = sqliteTable("cms_media", {
+  id: text("id").primaryKey(),
+  /** 'image' | 'video' | 'document' — from the file's type, never chosen. */
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  altText: text("alt_text"),
+  currentVersionId: text("current_version_id"),
+  /** 'active' | 'archived' — TEXT, never a boolean (BOOLEAN_COLUMNS). */
+  status: text("status").notNull().default("active"),
+  createdByEmail: text("created_by_email"),
+  createdAt: text("created_at").notNull(),
+  updatedByEmail: text("updated_by_email"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const cmsMediaVersions = sqliteTable(
+  "cms_media_versions",
+  {
+    id: text("id").primaryKey(),
+    mediaId: text("media_id").notNull().references(() => cmsMedia.id),
+    versionNo: integer("version_no").notNull(),
+    /** Never rewritten: a replacement is a new version with a new key. */
+    objectKey: text("object_key").notNull(),
+    originalName: text("original_name").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    width: integer("width"),
+    height: integer("height"),
+    durationMs: integer("duration_ms"),
+    /** A web-sized rendition made in the browser at upload; null when none. */
+    displayKey: text("display_key"),
+    displayWidth: integer("display_width"),
+    displayHeight: integer("display_height"),
+    uploadedByEmail: text("uploaded_by_email"),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("cms_media_versions_media_idx").on(table.mediaId, table.versionNo),
+    uniqueIndex("cms_media_versions_key_idx").on(table.objectKey),
+  ],
+);

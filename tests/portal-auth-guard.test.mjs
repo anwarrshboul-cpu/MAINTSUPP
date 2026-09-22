@@ -84,6 +84,10 @@ const PROTECTED_PATHS = [
   "/admin/audit",
   "/admin/pages",
   "/admin/navigation",
+  "/admin/media",
+  /* Search across workspaces — platform staff only, like every other console
+     screen; added with `/api/admin/search`. */
+  "/admin/search",
   "/admin/leads",
   "/admin/applications",
   "/admin/backups",

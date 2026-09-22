@@ -10,6 +10,7 @@ import {
   sites,
 } from "../../../../db/schema";
 import { boardKeyForRequest } from "../../../lib/board-registry";
+import { recordJobMilestones } from "../../../lib/job-milestones";
 import { recordContractorComment } from "../../../lib/contractor-comments";
 import {
   contractorSafeJob,
@@ -124,6 +125,41 @@ async function fileEvidenceOntoBoard(
         isNull(attachments.boardColumnId),
       ),
     );
+}
+
+/**
+ * DECISION N — a contractor answering through their link has HANDLED the job.
+ *
+ * The review asked what happens to a job that goes straight to a contractor and
+ * is completed without a coordinator ever touching it: with only the portal's
+ * doors recording, its `acknowledged_at` would stay empty for ever and the SLA
+ * would read a permanent coverage gap where the work was, in fact, answered.
+ *
+ * A contractor is a person, and reporting an obstruction, requesting completion
+ * or writing a note on the job is the first meaningful human handling of it.
+ * An automation is still not a person, and reading the page is still not
+ * handling — only a submission reaches here.
+ *
+ * WHO is recorded the way every other contractor-link write records it: the
+ * token, not an invented address (`contractor-link:<token id>`, the same string
+ * the upload routes file evidence under), so a reader can tell an answer that
+ * came through a link from one typed in the portal.
+ */
+async function recordContractorHandling(
+  db: Database,
+  scope: TokenScope,
+  by: string,
+  intent: string,
+) {
+  await recordJobMilestones(db, {
+    organisationId: scope.organisationId,
+    actorEmail: `contractor-link:${scope.id}`,
+    source: `job-link.${intent}`,
+    human: true,
+    handled: true,
+    changes: [{ requestId: scope.requestId, before: null, after: null }],
+  });
+  void by;
 }
 
 /**
@@ -720,6 +756,7 @@ export async function POST(
       if (note && scope.canComment) {
         await recordComment(db, scope, `Could not complete — ${reason}. ${note}`, by);
       }
+      await recordContractorHandling(db, scope, by, "blocked");
       await recordTokenUse(db, scope.id);
       await notifyCoordinator(db, scope, "blocked", by || null, note || null, reason);
       return Response.json({ ok: true, recorded: "blocked" });
@@ -825,6 +862,7 @@ export async function POST(
         );
       }
 
+      await recordContractorHandling(db, scope, by, "completion");
       await recordTokenUse(db, scope.id);
       await notifyCoordinator(db, scope, "completion", by || null, note || null, null);
       return Response.json({
@@ -859,6 +897,7 @@ export async function POST(
       );
 
     await recordComment(db, scope, completionUpdate(note, finishedOn), by);
+    await recordContractorHandling(db, scope, by, "note");
     await recordTokenUse(db, scope.id);
     return Response.json({ ok: true, recorded: "note" });
   } catch {

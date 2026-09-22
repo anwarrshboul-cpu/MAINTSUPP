@@ -171,8 +171,18 @@ test("a module's own operation inside a shared family is gated, and only that op
 });
 
 test("the finance and report-document guards carry it for every route behind them", async () => {
+  /* Every route of those two modules passes through one function, so the map's
+     entry IS the enforcement for all of them — asserted from `GUARDS` rather than
+     restated, so a third shared door added there is checked by being listed. */
+  for (const [file, key] of Object.entries(GUARDS)) {
+    assert.ok(isDisableableModule(key), `${file} names ${key}, which cannot be switched off`);
+    assert.match(
+      await read(file),
+      new RegExp(String.raw`moduleRefusal\([a-zA-Z.]+, "${key}"\)`),
+      `${file} must ask about ${key} for every route behind it`,
+    );
+  }
   const finance = await read("app/lib/finance/access.ts");
-  assert.match(finance, /moduleRefusal\(guard\.scope, "invoice-tracker"\)/);
   /* Last of the three checks in `guardFinance`: capability, then rank, then the
      switch — so the ledger never explains a switch to somebody who may not read
      it in the first place. */

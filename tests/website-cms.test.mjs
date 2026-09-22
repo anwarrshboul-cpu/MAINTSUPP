@@ -247,7 +247,10 @@ test("every catalogue entry has a renderer, and every renderer an entry", async 
     [...BLOCK_KINDS].sort(),
     "a renderer with no catalogue entry can never be reached, and a catalogue entry with no renderer draws nothing",
   );
-  assert.equal(BLOCK_CATALOGUE.length, 5, "five blocks, each earning a distinct renderer");
+  /* RE-POINTED 5 → 7 (decision K): `image` and `video` arrived with the media
+     library, each drawing its asset with its own element (`<img>`, `<video>`) —
+     distinct renderers, which is the rule this count protects. */
+  assert.equal(BLOCK_CATALOGUE.length, 7, "seven blocks, each earning a distinct renderer");
 });
 
 /* ------------------------------------------------------------------ */
@@ -626,8 +629,13 @@ test("the console lists the screen because the screen has an API", async () => {
      API (`/api/contractor-applications/inbox`) — the same rule kept once more.
      Re-pointed 8 → 9 for Backups (§39), which arrived with `/api/admin/backups`.
      Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
-     `/api/site-navigation`. */
-  assert.equal(PLATFORM_SECTIONS.length, 10);
+     `/api/site-navigation`.
+     Re-pointed 10 → 11 for Website media (decision K), which arrived with
+     `/api/cms-media` and its upload route.
+     Re-pointed 11 → 12 for Search across workspaces, which arrived with
+     `/api/admin/search` — the owner's optional follow-up to §36, and the same rule
+     kept again: listed because there is a server side behind it. */
+  assert.equal(PLATFORM_SECTIONS.length, 12);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -655,12 +663,22 @@ test("the console lists the screen because the screen has an API", async () => {
    *
    * And a fifth: `navigation` (decision J), for the pages entry's own reason —
    * it is MAINTSUPP's website, so no workspace capability can reach it.
+   *
+   * And a sixth: `media` (decision K), the same reason again — the website's own
+   * files, in a bucket of their own, belonging to no workspace.
+   *
+   * And a seventh: `search`, for a DIFFERENT reason worth stating rather than
+   * folding in. The six above answer to no capability because their rows are not
+   * in a workspace. This one's rows are — jobs, stores, contractors, people, all
+   * a workspace's — and the reason no capability fits is that the answer is about
+   * EVERY workspace at once, while every capability in this product is granted
+   * inside one. `platformAdmin` is the only gate that can be right about it.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "backups", "leads", "navigation", "pages"],
-    "only the five platform-owned surfaces answer to no capability",
+    ["applications", "backups", "leads", "media", "navigation", "pages", "search"],
+    "only the seven platform-owned surfaces answer to no capability",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

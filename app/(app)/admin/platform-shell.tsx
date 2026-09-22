@@ -76,8 +76,10 @@ import {
 } from "../../lib/platform-sections";
 import { ApplicationsInboxView } from "./applications-view";
 import { BackupsView } from "./backups-view";
+import { ConsoleSearchView } from "./console-search-view";
 import { LeadsInboxView } from "./leads-view";
 import { PlatformOverview } from "./platform-overview";
+import { SiteMediaView } from "./site-media-view";
 import { SiteNavigationView } from "./site-navigation-view";
 import { SitePagesView } from "./site-pages-view";
 import "./platform-shell.css";
@@ -129,6 +131,8 @@ export function PlatformShell({
            the rail's other screens describing the workspace that was current when
            the page loaded. */
         return <AdminClientsView onSwitched={() => window.location.reload()} />;
+      case "search":
+        return <ConsoleSearchView />;
       case "users":
         return <AdminUsersView />;
       case "roles":
@@ -139,6 +143,8 @@ export function PlatformShell({
         return <SitePagesView />;
       case "navigation":
         return <SiteNavigationView />;
+      case "media":
+        return <SiteMediaView />;
       case "leads":
         return <LeadsInboxView />;
       case "applications":
