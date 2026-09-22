@@ -1,6 +1,6 @@
 /**
  * Direct uploads — files over 900 KB go from the browser straight into the
- * PRIVATE bucket on short-lived, upload-only part URLs, so a 90 MB video never
+ * PRIVATE bucket on short-lived, upload-only part URLs, so a 50 MB video never
  * passes through a Vercel function (4.5 MB request cap). The owner's refined
  * rule: no persistent, public or read-capable storage URL or credential reaches
  * the browser; a single-part UPLOAD-ONLY URL for an upload the server already
@@ -28,6 +28,7 @@ const code = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/
 const s3 = await import("../db/r2-over-s3.ts");
 const signature = await import("../app/lib/file-signature.ts");
 const sessions = await import("../app/lib/upload-sessions.ts");
+const policy = await import("../app/lib/upload-policy.ts");
 
 const CREDS = { accessKeyId: "AKIAIOSFODNN7EXAMPLE", secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" };
 const MiB = 1024 * 1024;
@@ -212,14 +213,32 @@ test("a file's first bytes must match the type it claims", () => {
 /* The part plan, the uploader, and the session                         */
 /* ------------------------------------------------------------------ */
 
-test("a 90 MB video is planned as 18 parts, the last one the remainder", () => {
-  const plan = sessions.partPlan(90 * MiB);
-  assert.equal(plan.partSize, 5 * MiB);
-  assert.equal(plan.partCount, 18);
+test("the size policy: 50 MB for video, 25 MB for anything else, and what each refusal says", () => {
+  assert.equal(policy.MAX_VIDEO_FILE_SIZE, 50 * MiB);
+  assert.equal(policy.MAX_STANDARD_FILE_SIZE, 25 * MiB);
+  assert.equal(policy.uploadSizeRefusal(true, 50 * MiB), null, "exactly the maximum is accepted");
+  assert.equal(policy.uploadSizeRefusal(true, 50 * MiB + 1), "Maximum video size is 50 MB.");
+  assert.equal(policy.uploadSizeRefusal(false, 25 * MiB), null);
+  assert.equal(policy.uploadSizeRefusal(false, 25 * MiB + 1), "Files must be 25 MB or smaller.");
+  assert.equal(policy.uploadSizeRefusal(false, 40 * MiB), "Files must be 25 MB or smaller.", "a non-video does not borrow the video ceiling");
+  assert.equal(policy.maxUploadSize(true), 50 * MiB);
+  assert.equal(policy.maxUploadSize(false), 25 * MiB);
+});
+
+test("the largest video (50 MB) is ten full parts; a smaller one ends on the remainder", () => {
+  /* Re-pointed from "a 90 MB video is planned as 18 parts" when the owner set
+     the video ceiling to 50 MB (2026-09-22): the plan arithmetic is unchanged,
+     and both a remainder and an exact multiple are still covered. */
+  const largest = sessions.partPlan(policy.MAX_VIDEO_FILE_SIZE);
+  assert.equal(largest.partSize, 5 * MiB);
+  assert.equal(largest.partCount, 10);
+  assert.equal(largest.sizeOf(10), 5 * MiB, "the maximum ends on a full part");
+  const plan = sessions.partPlan(48 * MiB + 321);
+  assert.equal(plan.partCount, 10);
   assert.equal(plan.sizeOf(1), 5 * MiB);
-  assert.equal(plan.sizeOf(18), 90 * MiB - 17 * 5 * MiB);
+  assert.equal(plan.sizeOf(10), 48 * MiB + 321 - 9 * 5 * MiB);
   assert.equal(plan.sizeOf(0), 0);
-  assert.equal(plan.sizeOf(19), 0);
+  assert.equal(plan.sizeOf(11), 0);
   assert.equal(sessions.partPlan(1_200_000).partCount, 1, "a file under 5 MiB is one part");
   assert.equal(sessions.partPlan(10 * MiB).sizeOf(2), 5 * MiB, "an exact multiple ends on a full part");
 });
@@ -315,11 +334,11 @@ test("the session: scoped to its workspace, finished once, and swept when abando
     transport: "direct",
     contentType: "video/mp4",
     originalName: "clip.mp4",
-    byteSize: 90 * MiB,
+    byteSize: 50 * MiB,
   });
   const made = await sessions.createUploadSession(db, values("org_a/k1"), now);
   assert.equal(made.state, "pending");
-  assert.equal(Number(made.partCount), 18);
+  assert.equal(Number(made.partCount), 10);
   assert.equal(made.expiresAt, new Date(now + sessions.UPLOAD_SESSION_LIFETIME_MS).toISOString());
 
   assert.ok(await sessions.findUploadSession(db, { organisationId: "org_a", objectKey: "org_a/k1", uploadId: "up-org_a/k1" }));
@@ -391,12 +410,25 @@ test("the route: authorise, then the session, then sign — and complete is clai
   const put = route.slice(route.indexOf("export async function PUT"));
   assert.ok(put.indexOf("sessionRefusal(") < put.indexOf("await request.arrayBuffer()"), "a proxied part is refused before its bytes are read");
   assert.match(put, /bytes\.byteLength !== expected/);
-  // The size policy is unchanged: 90 MB for video, 25 MB for everything else, in both routes and the client.
+  /* The size policy — 50 MB for video (owner decision, 2026-09-22; it was
+     90 MB), 25 MB for everything else — is ONE module now, read by both routes
+     and the client. Re-pointed from three per-file copies of the constants,
+     which is how a limit drifts: each file must import it and keep no copy. */
+  const policySource = await read("app/lib/upload-policy.ts");
+  assert.match(policySource, /export const MAX_VIDEO_FILE_SIZE = 50 \* 1024 \* 1024;/);
+  assert.match(policySource, /export const MAX_STANDARD_FILE_SIZE = 25 \* 1024 \* 1024;/);
   for (const file of ["app/api/files/multipart/route.ts", "app/api/files/route.ts", "app/lib/client-upload.ts"]) {
-    const source = await read(file);
-    assert.match(source, /const MAX_VIDEO_FILE_SIZE = 90 \* 1024 \* 1024;/, file);
-    assert.match(source, /const MAX_STANDARD_FILE_SIZE = 25 \* 1024 \* 1024;/, file);
+    const source = code(await read(file));
+    assert.match(source, /from "[./]+(lib\/)?upload-policy"/, `${file} reads the one policy`);
+    assert.doesNotMatch(source, /const MAX_(VIDEO|STANDARD)_FILE_SIZE\s*=/, `${file} keeps no copy of it`);
+    assert.doesNotMatch(source, /90 MB/, `${file} no longer promises 90 MB`);
   }
+  // Refused at `start`, before a session or an upload id exists.
+  const start = route.slice(route.indexOf('if (action === "start")'));
+  assert.ok(start.indexOf("uploadSizeRefusal(") < start.indexOf("createMultipartUpload("), "an oversized file never reserves storage");
+  // And in the browser before the first request.
+  const client = code(await read("app/lib/client-upload.ts"));
+  assert.match(client, /function validateFile\(file: File\) \{\s*const refusal = uploadSizeRefusal\(isVideo\(file\), file\.size\);\s*if \(refusal\) throw new Error\(refusal\);/);
 });
 
 test("the small-file route checks the bytes before it stores them", async () => {
@@ -607,8 +639,9 @@ test("live: an abandoned upload cannot be finished, and false bytes are refused"
   assert.equal(direct.status, 415);
 
   // And the size and type policy is enforced before any storage is reserved.
-  const huge = await call("/api/files/multipart", { method: "POST", headers: { cookie }, body: startBody(owner.site, `${RUN}-huge.mp4`, "video/mp4", 90 * MiB + 1) });
+  const huge = await call("/api/files/multipart", { method: "POST", headers: { cookie }, body: startBody(owner.site, `${RUN}-huge.mp4`, "video/mp4", policy.MAX_VIDEO_FILE_SIZE + 1) });
   assert.equal(huge.status, 413);
+  assert.equal(huge.body?.error, "Maximum video size is 50 MB.");
   const page = await call("/api/files/multipart", { method: "POST", headers: { cookie }, body: startBody(owner.site, `${RUN}-page.html`, "text/html", 2_000_000) });
   assert.equal(page.status, 415);
 });

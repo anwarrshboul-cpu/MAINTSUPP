@@ -433,7 +433,7 @@ export function createR2Bucket(
    * Streams `value` to `target`, returning the byte count and MD5 as it goes.
    *
    * The MD5 is computed here, in one pass, because R2's etag for a single-shot
-   * put IS the MD5 of the content — and a 90 MB video (the app's video ceiling)
+   * put IS the MD5 of the content — and a 50 MB video (the app's video ceiling)
    * must never be resident in memory just to hash it. Everything the app hands
    * this function today is already a buffer, but the streaming path is what
    * keeps that ceiling from becoming a memory ceiling.
@@ -546,7 +546,7 @@ export function createR2Bucket(
      *
      * `head()`-shaped uses of a `get()` result are common, and an eagerly opened
      * descriptor that nobody reads is a descriptor leaked per request. The file
-     * route serves a 90 MB video by handing `object.body` to `new Response`, so
+     * route serves a 50 MB video by handing `object.body` to `new Response`, so
      * this must stay a real stream — reading the blob into a buffer would put
      * the whole video in the Worker's heap on every seek.
      */
@@ -997,11 +997,11 @@ export function createR2Bucket(
          * destination and only removes them when that destination finishes —
          * which `end: false` deliberately prevents. One sink shared across the
          * parts therefore accumulates four listeners per part and warns past
-         * ten: measured at 18 parts for a 90 MB video, and this route accepts up
+         * ten: measured at 18 parts for a 90 MB video (the ceiling then; 50 MB and ten parts now), and this route accepts up
          * to 100. The warning is cosmetic; the retained listeners are not.
          *
          * Writing by hand and awaiting `drain` keeps backpressure — the point of
-         * streaming at all is that a 90 MB assembly never sits in the heap.
+         * streaming at all is that a 50 MB assembly never sits in the heap.
          */
         try {
           for (const part of resolved) {

@@ -60,9 +60,8 @@ import {
   signatureMatches,
   typeAgreesWithExtension,
 } from "../../lib/file-signature";
+import { uploadSizeRefusal } from "../../lib/upload-policy";
 
-const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
-const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
 const allowedKinds = new Set<AttachmentKind>([
   "issue",
   "completion",
@@ -704,18 +703,10 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const maxSize = isVideo(file)
-      ? MAX_VIDEO_FILE_SIZE
-      : MAX_STANDARD_FILE_SIZE;
-    if (file.size > maxSize) {
-      return Response.json(
-        {
-          error: isVideo(file)
-            ? "Videos must be 90 MB or smaller."
-            : "Files must be 25 MB or smaller.",
-        },
-        { status: 413 },
-      );
+    // The one size policy — `upload-policy.ts` (50 MB video, 25 MB otherwise).
+    const tooLarge = uploadSizeRefusal(isVideo(file), file.size);
+    if (tooLarge) {
+      return Response.json({ error: tooLarge }, { status: 413 });
     }
 
     /*

@@ -103,6 +103,14 @@ calls it) and a `describe` string for diagnostics.
 
 ## 4. The 25 MB problem — read this before migrating
 
+> **Policy change, 2026-09-22 (owner decision).** The portal's video limit is
+> now **50 MB** (`app/lib/upload-policy.ts`), not 90 MB, to stay within the
+> current plan's 50 MB project upload ceiling without a plan upgrade. The
+> "at least 100 MB for 90 MB videos" advice below is superseded: nothing needs
+> raising for the product. The two historical `.mov` files quoted below (34.5
+> and 33.6 MB) are under the new limit. The historical Monday files themselves
+> remain deferred — possibly never migrated — and this script is not to be run.
+>
 > **Status, measured 2026-09-22 (direct-upload batch).** The Production
 > `job-media` bucket is now **100 MiB** (104,857,600 bytes, private, no MIME
 > restriction) — the recommendation below was carried out. The Staging bucket
@@ -120,8 +128,8 @@ calls it) and a `describe` string for diagnostics.
 > the first part past the limit rather than after every byte has been sent.
 
 The `job-media` bucket has a **file size limit of 25 MB**. The portal's own
-limits are **25 MB for files and 90 MB for videos** (`MAX_VIDEO_FILE_SIZE` in
-`app/api/files/multipart/route.ts`). Those do not agree, and the existing data
+limits were then **25 MB for files and 90 MB for videos** (now 50 MB — see the
+policy note above; the constants live in `app/lib/upload-policy.ts`). Those did not agree, and the existing data
 does not fit:
 
 ```

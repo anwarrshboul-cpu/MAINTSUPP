@@ -431,7 +431,7 @@ export function EvidenceManager({
 
         <p className="evidence-manager__hint">
           Upload images, videos, PDFs, Office files or ZIPs. Standard files up to 25 MB;
-          videos up to 90 MB. Large videos upload safely in smaller parts.
+          videos up to 50 MB. Large videos upload safely in smaller parts.
         </p>
         <div className="evidence-mobile-actions" aria-label="Add files from this device">
           <label>

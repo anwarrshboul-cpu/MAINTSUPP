@@ -306,7 +306,7 @@ test("#4 the throttles share sign-in's table without sharing its key space", asy
   const windows = [...throttles.matchAll(/windowMs: (\d+) \* 60_000/g)].map((m) => Number(m[1]));
   /* Re-pointed 3 → 4 for the direct-upload batch: `REPORT_JOB_SUBMISSIONS`
      throttles the home page's anonymous report door, whose upload token is now
-     worth up to 90 MB of storage. The lock still makes every addition visible. */
+     worth up to 50 MB of storage. The lock still makes every addition visible. */
   /* Re-pointed 4 → 6 for the public intake batch: `LEAD_SUBMISSIONS` and
      `CONTRACTOR_APPLICATIONS` throttle the marketing site's other two anonymous
      doors, which had a honeypot and nothing respectively. */
