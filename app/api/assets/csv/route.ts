@@ -43,6 +43,7 @@ import {
 import { auditActor, recordAudit } from "../../../lib/audit";
 import { csvDocument, csvDownload } from "../../../lib/finance/exports";
 import { assetKindLabel, parseSpecs, specsSummary } from "../../../lib/asset-model";
+import { memberSiteCondition } from "../../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -123,10 +124,8 @@ export async function GET(request: Request) {
      * never replace it. Asking only for stores outside the scope produces an
      * empty file, which is the honest answer, rather than widening.
      */
-    const wanted =
-      siteScope && siteScope.length
-        ? siteIds.filter((id) => siteScope.includes(id))
-        : siteIds;
+    /* Any restriction, an empty one included (it keeps no site — fail-closed). */
+    const wanted = siteScope ? siteIds.filter((id) => siteScope.includes(id)) : siteIds;
     if (siteIds.length && !wanted.length) {
       return csvDownload("assets.csv", csvDocument(HEADERS, []));
     }
@@ -166,7 +165,7 @@ export async function GET(request: Request) {
           kinds.length ? inArray(units.kind, kinds) : undefined,
           categories.length ? inArray(units.category, categories) : undefined,
           statuses.length ? inArray(units.status, statuses) : undefined,
-          siteScope && siteScope.length ? inArray(units.siteId, siteScope) : undefined,
+          memberSiteCondition(units.siteId, siteScope),
         ),
       )
       .orderBy(asc(sites.name), asc(units.name));

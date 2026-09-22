@@ -62,6 +62,17 @@ existing slug is refused; every save, move, delete and restore is a version in
 `CMS_OMISSIONS` in `cms-blocks.ts` lists what the editor does not do, and the editor
 prints it.
 
+**Public navigation (decision J).** The header menu and the footer's link lists are one
+`site_navigation` row (no row = the built-in menu), edited at `/admin/navigation`
+through `/api/site-navigation` (platform staff only; conditional on `revision`;
+versioned as `site_navigation` in `config_versions`). `app/lib/site-navigation.ts` owns
+the rules: safe destinations only, five locked links (Report a Job, Portal Login,
+Privacy, Terms, Cookies), and a pixel-width check of the header in both desktop
+layouts. The marketing layout reads it through `app/lib/site-navigation-public.ts`: a
+per-instance cache (30 s), never `ensureDatabase()`, falling back to the last good or
+the built-in menu; hidden links and links to website pages that are not live are
+dropped on the server.
+
 ## Uploads and documents
 
 - `app/lib/client-upload.ts` owns every upload from the browser: files up to 900 KB

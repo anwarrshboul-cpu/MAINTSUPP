@@ -4470,3 +4470,18 @@ export const siteBlocks = sqliteTable(
   /* Read together, always: every query is "the blocks of this page, in order". */
   (table) => [index("site_blocks_page_idx").on(table.pageId, table.position)],
 );
+
+/**
+ * The public website's navigation — decision J. One row (`id = 'public'`): the
+ * header menu and the footer's four link lists as one JSON document, validated
+ * by `app/lib/site-navigation.ts`. No row is the built-in navigation. See
+ * `ensureSiteNavigation` in `db/init.ts`.
+ */
+export const siteNavigation = sqliteTable("site_navigation", {
+  id: text("id").primaryKey(),
+  document: text("document").notNull(),
+  /** Bumped by every save; a save names the revision it was edited from. */
+  revision: integer("revision").notNull().default(1),
+  updatedByEmail: text("updated_by_email"),
+  updatedAt: text("updated_at").notNull(),
+});

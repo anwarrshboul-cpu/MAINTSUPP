@@ -20,6 +20,7 @@
 import { ensureDatabase } from "../../../../db/init";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { unlinkedContractorNames } from "../../../lib/contractor-linking";
+import { everySiteRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "board.view");
     if (guard.denied) return guard.denied;
+    /* Every site's spend, by contractor name: not a site-restricted member's
+       (security review) — see `everySiteRefusal`. */
+    const everySite = everySiteRefusal(guard.scope.siteScope, "contractor linking");
+    if (everySite) return everySite;
     const { db, orgId } = guard.scope;
 
     const result = await unlinkedContractorNames(db, orgId);

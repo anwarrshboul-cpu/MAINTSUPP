@@ -259,7 +259,13 @@ export async function accountWideRefusal(
     const allowed =
       actorRole !== null &&
       can(
-        { role: actorRole, capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {} },
+        {
+          role: actorRole,
+          capabilities: overrides.get(row.organisationId)?.[actorRole] ?? {},
+          /* The site ceiling in THAT workspace too (review): restricted there,
+             no account-wide change — a password reset included. */
+          siteRestricted: siteScopeInOrganisation(context, row.organisationId) !== null,
+        },
         capability,
       ) &&
       canManageRole(actorRole, targetRole);

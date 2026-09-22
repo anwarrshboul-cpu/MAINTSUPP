@@ -390,7 +390,8 @@ test("both upload doors ask the member's sites, after the grant and before the b
 test("the upload doors and the document doors share ONE rule", async () => {
   const documents = await read("app/api/files/documents.ts");
   const upload = documents.slice(documents.indexOf("export async function uploadOutsideSiteScope("));
-  assert.match(upload, /if \(!siteScope \|\| !siteScope\.length\) return false;/, "unrestricted: out before the first query");
+  /* Re-pointed 2026-09-22 (security review): the empty-scope fail-open was closed — see `memberSiteCondition`. An empty scope is a restriction to no site, and reaches nothing. */
+  assert.match(upload, /if \(!siteScope\) return false;\s*if \(!siteScope\.length\) return true;/, "unrestricted: out before the first query; empty: nothing");
   assert.equal((upload.match(/outsideSiteScope\(db, orgId, siteScope, /g) ?? []).length, 2, "filed anchors, then the predecessor");
   assert.match(documents, /export async function outsideSiteScope\(/);
   const byId = await read("app/api/files/[id]/route.ts");

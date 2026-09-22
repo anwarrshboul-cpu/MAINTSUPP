@@ -2385,7 +2385,7 @@ export async function POST(request: Request) {
          whole operation. See `subitemsOutsideMemberScope`. */
       if (await subitemsOutsideMemberScope(db, orgId, siteScope, requestIds, false)) {
         return beyondMemberScope(
-          "some of these jobs have subitems at other sites, and binning a job bins its subitems with it",
+          "some of these jobs have subitems outside your sites, and binning a job bins its subitems with it",
         );
       }
       /*
@@ -3495,6 +3495,10 @@ export async function PATCH(request: Request) {
             and(
               eq(maintenanceRequests.organisationId, orgId),
               eq(maintenanceRequests.location, previousName),
+              /* A site-restricted member's rename rewrites only THIS store's
+                 jobs, never another site's whose text happens to match
+                 (security review). Unrestricted: unchanged. */
+              siteScope ? eq(maintenanceRequests.siteId, siteOptionId) : undefined,
             ),
           );
         return Response.json({

@@ -420,13 +420,17 @@ test("the membership's site restriction is applied to every read and every write
   assert.match(route, /function siteFilter\(siteScope: string\[\] \| null\)/);
   const uses = route.match(/siteFilter\(siteScope\)/g) ?? [];
   assert.ok(uses.length >= 4, `expected the scope on every asset query, saw ${uses.length}`);
+  /* Re-pointed 2026-09-22 (security review): the empty-scope fail-open was closed — see `memberSiteCondition`.
+     `siteScope && siteScope.length` read an EMPTY restriction (the fail-closed
+     reader's answer for a malformed value) as "no filter"; the helpers read it
+     as "no site". */
   assert.match(
     route,
-    /siteScope && siteScope\.length \? inArray\(sites\.id, siteScope\) : undefined/,
+    /memberSiteCondition\(sites\.id, siteScope\)/,
     "and the site a write names must be one the member may touch",
   );
   /* Asking for a store outside the scope returns nothing rather than widening. */
-  assert.match(route, /!siteScope\.includes\(siteId\)/);
+  assert.match(route, /siteOutsideMemberScope\(siteScope, siteId\)/);
 });
 
 test("the export is formula-safe and scoped", async () => {
@@ -441,7 +445,8 @@ test("the export is formula-safe and scoped", async () => {
   assert.match(csv, /csvDocument\(/);
   assert.doesNotMatch(csv, /from "\.\.\/\.\.\/\.\.\/lib\/csv"/, "the unprotected writer is not used here");
   assert.match(csv, /scopedDbWithCapability\(request, "data\.export"\)/);
-  assert.match(csv, /inArray\(units\.siteId, siteScope\)/, "an export must not widen the scope");
+  /* Re-pointed 2026-09-22 (security review): the empty-scope fail-open was closed — see `memberSiteCondition`. */
+  assert.match(csv, /memberSiteCondition\(units\.siteId, siteScope\)/, "an export must not widen the scope");
   assert.match(csv, /isNull\(units\.deletedAt\)/, "a binned asset is not exported");
 
   const exports = await read("app/lib/finance/exports.ts");

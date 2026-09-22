@@ -160,8 +160,18 @@ test("the drawer opens from the left edge and locks the page without shifting it
   assert.match(chrome, /destination\.scrollIntoView\(\{ behavior: reduced \? "auto" : "smooth", block: "start" \}\);/);
   assert.match(chrome, /event\.key === "Escape"/);
   assert.match(chrome, /event\.shiftKey && document\.activeElement === first/);
-  for (const item of ["Report a Job", "Portal Login", "Services", "How It Works", "Pricing", "Case Study", "Contact Us", "Book a Portfolio Review"]) {
+  /* RE-POINTED (decision J): the drawer's three frame items are still typed in
+     the chrome; its section links are the shared nav list, which is data now —
+     the shipped list is in `app/lib/site-navigation.ts`, and the drawer renders
+     whatever that list is (`NAV.map` inside `aria-label="Mobile"`, asserted in
+     the Contact Us test below). */
+  for (const item of ["Report a Job", "Portal Login", "Book a Portfolio Review"]) {
     assert.ok(chrome.includes(item), `drawer item missing: ${item}`);
+  }
+  const navigation = await read("app/lib/site-navigation.ts");
+  const shippedNav = navigation.slice(navigation.indexOf("const NAV = ["), navigation.indexOf("] as const;"));
+  for (const item of ["Services", "How It Works", "Pricing", "Case Study", "Contact Us"]) {
+    assert.ok(shippedNav.includes(`"${item}"`), `drawer item missing from the shipped nav: ${item}`);
   }
 });
 
@@ -315,8 +325,13 @@ test("Contact Us is in both navs, and both send you to the section the footer al
    * was invented for this link.
    */
   const chrome = await read("app/(marketing)/_sections/chrome.tsx");
-  const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
+  /* RE-POINTED (decision J): the shared list is the shipped navigation in
+     `app/lib/site-navigation.ts`; the chrome renders `navigation.primary` — that
+     list, or the one staff saved — as `NAV`, in both bars (asserted below). */
+  const navigation = await read("app/lib/site-navigation.ts");
+  const nav = navigation.slice(navigation.indexOf("const NAV = ["), navigation.indexOf("] as const;"));
   assert.match(nav, /\["#contact", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
+  assert.match(chrome, /const NAV = navigation\.primary;/, "one list feeds both bars");
 
   /* RE-POINTED: the nav gained "Contractors", which is a ROUTE and not a hash,
      so the harvest can no longer assume every target starts with "#". The claim
@@ -359,11 +374,14 @@ test("Contact Us is in both navs, and both send you to the section the footer al
 
   /* And the destination exists — the same anchor the footer uses. The footer's
      Contact link moved with the nav, so both now say `#contact`. */
+  /* RE-POINTED (decision J): the footer's Contact entry is shipped footer data
+     now, rendered through the same `SectionLink`. */
   assert.match(
-    chrome,
-    /<SectionLink href="#contact">Contact<\/SectionLink>/,
+    navigation,
+    /\{ id: "ftr-contact", href: "#contact", label: "Contact" \}/,
     "the footer convention this reuses",
   );
+  assert.match(chrome, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/);
   const finalCta = await read("app/(marketing)/_sections/final-cta.tsx");
   assert.match(finalCta, /<section className="section finalcta" id="review">/, "#review is still a real section");
   assert.match(finalCta, /className="wrap finalcta__inner" id="contact"/, "#contact names the same place");

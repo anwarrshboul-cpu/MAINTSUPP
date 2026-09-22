@@ -398,6 +398,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      table; no seed. See `ensureSitePageLifecycle`. */
   await ensureSitePageLifecycle(d1);
 
+  /* Decision J — the public website's header menu and footer links, edited by
+     platform staff. One guarded table; no seed (no row = the built-in
+     navigation). See `ensureSiteNavigation`. */
+  await ensureSiteNavigation(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6633,6 +6638,42 @@ async function ensureSitePageLifecycle(d1: D1DatabaseLike) {
       "CREATE UNIQUE INDEX IF NOT EXISTS site_redirects_from_idx ON site_redirects(from_path)",
     ),
   ]);
+}
+
+/**
+ * THE PUBLIC WEBSITE'S NAVIGATION — decision J.
+ *
+ * One row, `id = 'public'`, holding the header menu and the footer's four link
+ * lists as one JSON document, validated against `app/lib/site-navigation.ts`
+ * before it is stored and repaired against it again when it is read.
+ *
+ * INSTALLATION-WIDE, for the reason `ensureSitePages` gives: there is one
+ * maintsupp.com, and a visitor has no workspace to scope by. It is edited by
+ * MAINTSUPP platform staff only; no workspace role can reach it.
+ *
+ * ONE DOCUMENT, NOT A ROW PER LINK, because the navigation is saved and restored
+ * whole: a reorder, a rename and a hidden link are one decision, and a table of
+ * rows would let a visitor's page read half of it. `revision` is what makes a
+ * save conditional — two people editing at once cannot silently overwrite each
+ * other; the second is told.
+ *
+ * NO SEED. No row is the built-in navigation (the one in code), exactly as no
+ * `theme_tokens` row is the built-in palette — so an installation that never
+ * edits its navigation is not a row that can drift from the code, and "reset"
+ * removes the row rather than writing a copy of the defaults.
+ */
+async function ensureSiteNavigation(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS site_navigation (
+         id TEXT PRIMARY KEY,
+         document TEXT NOT NULL,
+         revision INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL
+       )`,
+    )
+    .run();
 }
 
 async function ensureThemeTokens(d1: D1DatabaseLike) {

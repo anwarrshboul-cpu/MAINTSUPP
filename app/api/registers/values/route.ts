@@ -37,7 +37,10 @@ import {
   findRegisterColumnByKey,
   registerEntityExists,
 } from "../../../lib/register-columns";
-import { siteOutsideMemberScope } from "../../../lib/job-site-scope";
+import {
+  everySiteRefusal,
+  siteOutsideMemberScope,
+} from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +69,12 @@ export async function PATCH(request: Request) {
       );
     }
     const register = body.register;
+    /* The contractors register is every site's: refused to a site-restricted
+       member before anything about the row is looked at (security review). */
+    if (register === "contractors") {
+      const everySite = everySiteRefusal(scope.siteScope, "the contractor register");
+      if (everySite) return everySite;
+    }
     const entityId = typeof body.entityId === "string" ? body.entityId.trim() : "";
     const columnKey = typeof body.columnKey === "string" ? body.columnKey.trim() : "";
     if (!entityId || !columnKey) {

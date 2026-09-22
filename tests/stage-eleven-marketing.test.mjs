@@ -212,10 +212,25 @@ test("the legal pages exist and are linked", async () => {
       `/${page} must exist`,
     );
   }
-  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  /*
+   * RE-POINTED (decision J): the footer's links are data platform staff edit,
+   * so "in the footer" is now three facts, each asserted:
+   *   - the footer as shipped carries all three (`FOOTER_DEFAULTS`);
+   *   - all three are LOCKED — a save that removes, hides or re-points one is
+   *     refused (`validateNavigation`), and a stored row that lost one gets it
+   *     back when read (`normaliseNavigation`) — so no edit can take them away;
+   *   - the chrome still draws the Legal list it is handed.
+   */
+  const navigation = await read("app/lib/site-navigation.ts");
+  const { LOCKED_LINKS, normaliseNavigation } = await import("../app/lib/site-navigation.ts");
   for (const page of ["privacy", "terms", "cookies"]) {
-    assert.match(chrome, new RegExp(`href="/${page}"`), `/${page} must be in the footer`);
+    assert.match(navigation, new RegExp(`href: "/${page}"`), `/${page} must be in the footer`);
+    assert.ok(LOCKED_LINKS.some((lock) => lock.href === `/${page}` && lock.group === "legal"), `/${page} must be locked in the footer`);
+    const legal = normaliseNavigation({ primary: [], footer: [{ id: "legal", heading: "Legal", links: [] }] }).footer.find((group) => group.id === "legal");
+    assert.ok(legal.links.some((link) => link.href === `/${page}` && !link.hidden), `/${page} survives a row that dropped it`);
   }
+  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  assert.match(chrome, /<h3 className="ftr__h3--legal">\{legal\.heading\}<\/h3>/, "the chrome draws the Legal list");
 });
 
 test("the consent checkbox links to a privacy notice that exists", async () => {

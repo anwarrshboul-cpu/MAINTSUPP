@@ -223,6 +223,25 @@ export async function subitemsOutsideMemberScope(
   return anyJobOutsideMemberScope(db, orgId, siteScope, children);
 }
 
+/**
+ * WHAT COVERS EVERY SITE AT ONCE is not a site-restricted member's (security
+ * review, 2026-09-22): the finance ledger (every site's payables, receivables
+ * and margin), the billing and management report documents built from every
+ * site's jobs, and the contractor register (one contractor record, and its
+ * aliases, serve every site). Refused outright rather than half-confined: a
+ * ledger or a register cannot be partly one site's without a design decision
+ * the owner has not taken, and a refusal is the safe answer until then.
+ */
+export function everySiteRefusal(siteScope: SiteScope, what: string): Response | null {
+  if (!siteScope) return null;
+  return beyondMemberScope(`${what} covers every site, so it needs a member with access to every site`);
+}
+
+/** The contractor register through `/api/workspace`: refused when `entity` names it. */
+export function contractorRegisterRefusal(siteScope: SiteScope, entity: string | undefined): Response | null {
+  return entity === "contractor" ? everySiteRefusal(siteScope, "the contractor register") : null;
+}
+
 /** What a restricted member is told when a new record names no store. */
 export const SITE_REQUIRED =
   "Your access is limited to some sites, so this has to name one of them.";

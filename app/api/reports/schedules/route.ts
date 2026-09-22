@@ -20,6 +20,7 @@ import { emailDeliveryStatus } from "../../../lib/notifications";
 import { can, resolvePermissions } from "../../../lib/permissions";
 import { nextRunOn, REPORT_PERIODS, validateSchedule } from "../../../lib/report-schedule-rules";
 import { anonymousRefusal, scopedDbWithCapability, type ScopedDatabase } from "../../../lib/tenant-db";
+import { everySiteRefusal } from "../../../lib/job-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,8 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
+    if (everySite) return everySite;
     const scope = guard.scope;
     const rows = await scope.db
       .select()
@@ -113,6 +116,8 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
+    if (everySite) return everySite;
     const scope = guard.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const checked = validateSchedule(body, null);
@@ -164,6 +169,8 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
+    if (everySite) return everySite;
     const scope = guard.scope;
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     const id = typeof body.id === "string" ? body.id.slice(0, 80) : "";
@@ -216,6 +223,8 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "data.export");
     if (guard.denied) return guard.denied;
+    const everySite = everySiteRefusal(guard.scope.siteScope, "a scheduled report");
+    if (everySite) return everySite;
     const scope = guard.scope;
     const id = (new URL(request.url).searchParams.get("id") ?? "").slice(0, 80);
     const [existing] = await scope.db

@@ -83,7 +83,12 @@ import { CANONICAL_REGISTER } from "../../lib/register-scope";
 import { chunkIds } from "../../lib/sql-batching";
 import { anonymousRefusal, scopedDbWithCapability } from "../../lib/tenant-db";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
-import { beyondMemberScope, jobsWithinMemberScope, subitemsOutsideMemberScope } from "../../lib/job-site-scope";
+import {
+  beyondMemberScope,
+  boardStructureRefusal,
+  jobsWithinMemberScope,
+  subitemsOutsideMemberScope,
+} from "../../lib/job-site-scope";
 
 type Scope = Awaited<ReturnType<typeof scopedDbWithCapability>>["scope"];
 type Database = NonNullable<Scope>["db"];
@@ -310,11 +315,17 @@ export async function POST(request: Request) {
       if (entry && !(await confineBinEntries(db, orgId, siteScope, [entry])).length) {
         return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });
       }
+      /* A group, a column or a board view is board STRUCTURE: restoring one puts
+         it back for every site (security review) — see `boardStructureRefusal`. */
+      if (entry && ["group", "column", "board_view"].includes(entry.entityType)) {
+        const structure = boardStructureRefusal(siteScope);
+        if (structure) return structure;
+      }
       /* Restoring a job brings back the subitems binned with it; one at another
          site fails the whole restore. See `subitemsOutsideMemberScope`. */
       if (entry?.entityType === "job" && (await subitemsOutsideMemberScope(db, orgId, siteScope, [entry.entityId], true))) {
         return beyondMemberScope(
-          "this job has subitems at other sites, and restoring it would restore them with it",
+          "this job has subitems outside your sites, and restoring it would restore them with it",
         );
       }
     }
@@ -334,7 +345,7 @@ export async function POST(request: Request) {
           { status: 403 },
         );
       }
-      if (siteScope && siteScope.length && !siteScope.includes(assetSite)) {
+      if (siteScope && !siteScope.includes(assetSite)) {
         /* The same words a missing entry gets: confirming that it exists at a
            store they cannot see is itself a disclosure. */
         return Response.json({ error: "That item is no longer in the bin." }, { status: 404 });
@@ -434,6 +445,19 @@ export async function DELETE(request: Request) {
     /* One entry, for a restricted member: another store's is not in their bin,
        and the 404 below says so in the words a missing entry gets. */
     const all = await confineBinEntries(db, orgId, siteScope, unconfined);
+    /* A purge is permanent, so the restore's rules hold here too (security
+       review): board structure is every site's, and purging a job destroys
+       its subitems with it — one outside the member's sites fails it all. */
+    if (siteScope) {
+      if (all.some((entry) => ["group", "column", "board_view"].includes(entry.entityType))) {
+        const structure = boardStructureRefusal(siteScope);
+        if (structure) return structure;
+      }
+      const jobIds = all.filter((entry) => entry.entityType === "job").map((entry) => entry.entityId);
+      if (await subitemsOutsideMemberScope(db, orgId, siteScope, jobIds, true)) {
+        return beyondMemberScope("some of these jobs have subitems outside your sites, and purging a job destroys its subitems with it");
+      }
+    }
 
     /*
      * W2C — A CHILD OF A DELETED SECTION IS NOT SEPARATELY DESTROYABLE.

@@ -26,7 +26,7 @@
  * Matching is case-insensitive on both databases (`app/lib/search-text.ts`).
  * Each group returns a handful — this is a way to get somewhere, not a report.
  */
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { contractors, maintenanceRequests, memberships, sites, users } from "../../../db/schema";
 import { FINANCE_CAPABILITIES } from "../../lib/finance/access";
@@ -36,6 +36,7 @@ import { ROLE_RANK } from "../../lib/roles";
 import { containsText, searchNeedle, SEARCH_MIN_LENGTH } from "../../lib/search-text";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 import { GET as listDocuments } from "../files/route";
+import { memberSiteCondition } from "../../lib/member-site-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,6 @@ export async function GET(request: Request) {
        board cannot use it — the same answer every board read gives. */
     const refusal = requireCapability(subject, "board.view");
     if (refusal) return refusal;
-    const restricted = siteScope && siteScope.length ? siteScope : null;
     const groups: SearchGroup[] = [];
 
     /* ── Jobs ── */
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
         and(
           eq(maintenanceRequests.organisationId, orgId),
           isNull(maintenanceRequests.deletedAt),
-          restricted ? inArray(maintenanceRequests.siteId, restricted) : undefined,
+          memberSiteCondition(maintenanceRequests.siteId, siteScope),
           or(
             containsText(maintenanceRequests.id, needle),
             containsText(maintenanceRequests.reference, needle),
@@ -124,7 +124,7 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(sites.organisationId, orgId),
-          restricted ? inArray(sites.id, restricted) : undefined,
+          memberSiteCondition(sites.id, siteScope),
           or(
             containsText(sites.name, needle),
             containsText(sites.code, needle),
@@ -195,7 +195,9 @@ export async function GET(request: Request) {
 
     /* ── Invoices and quotes: the Invoice Tracker's door, rank and capability ── */
     const financeReader =
-      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"]);
+      ROLE_RANK[scope.actor.role] >= ROLE_RANK.admin && can(subject, FINANCE_CAPABILITIES["ledger.read"])
+      /* The ledger is every site's: not a site-restricted member's (security review). */
+      && !scope.siteScope;
     if (financeReader) {
       const term = raw.trim().slice(0, 80);
       const invoicePage = await listInvoices(db, orgId, { search: term, limit: PER_GROUP });

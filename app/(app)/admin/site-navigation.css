@@ -1,0 +1,115 @@
+/**
+ * The website-navigation editor: layout only (decision J).
+ *
+ * Built on the admin kit — `.admin-field`, `.admin-panel`, `.admin-toolbar`,
+ * `.admin-flash` and `.admin-mini` come from `views/admin-console.css` and are
+ * not restated here. Tokens only; no breakpoint at all: every row is an
+ * `auto-fit` grid, which collapses to one column on a phone by itself.
+ */
+
+.site-nav__intro {
+  margin: 4px 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.site-nav__panel {
+  margin: 0 0 16px;
+}
+
+.site-nav__heading {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.site-nav__heading small {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.site-nav__meter {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.site-nav__group-heading {
+  max-width: 320px;
+  margin-bottom: 10px;
+}
+
+.site-nav__list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+/* One link per row: label, destination, then the row's own controls, so a
+   control can never be visually separated from the link it acts on. */
+.site-nav__row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  align-items: end;
+  gap: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--canvas);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+/* Hidden is said in words by the checkbox; the tint only repeats it. */
+.site-nav__row--hidden {
+  border-style: dashed;
+}
+.site-nav__row--hidden .site-nav__label input {
+  color: var(--muted);
+}
+
+.site-nav__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.site-nav__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink);
+  margin-right: auto;
+}
+
+.site-nav__lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.site-nav__note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+  color: var(--amber-600);
+}
+
+.site-nav__fixed {
+  margin: 0;
+  padding-left: 18px;
+}
+.site-nav__fixed li {
+  margin: 4px 0;
+  line-height: 1.5;
+}
+
+/* An address is one unbroken word; let it break rather than widen the console. */
+.site-nav__row input {
+  overflow-wrap: anywhere;
+}

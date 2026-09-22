@@ -686,7 +686,7 @@ export function requireCapability(
     return Response.json(
       {
         error:
-          "Your access is limited to some sites, so a change to the whole workspace needs a member with access to every site.",
+          "Your access is limited to some sites, and this acts on the whole workspace, so it needs a member with access to every site.",
         capability,
         role: actor.role,
         denied: true,
