@@ -26,6 +26,7 @@ import {
   units,
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
+import { organisationLogoUrl } from "../../lib/organisation-logo";
 
 /**
  * The presence values the working-status row may set.
@@ -248,6 +249,8 @@ export async function GET(request: Request) {
           primaryColour: context.organisation.primaryColour,
           status: context.organisation.status,
           createdAt: context.organisation.createdAt,
+          /** The workspace's own mark, brokered — null draws the default. */
+          logoUrl: await organisationLogoUrl(context.db, context.orgId),
         },
         /** monday's "Spaces": every workspace this identity may switch to. */
         workspaces: context.activeOrganisations

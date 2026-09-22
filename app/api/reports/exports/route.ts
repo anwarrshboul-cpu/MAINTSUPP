@@ -54,6 +54,8 @@ import { DOCX_CONTENT_TYPE, renderDocx } from "../../../lib/exports/docx";
 import { PDF_CONTENT_TYPE, renderPdf } from "../../../lib/exports/pdf";
 import { XLSX_CONTENT_TYPE, renderXlsx } from "../../../lib/exports/xlsx";
 import { recordExportHistory } from "./history";
+import type { DocumentBranding } from "../../../lib/exports/document-model";
+import { documentLogo } from "../../../lib/organisation-logo";
 
 export const dynamic = "force-dynamic";
 
@@ -116,11 +118,18 @@ function documentKind(value: unknown): DocumentKind {
  * Invoice tab. It is not a second question — it selects sections from the one
  * payload, through `sectionsFor` in `document-model.ts`, which is the same gate
  * all three walk. A renderer still cannot compute a figure of its own.
+ *
+ * The branding joined it with the workspace logo, and it is not a question
+ * either: it is the cover's picture and nothing else — no figure, no text — and
+ * it is the same value for all three (the workbook, being data, ignores it). It
+ * is read HERE, from the workspace's own copy, never from the caller, and it
+ * travels beside the payload rather than inside it so a finalised document's
+ * snapshot is exactly what it was. See `DocumentBranding` in `document-model.ts`.
  */
 const RENDERERS: Record<
   ExportFormat,
   {
-    render: (payload: CombinedReportPayload, kind: DocumentKind) => Uint8Array;
+    render: (payload: CombinedReportPayload, kind: DocumentKind, branding: DocumentBranding) => Uint8Array;
     contentType: string;
   }
 > = {
@@ -225,6 +234,17 @@ async function readPreviewPayload(
 
 /* ── Producing the file ──────────────────────────────────────────────────── */
 
+/**
+ * The cover's logo — this workspace's, from its own stored copy, or none. A
+ * missing copy (no logo, or one uploaded where the browser could not draw the
+ * print JPEG) prints the cover as it always was; it never fails the export.
+ */
+async function documentBranding(scope: ScopedDatabase): Promise<DocumentBranding> {
+  const { env } = await import("cloudflare:workers");
+  const storage = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
+  return { logo: await documentLogo(scope.db, storage, scope.orgId) };
+}
+
 async function produce(
   request: Request,
   scope: ScopedDatabase,
@@ -242,7 +262,8 @@ async function produce(
     format,
     kind,
   });
-  const bytes = renderer.render(payload, kind);
+  const branding = await documentBranding(scope);
+  const bytes = renderer.render(payload, kind, branding);
 
   // The audit event first, and unconditionally — it is the record that somebody
   // took a copy of this invoice. See the header of `./history`.

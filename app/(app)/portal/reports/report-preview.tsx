@@ -33,6 +33,7 @@ import {
   sectionsFor,
 } from "../../../lib/exports/document-model";
 import type { DocCell, DocSection } from "../../../lib/exports/document-model";
+import { WorkspaceMark, useWorkspaceLogo } from "../workspace-mark";
 
 function toneClass(tone: DocCell["tone"]): string {
   return tone ? ` reports-cell--${tone}` : "";
@@ -188,10 +189,17 @@ export function CombinedDocumentPreview({
 }) {
   const document = buildReportDocument(payload, kind);
   const sections = sectionsFor(document, "internal");
+  /*
+   * The workspace's own logo, as the exported PDF and Word file will print it:
+   * their JPEG copy (`printUrl`), and nothing when there is no such copy — the
+   * screen and the download must not disagree about the cover either.
+   */
+  const logo = useWorkspaceLogo();
 
   return (
     <article className="reports-doc" aria-label={`${document.title} preview`}>
       <header className="reports-doc__cover">
+        <WorkspaceMark logoUrl={logo?.printUrl} className="reports-doc__logo" fallback={null} />
         <p className="reports-doc__eyebrow">
           <Icon name="document" size={14} />
           {snapshot ? "Issued document — stored snapshot" : "Preview — nothing has been saved"}
