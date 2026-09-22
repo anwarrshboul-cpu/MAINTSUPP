@@ -2,9 +2,9 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ImgHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
-import { Icon } from "../../components";
+import { Icon, type IconName } from "../../components";
 import { uploadEvidenceFile, describeUploadStage } from "../../lib/client-upload";
 import {
   MediaViewer,
@@ -66,6 +66,38 @@ function kindLabel(kind: AttachmentKind) {
   }[kind];
 }
 
+/**
+ * A picture whose bytes are missing — or refused — draws the file's glyph, never
+ * the browser's broken-image mark: the rule `DocumentThumbnail` applies in the
+ * register (BUG 4), here for the board's strip, overflow list and evidence grid.
+ * Remembering WHICH `src` failed means a reused node for another file starts
+ * clean. A named picture keeps its name on the glyph.
+ */
+function TileImage({
+  src,
+  alt,
+  glyph,
+  glyphSize,
+  ...rest
+}: {
+  src: string;
+  alt: string;
+  glyph: IconName;
+  glyphSize: number;
+} & Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt" | "onError">) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (failedSrc === src) {
+    return alt ? (
+      <span role="img" aria-label={alt}>
+        <Icon name={glyph} size={glyphSize} />
+      </span>
+    ) : (
+      <Icon name={glyph} size={glyphSize} />
+    );
+  }
+  return <img src={src} alt={alt} {...rest} onError={() => setFailedSrc(src)} />;
+}
+
 function FilePreview({
   file,
   compact = false,
@@ -85,9 +117,11 @@ function FilePreview({
      * broken.
      */
     return (
-      <img
+      <TileImage
         src={`/api/files/${file.id}?thumb=1`}
         alt={documentName(file)}
+        glyph={glyphFor(file.contentType)}
+        glyphSize={compact ? 20 : 34}
         loading="lazy"
         decoding="async"
       />
@@ -1085,13 +1119,16 @@ export function FileHoverPreview({
                     }}
                   >
                     {file.contentType.startsWith("image/") ? (
-                      <img
+                      <TileImage
                         // `?thumb=1` serves a 96px WebP derivative and falls
                         // back to the original when one has not been generated,
                         // so a new upload still draws — heavier, never broken.
                         // Measured: 146 KB of JPEG becomes 1.1 KB of WebP.
+                        // Bytes that are missing draw the glyph (`TileImage`).
                         src={`/api/files/${file.id}?thumb=1`}
                         alt=""
+                        glyph={glyphFor(file.contentType)}
+                        glyphSize={13}
                         width={32}
                         height={24}
                         loading="lazy"
@@ -1249,9 +1286,11 @@ export function FileHoverPreview({
                 <span className="sheet-file-overflow__row" key={file.id} role="listitem">
                   <span className="sheet-file-overflow__thumb">
                     {file.contentType.startsWith("image/") ? (
-                      <img
+                      <TileImage
                         src={`/api/files/${file.id}?thumb=1`}
                         alt=""
+                        glyph={glyphFor(file.contentType)}
+                        glyphSize={14}
                         loading="lazy"
                         decoding="async"
                       />

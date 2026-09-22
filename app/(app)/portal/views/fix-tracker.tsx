@@ -56,6 +56,7 @@ import { chipStyle as sharedChipStyle } from "../chip-ink";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
 import { type BoardItem, formatDate } from "./view-model";
 import { MediaViewer } from "../media-viewer";
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 /*
  * ONE RULE FOR WHAT A DOCUMENT IS CALLED. `documentName` is the Documents
  * register's own — the title somebody set, the stored filename otherwise — and
@@ -829,6 +830,11 @@ function FixTrackerDetail({
   onClose: () => void;
   onChanged?: () => void;
 }) {
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation. The photo viewer opened
+     from here takes its own Escape first (window capture), so one press closes
+     one surface. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour<HTMLElement>(true, onClose);
   const [files, setFiles] = useState<Attachment[]>([]);
   const [completedAt, setCompletedAt] = useState(
     item.completedAt ? item.completedAt.slice(0, 10) : "",
@@ -1077,10 +1083,13 @@ function FixTrackerDetail({
         onClick={onClose}
       />
       <section
+        ref={surface}
         className="fix-tracker__panel"
         role="dialog"
         aria-modal="true"
         aria-label={item.description?.trim() || item.title}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
       >
         <header>
           <div>

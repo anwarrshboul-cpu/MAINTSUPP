@@ -9887,3 +9887,24 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   outline: 2px solid var(--accent-fg);
   outline-offset: 2px;
 }
+
+/*
+ * The keyboard ring, given back where a component rule took it away (§47).
+ * The Jobs toolbar's filter selects, each row's "Move" select on the board and
+ * the SLA fields in Settings carry `outline: 0` in globals.css — (0,1,1),
+ * which outranks the global `:focus-visible` ring at (0,1,0) — so a keyboard
+ * reaching them saw nothing at all. Found by the keyboard walk, not by axe,
+ * which cannot see focus. `:focus-visible` only: a mouse click still draws no
+ * ring. The two selects are borderless and sit in boxes that clip (a toolbar
+ * that scrolls sideways, a table cell), so their ring is drawn INSIDE the box.
+ */
+.live-board-tool select:focus-visible,
+.sheet-column--move select:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
+
+.sla-settings input:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}

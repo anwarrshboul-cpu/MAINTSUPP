@@ -24,6 +24,7 @@
 
 import { useMemo, useState } from "react";
 import { Icon } from "../../../components";
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 import {
   AdminFlash,
   AdminLoading,
@@ -426,7 +427,7 @@ export function AdminUsersView() {
                       <th>Workspaces</th>
                       <th>Status</th>
                       <th>Last sign-in</th>
-                      <th aria-label="Actions" />
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -644,7 +645,7 @@ export function AdminUsersView() {
                       <th>Invited by</th>
                       <th>Sent</th>
                       <th>Expires</th>
-                      {can("users.invite") ? <th aria-label="Actions" /> : null}
+                      {can("users.invite") ? <th>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -785,13 +786,19 @@ function AdminDialog({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
   return (
     <div className="admin-dialog-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={surface}
         className="admin-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onClick={(event) => event.stopPropagation()}
       >
         <header>

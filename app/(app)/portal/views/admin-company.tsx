@@ -23,6 +23,7 @@
 import { useState } from "react";
 import { Icon } from "../../../components";
 import { adminWrite } from "./admin-shell";
+import { useDialogBehaviour } from "../overlay/dialog-behaviour";
 
 export type CompanyWorkspace = {
   id: string;
@@ -124,6 +125,9 @@ export function WorkspaceAccessDialog({
   onClose: () => void;
   onChanged: (result: Flash) => void | Promise<void>;
 }) {
+  /* What `aria-modal` promises — Escape, focus in and back, the Tab trap, the
+     scroll lock — from the one shared implementation. See `dialog-behaviour.ts`. */
+  const { surface, onKeyDown } = useDialogBehaviour(true, onClose);
   const [busy, setBusy] = useState<string | null>(null);
   const [roles, setRoles] = useState<Record<string, string>>({});
   const held = new Map(
@@ -159,10 +163,13 @@ export function WorkspaceAccessDialog({
   return (
     <div className="admin-dialog-backdrop" role="presentation" onClick={onClose}>
       <div
+        ref={surface}
         className="admin-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={`Workspace access for ${user.fullName ?? user.email}`}
+        tabIndex={-1}
+        onKeyDown={onKeyDown}
         onClick={(event) => event.stopPropagation()}
       >
         <header>
