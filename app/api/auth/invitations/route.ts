@@ -11,7 +11,6 @@ import {
   INVITATION_SENDER,
   invitationEmailEnabled,
   invitationEmailTemplate,
-  outboundEmailMode,
   sendNotification,
   type SendResult,
 } from "../../../lib/notifications";
@@ -150,19 +149,22 @@ async function deliverInvitation(input: {
     };
   }
 
+  /* §33: `sendNotification` itself now answers `redirected` for a sink send, so
+     the mode no longer has to be asked separately here — and cannot drift from
+     what the send actually did. */
   switch (result.status) {
+    case "redirected":
+      return {
+        ...base,
+        status: "sink",
+        message: `Test environment: the email was redirected to the internal test inbox rather than to ${input.email}. Share the link below if they need it.`,
+      };
     case "sent":
-      return outboundEmailMode() === "sink"
-        ? {
-            ...base,
-            status: "sink",
-            message: `Test environment: the email was redirected to the internal test inbox rather than to ${input.email}. Share the link below if they need it.`,
-          }
-        : {
-            ...base,
-            status: "sent",
-            message: `An invitation email was sent to ${input.email} from ${INVITATION_REPLY_TO}.`,
-          };
+      return {
+        ...base,
+        status: "sent",
+        message: `An invitation email was sent to ${input.email} from ${INVITATION_REPLY_TO}.`,
+      };
     case "suppressed":
       return {
         ...base,

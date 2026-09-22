@@ -208,6 +208,11 @@ export async function deliverScheduledReports(
           body: email.body,
         });
         statuses.push(sent.status);
+        /* §33 — a person's own switch or the duplicate guard is about THIS
+           recipient, not the deployment, so it is named rather than folded into
+           the deployment-wide reason below. */
+        if (sent.suppressedBy === "preference") reasons.push(`${person.email} has switched off report emails`);
+        if (sent.suppressedBy === "duplicate") reasons.push(`${person.email} already had this report in the last 10 minutes`);
       }
       for (const missing of ids.filter((id) => !people.some((person) => person.id === id))) {
         reasons.push(`recipient ${missing.slice(0, 12)}… no longer exists`);

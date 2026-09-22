@@ -1,0 +1,45 @@
+/* Settings → Notifications (§33). The rows borrow `.setting-row` so the card
+   reads like its neighbours; the list reset and the right-hand "to" label are
+   the only new rules. */
+
+.workspace-email__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-email__list .setting-row {
+  gap: 16px;
+}
+
+.workspace-email__to {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  text-align: right;
+}
+
+.workspace-email__status {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-email__foot {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-email__foot a {
+  color: var(--teal-500);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

@@ -22,6 +22,7 @@ import { ACCOUNT_PANELS } from "./account-panels";
 import { useModuleAvailable } from "../../../lib/client-capabilities";
 import { AccountError, AccountLoading } from "./account-ui";
 import { AccountProfilePanel } from "./account-profile";
+import { AccountNotificationsPanel } from "./account-notifications";
 import {
   AccountArchivePanel,
   AccountBillingPanel,
@@ -161,6 +162,8 @@ export function AccountShell({ panel }: { panel: string }) {
     if (!snapshot) return <AccountLoading label="Loading your account" />;
 
     switch (active.key) {
+      case "notifications":
+        return <AccountNotificationsPanel onNotify={notify} />;
       case "developers":
         return <AccountDevelopersPanel />;
       case "workspaces":

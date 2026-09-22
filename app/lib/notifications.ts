@@ -1,6 +1,15 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { notificationLog } from "../../db/schema";
+import {
+  NOTIFICATION_TOPICS,
+  STORM_EXEMPT_EVENTS,
+  claimSendSlot,
+  recipientDeclined,
+  releaseSendSlot,
+  stormKey,
+  topicForEvent,
+} from "./notification-preferences";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -59,6 +68,12 @@ export type NotificationRequest = {
    * verified domain, same kill switch; only the From line differs.
    */
   from?: string;
+  /**
+   * The log row this send retries (`replayFailed`). A replay is an operator's
+   * deliberate retry of a message that never left, so the duplicate guard does
+   * not hold it back as a copy of the attempt it is replacing.
+   */
+  replayOf?: string;
 };
 
 /**
@@ -98,12 +113,34 @@ export function invitationEmailEnabled() {
   return (env?.env?.INVITATION_EMAIL_MODE ?? "").trim().toLowerCase() === "live";
 }
 
+/**
+ * What happened to one email. `ok` is true ONLY for `sent`: the person it was
+ * addressed to has it.
+ *
+ *   sent        — delivered to the real recipient (`EMAIL_MODE=live`).
+ *   redirected  — `EMAIL_MODE=sink`: it went to the internal test inbox. The
+ *                 provider accepted it, but the person it was for was not told
+ *                 anything, so it is not `sent` (owner decision Q1). It used to
+ *                 be recorded as `sent`, and every caller that trusts `ok` —
+ *                 the job's "notified at", the compliance ladder's "this stage
+ *                 was announced", an automation's "emailed x" — believed it.
+ *   suppressed  — deliberately not sent: `EMAIL_MODE=log`, the recipient has
+ *                 switched this kind of email off, or an identical email went in
+ *                 the last ten minutes. `suppressedBy` says which.
+ *   skipped     — no provider configured.
+ *   failed      — attempted and refused, or no usable address.
+ */
 export type SendResult = {
   ok: boolean;
   logId: string;
-  status: "sent" | "failed" | "skipped" | "suppressed";
+  status: "sent" | "redirected" | "failed" | "skipped" | "suppressed";
+  suppressedBy?: "mode" | "preference" | "duplicate";
   error?: string;
 };
+
+/** The words `notification_log.error` and the caller get for a sink redirect. */
+export const REDIRECTED_REASON =
+  "Sent to the internal test inbox (EMAIL_MODE=sink), not to the recipient.";
 
 /**
  * Reads provider configuration from the Worker environment.
@@ -365,6 +402,28 @@ export async function sendNotification(
   }
 
   /*
+   * §33 — THE PERSON'S OWN SWITCH, then THE DUPLICATE GUARD. Both before the
+   * mode checks, so a declined or repeated email is recorded as exactly that on
+   * every deployment — a Preview with no provider shows the same decisions
+   * Production would make. Both fail open; see `notification-preferences.ts`.
+   * Invitations and test sends reach neither (no topic, and storm-exempt).
+   */
+  const topic = request.channel === "email" ? topicForEvent(request.event) : null;
+  if (topic && (await recipientDeclined(db, request.to, topic))) {
+    const label = NOTIFICATION_TOPICS.find((entry) => entry.key === topic)?.label ?? topic;
+    const reason = `The recipient has switched off "${label}" in their notification settings.`;
+    await db.insert(notificationLog).values({ ...base, status: "suppressed", attempts: 0, error: reason });
+    return { ok: false, logId, status: "suppressed", suppressedBy: "preference", error: reason };
+  }
+  const slot =
+    STORM_EXEMPT_EVENTS.has(request.event) || request.replayOf ? null : await stormKey(request);
+  if (slot && !(await claimSendSlot(db, request.organisationId, slot))) {
+    const reason = "An identical email went to this recipient in the last 10 minutes.";
+    await db.insert(notificationLog).values({ ...base, status: "suppressed", attempts: 0, error: reason });
+    return { ok: false, logId, status: "suppressed", suppressedBy: "duplicate", error: reason };
+  }
+
+  /*
    * `log` — nothing leaves the building. Recorded with everything the send
    * would have carried so `/api/notifications/replay` can post it for real
    * once a deployment is meant to, and so a test can assert on what WOULD
@@ -382,6 +441,7 @@ export async function sendNotification(
       ok: false,
       logId,
       status: "suppressed",
+      suppressedBy: "mode",
       error: "EMAIL_MODE=log — nothing was sent.",
     };
   }
@@ -406,6 +466,24 @@ export async function sendNotification(
   try {
     const result = await deliverEmail(config, request);
     if (result.ok) {
+      /*
+       * REDIRECTED IS NOT SENT. In sink mode the provider accepted a message
+       * addressed to the internal test inbox; the recipient received nothing,
+       * so the row, and `ok`, say so. `delivered_at` is left empty for the same
+       * reason — nothing reached the address in `recipient`.
+       */
+      if (config.mode === "sink") {
+        await db
+          .update(notificationLog)
+          .set({
+            status: "redirected",
+            providerId: result.providerId ?? null,
+            error: REDIRECTED_REASON,
+            updatedAt: sql`CURRENT_TIMESTAMP`,
+          })
+          .where(eq(notificationLog.id, logId));
+        return { ok: false, logId, status: "redirected", error: REDIRECTED_REASON };
+      }
       await db
         .update(notificationLog)
         .set({
@@ -418,6 +496,7 @@ export async function sendNotification(
       return { ok: true, logId, status: "sent" };
     }
 
+    if (slot) await releaseSendSlot(db, slot);
     await db
       .update(notificationLog)
       .set({ status: "failed", error: result.error ?? null, updatedAt: sql`CURRENT_TIMESTAMP` })
@@ -425,6 +504,7 @@ export async function sendNotification(
     return { ok: false, logId, status: "failed", error: result.error };
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : "Delivery failed.";
+    if (slot) await releaseSendSlot(db, slot);
     await db
       .update(notificationLog)
       .set({ status: "failed", error: message.slice(0, 500), updatedAt: sql`CURRENT_TIMESTAMP` })
@@ -466,6 +546,7 @@ export async function replayFailed(db: Database, organisationId: string, limit =
       to: row.recipient,
       subject: row.subject ?? "MAINTSUPP notification",
       body: `<p>Replayed notification: ${row.event}</p>`,
+      replayOf: row.id,
     });
     if (result.ok) {
       sent += 1;

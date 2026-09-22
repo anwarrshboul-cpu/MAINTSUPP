@@ -90,22 +90,29 @@ export async function POST(request: Request) {
     });
 
     return Response.json({
-      ok: result.ok || result.status === "suppressed" || result.status === "skipped",
+      ok:
+        result.ok ||
+        result.status === "suppressed" ||
+        result.status === "skipped" ||
+        result.status === "redirected",
       to,
       status: result.status,
       /*
        * The mode is reported back so the operator is told what actually
        * happened. "Sent" when nothing left the building would be the single
-       * most misleading thing this endpoint could say.
+       * most misleading thing this endpoint could say — and "sent" for a sink
+       * redirect was exactly that until §33 gave it its own status.
        */
       message:
         result.status === "sent"
           ? `A test reminder has been sent to ${to}.`
-          : result.status === "suppressed"
-            ? `Email is suppressed on this deployment, so nothing was delivered. The message was written to the notification log instead.`
-            : result.status === "skipped"
-              ? `Email is not configured on this deployment, so nothing was delivered.`
-              : `The test could not be sent: ${result.error ?? "unknown error"}`,
+          : result.status === "redirected"
+            ? `Email is in test mode on this deployment: the message went to the internal test inbox, not to ${to}.`
+            : result.status === "suppressed"
+              ? `Email is suppressed on this deployment, so nothing was delivered. The message was written to the notification log instead.`
+              : result.status === "skipped"
+                ? `Email is not configured on this deployment, so nothing was delivered.`
+                : `The test could not be sent: ${result.error ?? "unknown error"}`,
     });
   } catch (error) {
     const { status, message } = databaseSafeFailure(error, "The test send could not be made.");
