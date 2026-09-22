@@ -278,11 +278,17 @@ function lifecycleColumns(input: PageInput) {
  * ANY page by slug, draft or scheduled included — for a platform-staff
  * PREVIEW only. The public route never calls this without that check.
  */
-export async function readPageForPreview(db: Database, slug: string): Promise<CmsPage | null> {
+export async function readPageForPreview(
+  db: Database,
+  slug: string,
+  /* The instant its `state` is judged at — taken, like `readPublishedPage`'s,
+     so a caller (and a test) can name it. The page itself passes nothing. */
+  now = Date.now(),
+): Promise<CmsPage | null> {
   try {
     const rows = await db.select().from(sitePages).where(eq(sitePages.slug, slug)).limit(1);
     const page = rows[0];
-    return page ? toPage(page, await blocksOf(db, page.id)) : null;
+    return page ? toPage(page, await blocksOf(db, page.id), now) : null;
   } catch (error) {
     console.error("[cms] could not read the page for preview", error);
     return null;

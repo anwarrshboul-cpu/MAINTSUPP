@@ -312,9 +312,12 @@ test("the public read honours the window; a preview read sees every state", asyn
   assert.equal(hidden.canonicalUrl, "https://maintsupp.com/p/open");
   assert.equal(hidden.blocks.length, 1, "the live read still carries the blocks");
 
-  assert.equal((await repo.readPageForPreview(db, "draft"))?.state, "draft");
-  assert.equal((await repo.readPageForPreview(db, "soon"))?.state, "scheduled");
-  assert.equal(await repo.readPageForPreview(db, "never"), null);
+  /* At NOW, like every read above. This line read the real clock, so from
+     13:00 UTC on 2026-09-22 — an hour past the fixed NOW — "soon" was live and
+     the test failed on an untouched tree. */
+  assert.equal((await repo.readPageForPreview(db, "draft", NOW))?.state, "draft");
+  assert.equal((await repo.readPageForPreview(db, "soon", NOW))?.state, "scheduled");
+  assert.equal(await repo.readPageForPreview(db, "never", NOW), null);
 
   const listed = (await repo.listPagesForSitemap(db)).map((page) => page.slug).sort();
   assert.deepEqual(listed, ["draft", "gone", "hidden", "open", "soon"], "every row; the rules pick");

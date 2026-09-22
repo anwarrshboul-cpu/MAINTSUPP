@@ -9982,3 +9982,26 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   outline: 3px solid var(--focus-ring);
   outline-offset: -3px;
 }
+
+/*
+ * The keyboard ring, third pass: the stand-ins #88 measured as visible but too
+ * faint (§47). WCAG 1.4.11 asks 3:1 for a focus indicator against the unfocused
+ * state; each of these fell under it in one theme (a border or text colour that
+ * moves 1.57-2.75:1 — the ratios are in tests/a11y-keyboard.test.mjs). The
+ * stand-in stays and the ring joins it. Inside (-3px) throughout: every one sits
+ * in a box that clips or scrolls — the account menu, the assignee popover, the board toolbar, the update thread, the top bar. A
+ * control's ring outranks the rule that stripped it by specificity (`:root`),
+ * not load order; a borderless field rings its bordered wrapper via `:has`.
+ * (The automation builder's headings take theirs in board-actions.css: this
+ * file may not carry automation styles.)
+ */
+:root .account-menu__plan:focus-visible,
+:root .account-menu__item:focus-visible,
+:root .account-menu__status-list button:focus-visible,
+:root .update-composer textarea:focus-visible,
+.assignee-search:has(input:focus-visible),
+.global-search__field:has(input:focus-visible),
+.portal-shell .live-board-search:has(input:focus-visible) {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
+}
