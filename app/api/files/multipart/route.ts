@@ -36,6 +36,7 @@ import {
   pendingReview,
   resolveUploadAuthority,
   resolveUploadTenant,
+  ungrantedAnonymousRefusal,
 } from "../upload-authority";
 import {
   MAX_PENDING_UPLOADS_PER_UPLOADER,
@@ -236,6 +237,9 @@ async function authorizeUpload(
   const scope = await scopedDb(request, { allowAnonymous: true });
   const { actor, db } = scope;
   let orgId = scope.orgId;
+  /* No session and no grant: 401 before any lookup can say what exists. See the helper. */
+  const ungranted = ungrantedAnonymousRefusal(scope, uploadToken);
+  if (ungranted) return { response: ungranted } as const;
   /*
    * `isOperator = authenticated || demoIdentityAllowed()` used to stand here and
    * decide every branch below. It is gone — see `../upload-authority.ts`. What

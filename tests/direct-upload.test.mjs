@@ -404,6 +404,26 @@ test("the small-file route checks the bytes before it stores them", async () => 
   assert.ok(direct.indexOf("signatureMatches(file.type, file.name") < direct.indexOf("runtimeEnv.BUCKET.put(key, bytes"));
 });
 
+test("a caller with no session and no grant is refused before any lookup can say what exists", async () => {
+  /* The job and anchor lookups run before the grant check (a token picks the
+     tenant to look in), so without this floor a made-up job id answered 404 and
+     a real one 401 — an existence oracle for `MN-<n>`. */
+  const authority = code(await read("app/api/files/upload-authority.ts"));
+  assert.match(
+    authority,
+    /export function ungrantedAnonymousRefusal\([\s\S]*?if \(uploadToken \|\| scope\.authenticated \|\| demoIdentityAllowed\(\)\) return null;\s*return refuse\("Sign in to upload a document\.", 401\);/,
+  );
+  for (const file of ["app/api/files/route.ts", "app/api/files/multipart/route.ts"]) {
+    const source = code(await read(file));
+    const floor = source.indexOf("ungrantedAnonymousRefusal(scope, uploadToken)");
+    assert.ok(floor > 0, `${file}: the floor is applied`);
+    for (const lookup of ["resolveUploadTenant(db", "eq(maintenanceRequests.id, requestId)", "anchorReferencesRefusal(db", "resolveUploadAuthority({"]) {
+      const at = source.indexOf(lookup);
+      assert.ok(at > floor, `${file}: \`${lookup}\` runs after the floor`);
+    }
+  }
+});
+
 test("the client sends parts to the signed URL without credentials, and never reads from storage", async () => {
   const client = code(await read("app/lib/client-upload.ts"));
   const putPart = client.slice(client.indexOf("function putPart("), client.indexOf("const PART_ATTEMPTS"));
@@ -591,6 +611,29 @@ test("live: an abandoned upload cannot be finished, and false bytes are refused"
   assert.equal(huge.status, 413);
   const page = await call("/api/files/multipart", { method: "POST", headers: { cookie }, body: startBody(owner.site, `${RUN}-page.html`, "text/html", 2_000_000) });
   assert.equal(page.status, 415);
+});
+
+test("live: with no session and no grant, a real job and a made-up one get the same 401", { skip: !serverUp }, async (t) => {
+  /* A development server lends a signed-out caller the demo identity, so the
+     floor cannot fire there; this runs against a production build (a Preview). */
+  if ((await call("/api/context")).status !== 401) return t.skip("this server lends signed-out callers the demo identity");
+  const owner = await ownerContext();
+  if (!owner) return t.skip("the seeded owner is unavailable here");
+  const jobs = await call("/api/maintenance", { headers: { cookie } });
+  const real = (jobs.body?.requests ?? [])[0]?.id;
+  if (!real) return t.skip("there is no job to probe with here");
+  for (const [label, requestId] of [["real", real], ["made-up", `${RUN}-none`]]) {
+    const start = await call("/api/files/multipart", { method: "POST", body: JSON.stringify({ action: "start", kind: "issue", requestId, originalName: "a.pdf", contentType: "application/pdf", byteSize: 2_000_000 }) });
+    assert.equal(start.status, 401, `multipart start, ${label} job`);
+    const form = new FormData();
+    form.set("requestId", requestId);
+    form.set("kind", "issue");
+    form.set("file", new Blob([pdfBytes(2000)], { type: "application/pdf" }), "a.pdf");
+    const direct = await fetch(`${BASE_URL}/api/files`, { method: "POST", body: form });
+    assert.equal(direct.status, 401, `direct upload, ${label} job`);
+  }
+  const site = await call("/api/files/multipart", { method: "POST", body: startBody(`${RUN}-no-site`, "a.pdf", "application/pdf", 2_000_000) });
+  assert.equal(site.status, 401, "a made-up site anchor gets the same answer");
 });
 
 after(async () => {
