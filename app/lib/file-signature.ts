@@ -100,7 +100,7 @@ const BY_EXTENSION: Record<string, string> = {
  * The declared types a file with this extension may honestly carry. A caller
  * supplies both the name and the type, and the two used to be checked against
  * the allowlist SEPARATELY — so `x.mp4` declared `text/plain` passed both,
- * earned the 90 MB video limit from its name and skipped the byte check as
+ * earned the video limit from its name and skipped the byte check as
  * text. They must now agree with each other. The alternatives are the ones
  * real browsers send: Windows labels a CSV `application/vnd.ms-excel`, some
  * browsers label an M4V as MP4, and HEIC/HEIF are used interchangeably.

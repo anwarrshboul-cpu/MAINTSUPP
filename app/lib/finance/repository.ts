@@ -28,7 +28,7 @@
  * inventing a second dialect story.
  */
 
-import { and, asc, count, desc, eq, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, getTableColumns, gte, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "../../../db";
 import {
   creditNotes,
@@ -56,8 +56,29 @@ import { paymentAllocationState } from "./rules";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
-export type InvoiceRow = typeof invoices.$inferSelect;
-export type QuoteRow = typeof quotations.$inferSelect;
+/*
+ * THE LEGACY `amount` REAL NEVER LEAVES THIS REPOSITORY.
+ *
+ * `invoices.amount` and `quotations.amount` are floats from before Module 5.
+ * The money has been integer pence since then (`net_pence` / `vat_pence` /
+ * `gross_pence`), and both inserts below write `amount` as ZERO because the
+ * column is NOT NULL and this bootstrap performs no destructive ALTER. Every
+ * read that feeds an API used to spread the whole row, so each invoice and
+ * quote went out with `amount: 0` beside its real price — a money-shaped field
+ * that was always wrong. The owner approved normalising the last float money
+ * (2026-09-22): these reads now select every column BUT `amount`, and the row
+ * types say so, so the compiler refuses any code that tries to use it.
+ */
+function withoutLegacyAmount<T extends { amount: unknown }>(columns: T): Omit<T, "amount"> {
+  const { amount, ...rest } = columns;
+  void amount;
+  return rest;
+}
+const INVOICE_COLUMNS = withoutLegacyAmount(getTableColumns(invoices));
+const QUOTE_COLUMNS = withoutLegacyAmount(getTableColumns(quotations));
+
+export type InvoiceRow = Omit<typeof invoices.$inferSelect, "amount">;
+export type QuoteRow = Omit<typeof quotations.$inferSelect, "amount">;
 export type PaymentRow = typeof payments.$inferSelect;
 export type CreditNoteRow = typeof creditNotes.$inferSelect;
 
@@ -204,7 +225,7 @@ export async function listInvoices(
   const offset = Math.max(0, Math.trunc(filters.offset ?? 0));
 
   const rows = await db
-    .select()
+    .select(INVOICE_COLUMNS)
     .from(invoices)
     .where(where)
     .orderBy(desc(dateText(invoices.invoiceDate)), desc(invoices.createdAt), asc(invoices.id))
@@ -278,7 +299,7 @@ export async function readInvoice(
   invoiceId: string,
 ): Promise<InvoiceRow | null> {
   const rows = await db
-    .select()
+    .select(INVOICE_COLUMNS)
     .from(invoices)
     .where(and(eq(invoices.organisationId, organisationId), eq(invoices.id, invoiceId)))
     .limit(1);
@@ -640,7 +661,7 @@ export async function listQuotes(
   const limit = clampPage(filters.limit);
   const offset = Math.max(0, Math.trunc(filters.offset ?? 0));
   const rows = await db
-    .select()
+    .select(QUOTE_COLUMNS)
     .from(quotations)
     .where(where)
     .orderBy(desc(dateText(quotations.quoteDate)), desc(quotations.submittedAt), asc(quotations.id))
@@ -656,7 +677,7 @@ export async function readQuote(
   quoteId: string,
 ): Promise<QuoteRow | null> {
   const rows = await db
-    .select()
+    .select(QUOTE_COLUMNS)
     .from(quotations)
     .where(and(eq(quotations.organisationId, organisationId), eq(quotations.id, quoteId)))
     .limit(1);

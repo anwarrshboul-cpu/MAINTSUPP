@@ -314,7 +314,7 @@ export default function ContractorJobView({ token }: { token: string }) {
        * `/api/files/multipart` in chunks, retries a direct upload that 413s, and
        * offers a WebP thumbnail afterwards so the board draws a thumbnail rather
        * than the original. It also enforces the real size ceilings — 25 MB, or
-       * 90 MB for video — with a sentence a human can act on.
+       * 50 MB for video (`upload-policy.ts`) — with a sentence a human can act on.
        *
        * This was never a regression: the page always posted directly, and the
        * contractor link had the same ceiling. What changed is who is standing in
