@@ -452,8 +452,11 @@ test("the console lists the inbox because the inbox now has a server side", asyn
      Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
      `/api/site-navigation`.
      Re-pointed 10 → 11 for Website media (decision K), which arrived with
-     `/api/cms-media` and its upload route. */
-  assert.equal(PLATFORM_SECTIONS.length, 11);
+     `/api/cms-media` and its upload route.
+     Re-pointed 11 → 12 for Search across workspaces, which arrived with
+     `/api/admin/search` — the owner's optional follow-up to §36, and the same rule
+     kept again: listed because there is a server side behind it. */
+  assert.equal(PLATFORM_SECTIONS.length, 12);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the
