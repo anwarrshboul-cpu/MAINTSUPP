@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components";
-import { uploadEvidenceFile } from "../../lib/client-upload";
+import { uploadEvidenceFile, describeUploadStage } from "../../lib/client-upload";
 import { formatDate as sharedFormatDate } from "../../lib/format-date";
 /*
  * ONE RULE FOR WHAT A DOCUMENT IS CALLED — the title somebody set, the stored
@@ -258,6 +258,8 @@ export function ContractorProfile({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<number | null>(null);
+  /* What the upload is doing, in words — see `describeUploadStage`. */
+  const [stage, setStage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   /*
@@ -464,6 +466,7 @@ export function ContractorProfile({
         kind: "general",
         contractorId: contractor.id,
         onProgress: setProgress,
+        onStage: (next) => setStage(describeUploadStage(next)),
       });
       onNotify(`${file.name} filed against ${contractor.name}.`);
       reloadDocuments();
@@ -474,6 +477,7 @@ export function ContractorProfile({
     } finally {
       setBusy(null);
       setProgress(null);
+      setStage(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
@@ -871,7 +875,7 @@ export function ContractorProfile({
               <label className="secondary-button" htmlFor="contractor-document-upload">
                 <Icon name="upload" size={16} />
                 {busy === "upload"
-                  ? `Uploading${progress === null ? "" : ` ${Math.round(progress)}%`}…`
+                  ? (stage ?? `Uploading${progress === null ? "" : ` ${Math.round(progress)}%`}…`)
                   : "Add a document"}
               </label>
               <input

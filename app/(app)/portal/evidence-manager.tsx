@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components";
-import { uploadEvidenceFile } from "../../lib/client-upload";
+import { uploadEvidenceFile, describeUploadStage } from "../../lib/client-upload";
 import {
   MediaViewer,
   glyphFor,
@@ -142,6 +142,8 @@ export function EvidenceManager({
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  /* What the upload is doing, in words — see `describeUploadStage`. */
+  const [uploadStage, setUploadStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<string | null>(null);
@@ -262,6 +264,12 @@ export function EvidenceManager({
             setUploadProgress(
               Math.round(((index + progress / 100) / selected.length) * 100),
             ),
+          onStage: (stage) =>
+            setUploadStage(
+              selected.length > 1
+                ? `${index + 1} of ${selected.length} · ${describeUploadStage(stage)}`
+                : describeUploadStage(stage),
+            ),
         });
         setFiles((current) => [payload.file, ...current]);
         fileCount += 1;
@@ -289,6 +297,7 @@ export function EvidenceManager({
     }
     if (failures.length) setError(failures.join(" "));
     setUploading(false);
+    setUploadStage(null);
     setUploadProgress(0);
     if (inputRef.current) inputRef.current.value = "";
     if (cameraInputRef.current) cameraInputRef.current.value = "";
@@ -372,7 +381,7 @@ export function EvidenceManager({
           )}
           <label className="primary-button evidence-upload">
             <Icon name="upload" size={17} />
-            {uploading ? `Uploading ${uploadProgress}%` : "Add files"}
+            {uploading ? (uploadStage ?? `Uploading ${uploadProgress}%`) : "Add files"}
             <input
               ref={inputRef}
               type="file"
@@ -439,7 +448,7 @@ export function EvidenceManager({
           {uploading && (
             <div className="evidence-mobile-progress" role="status">
               <span><i style={{ width: `${uploadProgress}%` }} /></span>
-              <strong>Uploading… {uploadProgress}%</strong>
+              <strong>{uploadStage ?? `Uploading… ${uploadProgress}%`}</strong>
             </div>
           )}
         </div>

@@ -673,10 +673,18 @@ test("one current version per lineage, enforced per organisation rather than per
 
 test("every byte is served through /api/files, from a private bucket", async () => {
   /*
-   * The bucket must stay private: all access is brokered through `/api/files`,
-   * so a public bucket or a presigned URL would turn an object key into a
-   * bearer credential — and object keys travel in payloads that a board
+   * The bucket must stay private: every READ is brokered through `/api/files`,
+   * so a public bucket or a read-capable signed URL would turn an object key
+   * into a bearer credential — and object keys travel in payloads that a board
    * instance would widen the audience for.
+   *
+   * Refined by the owner for the direct-upload batch: no persistent, public or
+   * read-capable storage URL or storage credential reaches the browser. The one
+   * exception is a short-lived UPLOAD-ONLY URL for a single part of an upload
+   * the server has already authorised — the client receives it from
+   * `sign-part` and never builds, stores or reads through it. That exception is
+   * pinned where it lives, in `tests/direct-upload.test.mjs`; the sweep below
+   * still refuses every read-side token in client code.
    */
   /*
    * The client half. These three run in, or serialise straight to, the browser,

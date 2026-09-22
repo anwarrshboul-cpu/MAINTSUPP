@@ -83,25 +83,31 @@ const PROXY_REQUEST_BODY_LIMIT = 4_500_000;
  * 900 KB and 4.5 MB the existing path already works there, which is worth
  * knowing before anyone changes it in the belief that it does not.
  *
- * WHAT DOES NOT, AND WHY THE ROUTE HAS TO CHANGE SHAPE. Above 4.5 MB on Vercel
- * there is nothing this file can do. One HTTP request carries one S3 part, so
- * the part is the body and the body is capped; no chunking arrangement makes a
- * ≥5 MiB part fit through a 4.5 MB hole. Buffering several sub-cap chunks into
- * one part on the server needs state that survives between invocations, and a
- * Vercel function has none. The fix is to stop sending the bytes through the
- * function: sign an UploadPart URL and let the browser PUT to the bucket
- * directly. `db/r2-over-s3.ts` already carries the SigV4 signer that would need
- * — it signs `?uploads` and `?uploadId=…&partNumber=…` today — so the work is a
- * new presign action on the multipart route plus a branch here, and it is a
- * route change, not a constant change. `db/node-r2.ts` cannot presign (it says
- * so), but a filesystem deployment is by definition not behind Vercel's proxy,
- * so it keeps this path.
+ * WHAT DID NOT, AND WHY THE ROUTE CHANGED SHAPE. Above 4.5 MB on Vercel no
+ * chunking arrangement helps while the bytes pass through the function: one
+ * HTTP request carries one S3 part, the part is the body, and the body is
+ * capped. So the bytes no longer pass through the function. `start` now says
+ * whether the storage can sign part URLs (`transport: "direct"` — the S3 driver
+ * can), and then each part is:
  *
- * Until that exists, the honest position is: this constant is correct, Railway
- * is unaffected, and Vercel's ceiling for an attachment is 4.5 MB against the
- * 25 MB and 90 MB the validator advertises. `partUploadError` below makes that
- * ceiling say so when it is hit instead of promising a retry that will not
- * happen.
+ *   1. `sign-part` — a metadata-only POST; the route checks the caller against
+ *      the upload session `start` created and answers with a URL good for this
+ *      one part, at the exact size planned, for fifteen minutes;
+ *   2. a PUT of the part's bytes to that URL, straight into the PRIVATE bucket,
+ *      with no cookie and no header of ours — `XMLHttpRequest`, because `fetch`
+ *      cannot report upload progress and a 90 MB video on a phone needs it;
+ *   3. retried on a dropped connection or an expired URL, with a fresh URL.
+ *
+ * `complete` then asks the bucket which parts it holds (the browser's word is
+ * not evidence of that), checks each against the plan, assembles the file and
+ * reads its first bytes to confirm it is what it claims to be. The upload-only
+ * URL can do nothing else: no read, no list, no delete, no other key. Every
+ * download still goes through `GET /api/files/[id]` and its authorisation.
+ *
+ * `transport: "proxy"` — Miniflare's R2 locally, the filesystem driver on
+ * Railway — keeps the parts on `PUT /api/files/multipart`, and so keeps this
+ * constant at 5 MiB: neither of those sits behind Vercel's cap.
+ * `partUploadError` below still explains a proxy's 413 if one is ever hit.
  */
 const MULTIPART_CHUNK_SIZE = STORAGE_MINIMUM_PART_SIZE;
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
@@ -117,7 +123,60 @@ type MultipartStartResponse = {
   key: string;
   uploadId: string;
   fileId: string;
+  /* The route's part plan. Absent only from a server older than this file. */
+  transport?: "direct" | "proxy";
+  partSize?: number;
+  partCount?: number;
 };
+
+type SignedPartResponse = {
+  url: string;
+  partNumber: number;
+  size: number;
+};
+
+/**
+ * Where an upload is, in words a person can be shown. A 90 MB video on a phone
+ * takes minutes; "Uploading 37%" and "Finishing…" are the difference between a
+ * control that is working and one that looks frozen. `complete` is reported
+ * only once the server has CONFIRMED the document exists.
+ */
+export type UploadStage =
+  | { phase: "preparing" }
+  | { phase: "uploading"; progress: number }
+  | { phase: "finalizing" }
+  | { phase: "complete" }
+  | { phase: "failed"; message: string };
+
+export type UploadProgress = {
+  onProgress?: (progress: number) => void;
+  onStage?: (stage: UploadStage) => void;
+  /** Aborting it cancels the upload and abandons what was sent. */
+  signal?: AbortSignal;
+};
+
+/** How a stage reads on a control. One wording, so every upload says the same thing. */
+export function describeUploadStage(stage: UploadStage): string {
+  switch (stage.phase) {
+    case "preparing":
+      return "Preparing upload…";
+    case "uploading":
+      return `Uploading ${stage.progress}%`;
+    case "finalizing":
+      return "Finishing…";
+    case "complete":
+      return "Uploaded";
+    case "failed":
+      return stage.message;
+  }
+}
+
+class UploadCancelledError extends Error {
+  constructor() {
+    super("The upload was cancelled.");
+    this.name = "UploadCancelledError";
+  }
+}
 
 type MultipartPartResponse = {
   part: {
@@ -328,10 +387,38 @@ async function directUpload(options: UploadOptions) {
   );
 }
 
-async function multipartUpload(
-  options: UploadOptions & { onProgress?: (progress: number) => void },
-) {
-  const { file, requestId, kind, columnId, uploadToken, onProgress } = options;
+/**
+ * PUT one part's bytes to its signed URL. Resolves with the HTTP status — 0 for
+ * a connection that dropped — and rejects only when the person cancelled.
+ *
+ * No `withCredentials`: the storage host gets no cookie of ours, and needs none;
+ * the URL itself is the whole (upload-only, one-part) permission.
+ */
+function putPart(url: string, chunk: Blob, onLoaded: (loaded: number) => void, signal?: AbortSignal) {
+  return new Promise<number>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new UploadCancelledError());
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onLoaded(event.loaded);
+    };
+    xhr.onload = () => resolve(xhr.status);
+    xhr.onerror = () => resolve(0);
+    xhr.ontimeout = () => resolve(0);
+    xhr.onabort = () => reject(new UploadCancelledError());
+    signal?.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.send(chunk);
+  });
+}
+
+const PART_ATTEMPTS = 4;
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function multipartUpload(options: UploadOptions & UploadProgress) {
+  const { file, requestId, kind, columnId, uploadToken, onProgress, onStage, signal } = options;
   /*
    * WHAT NAMES THE KEY MUST BE IDENTICAL ON ALL FOUR CALLS.
    *
@@ -395,13 +482,70 @@ async function multipartUpload(
   );
 
   const parts: Array<{ partNumber: number; etag: string }> = [];
-  const partCount = Math.ceil(file.size / MULTIPART_CHUNK_SIZE);
+  /* The route's plan when it sent one; the same arithmetic otherwise. */
+  const chunkSize = start.partSize ?? MULTIPART_CHUNK_SIZE;
+  const partCount = start.partCount ?? Math.ceil(file.size / chunkSize);
+  const direct = start.transport === "direct";
+  let sent = 0;
+  const report = (loaded: number) => {
+    const progress = Math.min(100, Math.round(((sent + loaded) / file.size) * 100));
+    onStage?.({ phase: "uploading", progress });
+    onProgress?.(Math.round(progress * 0.92));
+  };
+  report(0);
 
   try {
     for (let index = 0; index < partCount; index += 1) {
-      const startOffset = index * MULTIPART_CHUNK_SIZE;
-      const endOffset = Math.min(startOffset + MULTIPART_CHUNK_SIZE, file.size);
+      const startOffset = index * chunkSize;
+      const endOffset = Math.min(startOffset + chunkSize, file.size);
       const chunk = file.slice(startOffset, endOffset);
+      if (direct) {
+        /*
+         * Straight to the bucket. Each attempt asks for a FRESH URL, so an
+         * attempt after an expired one (403) or a dropped connection (0) is a
+         * clean retry; a refusal of any other kind is final and says why.
+         */
+        let status = 0;
+        for (let attempt = 1; attempt <= PART_ATTEMPTS; attempt += 1) {
+          const signed = await readApi<SignedPartResponse>(
+            await fetch("/api/files/multipart", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "sign-part",
+                requestId,
+                kind,
+                columnId,
+                key: start.key,
+                uploadId: start.uploadId,
+                partNumber: index + 1,
+                uploadToken,
+                ...keyBody,
+              }),
+            }),
+          );
+          status = await putPart(signed.url, chunk, report, signal);
+          if (status >= 200 && status < 300) break;
+          const retryable = status === 0 || status === 403 || status === 408 || status === 429 || status >= 500;
+          if (!retryable || attempt === PART_ATTEMPTS) break;
+          await wait(1000 * 2 ** (attempt - 1));
+        }
+        if (status < 200 || status >= 300) {
+          throw new UploadApiError(
+            status === 0
+              ? "The connection dropped while the file was uploading. Check the signal and try again."
+              : status === 403
+                ? "The upload took too long to send a part. Try again."
+                : `The file store refused part ${index + 1} of the upload (${status}).`,
+            status || 503,
+          );
+        }
+        // The route lists the parts from the bucket itself at `complete`.
+        parts.push({ partNumber: index + 1, etag: "" });
+        sent += chunk.size;
+        report(0);
+        continue;
+      }
       const response = await fetch("/api/files/multipart", {
         method: "PUT",
         headers: {
@@ -426,9 +570,11 @@ async function multipartUpload(
         partUploadError,
       );
       parts.push(uploaded.part);
-      onProgress?.(Math.round(((index + 1) / partCount) * 92));
+      sent += chunk.size;
+      report(0);
     }
 
+    onStage?.({ phase: "finalizing" });
     const completed = await readApi<UploadResponse>(
       await fetch("/api/files/multipart", {
         method: "POST",
@@ -455,6 +601,15 @@ async function multipartUpload(
     onProgress?.(100);
     return completed;
   } catch (error) {
+    onStage?.({
+      phase: "failed",
+      message:
+        error instanceof UploadCancelledError
+          ? "Upload cancelled."
+          : error instanceof Error
+            ? error.message
+            : "The file could not be uploaded.",
+    });
     fetch("/api/files/multipart", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -536,14 +691,22 @@ async function offerThumbnail(file: File, attachmentId: string) {
 }
 
 export async function uploadEvidenceFile(
-  options: UploadOptions & { onProgress?: (progress: number) => void },
+  options: UploadOptions & UploadProgress,
 ): Promise<UploadResponse> {
-  const { file, onProgress } = options;
-  validateFile(file);
+  const { file, onProgress, onStage } = options;
+  try {
+    validateFile(file);
+  } catch (error) {
+    onStage?.({ phase: "failed", message: error instanceof Error ? error.message : "The file could not be uploaded." });
+    throw error;
+  }
+  onStage?.({ phase: "preparing" });
   onProgress?.(0);
 
+  /* "Uploaded" only once the server has answered with the document it made. */
   const finish = async (result: UploadResponse) => {
     if (result.file?.id) await offerThumbnail(file, result.file.id);
+    onStage?.({ phase: "complete" });
     return result;
   };
 
@@ -552,6 +715,7 @@ export async function uploadEvidenceFile(
   }
 
   try {
+    onStage?.({ phase: "uploading", progress: 0 });
     const result = await directUpload(options);
     onProgress?.(100);
     return finish(result);
@@ -559,6 +723,7 @@ export async function uploadEvidenceFile(
     if (error instanceof UploadApiError && error.status === 413) {
       return finish(await multipartUpload(options));
     }
+    onStage?.({ phase: "failed", message: error instanceof Error ? error.message : "The file could not be uploaded." });
     throw error;
   }
 }

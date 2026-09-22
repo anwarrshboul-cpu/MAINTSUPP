@@ -2225,6 +2225,36 @@ export const configVersions = sqliteTable(
   (table) => [uniqueIndex("config_versions_org_subject_idx").on(table.organisationId, table.subjectType, table.subjectKey, table.versionNo)],
 );
 
+/**
+ * Direct uploads — one row per multipart upload, binding it to the person and
+ * workspace that started it. See `ensureUploadSessions` in `db/init.ts`.
+ */
+export const uploadSessions = sqliteTable(
+  "upload_sessions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull().references(() => organisations.id),
+    fileId: text("file_id").notNull(),
+    objectKey: text("object_key").notNull(),
+    uploadId: text("upload_id").notNull(),
+    uploader: text("uploader").notNull(),
+    transport: text("transport").notNull().default("proxy"),
+    contentType: text("content_type").notNull(),
+    originalName: text("original_name").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    partSize: integer("part_size").notNull(),
+    partCount: integer("part_count").notNull(),
+    state: text("state").notNull().default("pending"),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    finalizedAt: text("finalized_at"),
+  },
+  (table) => [
+    uniqueIndex("upload_sessions_object_key_idx").on(table.objectKey),
+    index("upload_sessions_state_idx").on(table.state, table.expiresAt),
+  ],
+);
+
 /** Scoped, expiring links that let a contractor act on one job — Stage 9, Z1. */
 export const jobAccessTokens = sqliteTable(
   "job_access_tokens",

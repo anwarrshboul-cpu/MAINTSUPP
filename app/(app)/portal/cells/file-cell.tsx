@@ -30,7 +30,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import { Icon, type IconName } from "../../../components";
-import { uploadEvidenceFile } from "../../../lib/client-upload";
+import { uploadEvidenceFile, describeUploadStage } from "../../../lib/client-upload";
 import type {
   AttachmentRecord,
   MaintenanceBoardFilePreview,
@@ -276,6 +276,8 @@ export function FileCell({
   const addButtonRef = useRef<HTMLButtonElement>(null);
   const mountedRef = useRef(true);
   const [progress, setProgress] = useState<number | null>(null);
+  /* What the upload is doing, in words — see `describeUploadStage`. */
+  const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -326,6 +328,13 @@ export function FileCell({
               setProgress(
                 Math.round(((index + value / 100) / selected.length) * 100),
               ),
+            onStage: (next) =>
+              mountedRef.current &&
+              setStage(
+                selected.length > 1
+                  ? `${index + 1} of ${selected.length} · ${describeUploadStage(next)}`
+                  : describeUploadStage(next),
+              ),
           });
           added.push(payload.file);
           if (payload.request) latestRequest = payload.request;
@@ -340,6 +349,7 @@ export function FileCell({
 
       if (!mountedRef.current) return;
       setProgress(null);
+      setStage(null);
       if (inputRef.current) inputRef.current.value = "";
 
       if (added.length) {
@@ -471,7 +481,7 @@ export function FileCell({
           <span className="file-cell__track">
             <i style={{ width: `${progress}%` }} />
           </span>
-          <small>Uploading {progress}%</small>
+          <small>{stage ?? `Uploading ${progress}%`}</small>
         </div>
       )}
       {error && (

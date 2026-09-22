@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { BrandMark, Icon } from "../../components";
-import { uploadEvidenceFile } from "../../lib/client-upload";
+import { uploadEvidenceFile, describeUploadStage } from "../../lib/client-upload";
 import type { Priority } from "../../lib/types";
 
 type RequestChoice = { value: string; label: string; isDefault: boolean };
@@ -23,6 +23,8 @@ export function RequestForm() {
   const [successWarning, setSuccessWarning] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
+  /* What the upload is doing, in words — see `describeUploadStage`. */
+  const [uploadStage, setUploadStage] = useState<string | null>(null);
   const [configuration, setConfiguration] =
     useState<RequestConfiguration | null>(null);
 
@@ -93,6 +95,12 @@ export function RequestForm() {
               onProgress: (progress) =>
                 setUploadProgress(
                   Math.round(((index + progress / 100) / files.length) * 100),
+                ),
+              onStage: (stage) =>
+                setUploadStage(
+                  files.length > 1
+                    ? `${index + 1} of ${files.length} · ${describeUploadStage(stage)}`
+                    : describeUploadStage(stage),
                 ),
             });
           } catch (caught) {
@@ -327,7 +335,7 @@ export function RequestForm() {
               >
                 {state === "sending"
                   ? uploadProgress
-                    ? `Uploading evidence ${uploadProgress}%…`
+                    ? (uploadStage ?? `Uploading evidence ${uploadProgress}%…`)
                     : "Submitting…"
                   : "Submit request"}
                 {state !== "sending" && <Icon name="arrow" size={17} />}
