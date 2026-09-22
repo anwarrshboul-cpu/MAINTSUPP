@@ -8757,7 +8757,11 @@ function RequestDrawer({
             <JobMilestonesPanel
               requestId={request.id}
               hidden={activeTab !== "columns"}
-              refreshKey={`${request.stage}|${request.status}|${request.assignee ?? ""}|${request.contractor ?? ""}`}
+              /* The job's own state AND how many activity entries it has: a note
+                 acknowledges the job without moving any of the four, and the
+                 panel must not be left showing an Acknowledge button that would
+                 answer 409. `loadActivities` runs after every drawer write. */
+              refreshKey={`${request.stage}|${request.status}|${request.assignee ?? ""}|${request.contractor ?? ""}|${activities.length}|${statusHistory.length}`}
               onRecorded={() => void loadActivities()}
               onNotify={onNotify}
             />

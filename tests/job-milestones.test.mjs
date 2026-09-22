@@ -73,7 +73,7 @@ test("attendance is only ever explicit, and recording it acknowledges the job", 
   assert.doesNotMatch(source, /\.stage\b|\.status\b|On site/, "no stage or status is read at all");
 });
 
-test("a time from either dialect is read, and only jobs raised inside the recording qualify", () => {
+test("a time from either dialect is read, and only rows CREATED inside the recording qualify", () => {
   const expected = Date.parse("2026-09-22T10:00:00Z");
   assert.equal(instantOf("2026-09-22T10:00:00.000Z"), expected);
   assert.equal(instantOf("2026-09-22 10:00:00"), expected, "SQLite CURRENT_TIMESTAMP is UTC");
@@ -81,8 +81,27 @@ test("a time from either dialect is read, and only jobs raised inside the record
   assert.equal(instantOf("2026-09-22 11:00:00+01:00"), expected);
   assert.ok(Number.isNaN(instantOf("")));
   assert.equal(withinRecording("2026-09-22 10:00:01", "2026-09-22T10:00:00.000Z"), true);
-  assert.equal(withinRecording("2026-07-01T09:00:00Z", "2026-09-22T10:00:00.000Z"), false, "raised before the recording: nothing invented");
+  assert.equal(withinRecording("2026-07-01T09:00:00Z", "2026-09-22T10:00:00.000Z"), false, "a row that existed before: nothing invented");
   assert.equal(withinRecording("2026-09-23T09:00:00Z", null), false, "no epoch, nothing recorded");
+});
+
+/*
+ * THE GATE IS THE ROW'S BIRTH, NOT THE REQUEST DATE, and the three ways that
+ * matters are all reachable from the product: a job raised today FOR last week
+ * (the drawer's own Date requested field), a duplicate of an old job, which
+ * copies `requested_at` verbatim, and a historical job whose request date is
+ * corrected forward. Under a `requested_at` gate the first two could never
+ * record anything and the third would silently start recording invented times.
+ */
+test("the eligibility gate reads created_at, which nothing in the product can edit", async () => {
+  const lib = code(readFileSync(path.join(root, "app/lib/job-milestones.ts"), "utf8"));
+  assert.match(lib, /cast\(\$\{maintenanceRequests\.createdAt\} as text\) as created_at/);
+  assert.doesNotMatch(lib, /requestedAt|requested_at/, "the request date is not consulted at all");
+  assert.match(lib, /withinRecording\(row\.createdAt, epoch\)/);
+  const route = code(await read("app/api/maintenance/milestones/route.ts"));
+  assert.match(route, /withinRecording\(row\?\.createdAt \?\? null, epoch\)/);
+  /* And `requested_at` is a live, editable cell — which is why it cannot be the gate. */
+  assert.match(code(await read("app/lib/request-fields.ts")), /requested/);
 });
 
 /* ================================================================== */
@@ -96,7 +115,7 @@ async function database() {
   sqlite.exec(`
     CREATE TABLE organisations (id TEXT PRIMARY KEY);
     INSERT INTO organisations VALUES ('org_a'), ('org_b');
-    CREATE TABLE maintenance_requests (id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL, requested_at TEXT, deleted_at TEXT, parent_id TEXT,
+    CREATE TABLE maintenance_requests (id TEXT PRIMARY KEY, organisation_id TEXT NOT NULL, requested_at TEXT, created_at TEXT, deleted_at TEXT, parent_id TEXT,
       acknowledged_at TEXT, assigned_at TEXT, attended_at TEXT);
     CREATE TABLE maintenance_group_items (request_id TEXT PRIMARY KEY, organisation_id TEXT, board_id TEXT NOT NULL DEFAULT 'maintenance');
     CREATE TABLE audit_events (id TEXT PRIMARY KEY, organisation_id TEXT, actor_user_id TEXT, actor_email TEXT, actor_role TEXT, action TEXT NOT NULL,
@@ -106,13 +125,19 @@ async function database() {
   sqlite.exec(init.match(/`(CREATE TABLE IF NOT EXISTS job_status_history \([\s\S]*?\))`/)[1]);
   sqlite.exec(init.match(/`(CREATE TABLE IF NOT EXISTS feature_epochs \([\s\S]*?\))`/)[1]);
   sqlite.prepare("INSERT OR IGNORE INTO feature_epochs (feature, started_at) VALUES (?, ?)").run("job_milestones", EPOCH);
-  const insert = sqlite.prepare("INSERT INTO maintenance_requests (id, organisation_id, requested_at, parent_id) VALUES (?, ?, ?, ?)");
-  insert.run("MN-1", "org_a", "2026-09-22 11:00:00", null);
-  insert.run("MN-2", "org_a", "2026-09-22T12:00:00.000Z", null);
-  insert.run("MN-OLD", "org_a", "2026-07-01T09:00:00.000Z", null);
-  insert.run("MN-SUB", "org_a", "2026-09-22T12:00:00.000Z", "MN-1");
-  insert.run("SD-1", "org_a", "2026-09-22T12:00:00.000Z", null);
-  insert.run("MN-B", "org_b", "2026-09-22T12:00:00.000Z", null);
+  const insert = sqlite.prepare("INSERT INTO maintenance_requests (id, organisation_id, requested_at, created_at, parent_id) VALUES (?, ?, ?, ?, ?)");
+  /* Created after recording began — including one raised FOR a date long before
+     it, which is an ordinary thing to do and must still record. */
+  insert.run("MN-1", "org_a", "2026-09-22 11:00:00", "2026-09-22 11:00:00", null);
+  insert.run("MN-2", "org_a", "2026-09-22T12:00:00.000Z", "2026-09-22T12:00:00.000Z", null);
+  insert.run("MN-BACKDATED", "org_a", "2026-03-04T08:00:00.000Z", "2026-09-22T12:00:00.000Z", null);
+  /* The row itself predates the recording. */
+  insert.run("MN-OLD", "org_a", "2026-07-01T09:00:00.000Z", "2026-07-01T09:00:00.000Z", null);
+  /* A duplicate of that old job: its request date is the original's, its row is new. */
+  insert.run("MN-COPY", "org_a", "2026-07-01T09:00:00.000Z", "2026-09-22T13:00:00.000Z", null);
+  insert.run("MN-SUB", "org_a", "2026-09-22T12:00:00.000Z", "2026-09-22T12:00:00.000Z", "MN-1");
+  insert.run("SD-1", "org_a", "2026-09-22T12:00:00.000Z", "2026-09-22T12:00:00.000Z", null);
+  insert.run("MN-B", "org_b", "2026-09-22T12:00:00.000Z", "2026-09-22T12:00:00.000Z", null);
   sqlite.prepare("INSERT INTO maintenance_group_items (request_id, organisation_id, board_id) VALUES (?, ?, ?)").run("SD-1", "org_a", "store-documentation");
   sqlite.prepare("INSERT INTO maintenance_group_items (request_id, organisation_id, board_id) VALUES (?, ?, ?)").run("MN-1", "org_a", "maintenance");
   /*
@@ -177,7 +202,19 @@ test("two writers at once record one time, not two", async () => {
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM job_status_history WHERE to_value = 'attended'").get().n, 1);
 });
 
-test("nothing is invented: an old job, a register row, a subitem and another workspace's job get nothing", async () => {
+test("a job raised for an earlier date, and a duplicate of an old one, both record", async () => {
+  const { sqlite, db } = await database();
+  const recorded = await milestones.recordJobMilestones(db, {
+    organisationId: "org_a", actorEmail: "a@example.com", source: "job.edit", human: true, handled: true,
+    changes: ["MN-BACKDATED", "MN-COPY"].map((requestId) => ({ requestId, before: null, after: null })),
+  });
+  assert.deepEqual(recorded.map((entry) => entry.requestId).sort(), ["MN-BACKDATED", "MN-COPY"]);
+  for (const id of ["MN-BACKDATED", "MN-COPY"]) {
+    assert.ok(stamps(sqlite, id).acknowledged_at, `${id} records: its ROW was created inside the recording`);
+  }
+});
+
+test("nothing is invented: an old row, a register row, a subitem and another workspace's job get nothing", async () => {
   const { sqlite, db } = await database();
   const recorded = await milestones.recordJobMilestones(db, {
     organisationId: "org_a", actorEmail: "a@example.com", source: "job.edit", human: true, handled: true,
@@ -204,6 +241,29 @@ test("an automation assigns but never acknowledges, and a broken store never fai
     changes: [{ requestId: "MN-2", before: null, after: null }],
   });
   assert.ok(Array.isArray(broken), "it answered rather than throwing");
+  /* WRITE-ONCE MAKES THIS LOAD-BEARING: the column was stamped before the
+     history insert failed, and the caller can never retry, so what was stamped
+     must come back rather than an empty list. */
+  assert.deepEqual(broken.map((entry) => entry.milestone), ["acknowledged"]);
+  assert.ok(stamps(sqlite, "MN-2").acknowledged_at);
+});
+
+test("the audit row names the account and the role, as every other audited action does", async () => {
+  const { sqlite, db } = await database();
+  await milestones.recordJobMilestones(db, {
+    organisationId: "org_a",
+    actorEmail: "coordinator@example.com",
+    actor: { userId: "usr_1", email: "coordinator@example.com", role: "admin" },
+    source: "job.milestone", human: true, handled: true,
+    changes: [{ requestId: "MN-1", before: null, after: null, explicit: ["acknowledged"] }],
+  });
+  const row = { ...sqlite.prepare("SELECT actor_user_id, actor_email, actor_role FROM audit_events").get() };
+  assert.deepEqual(row, { actor_user_id: "usr_1", actor_email: "coordinator@example.com", actor_role: "admin" });
+});
+
+test("the epoch is re-read after a miss, so recording cannot stay off for the life of an instance", async () => {
+  const lib = code(readFileSync(path.join(root, "app/lib/job-milestones.ts"), "utf8"));
+  assert.match(lib, /if \(value === null\) epochMemo = null;/);
 });
 
 /* ================================================================== */
@@ -212,7 +272,7 @@ test("an automation assigns but never acknowledges, and a broken store never fai
 
 test("every door that handles or assigns a job records its milestones, and says whether a person did it", async () => {
   const doors = [
-    ["app/api/maintenance/route.ts", /recordJobMilestones\(db, \{\s*organisationId: orgId,\s*actorEmail: actor\.email,\s*source: "job\.edit",\s*human: true,\s*handled: true,\s*changes: \[\{ requestId: id, before: before \?\? null, after: updated \}\]/],
+    ["app/api/maintenance/route.ts", /recordJobMilestones\(db, \{[\s\S]{0,200}?source: "job\.edit",\s*human: true,\s*handled: true,\s*changes: \[\{ requestId: id, before: before \?\? null, after: updated \}\]/],
     ["app/lib/board-mutations.ts", /if \(source === "board\.move" && movedFrom\.length\) \{\s*await recordJobMilestones\(db, \{[\s\S]*?human: true,\s*handled: true,/],
     ["app/api/board/route.ts", /if \(existingItem\.groupId !== groupId\) \{\s*await recordJobMilestones\(db, \{[\s\S]*?source: "board\.move",\s*human: true,/],
     ["app/api/board/route.ts", /setBoardCell\(db, orgId, boardId, requestId, columnId, value\);\s*await recordJobMilestones\(db, \{[\s\S]*?source: "board\.cell",/],
@@ -228,6 +288,26 @@ test("every door that handles or assigns a job records its milestones, and says 
   /* The history still comes first where both are written. */
   const patch = code(await read("app/api/maintenance/route.ts"));
   assert.ok(patch.indexOf('source: "job.edit",\n      changes: statusChangesBetween(id, before, updated)') < patch.indexOf("recordJobMilestones(db, {"));
+  /* The doors that hold a scope name the account and the role in the audit. */
+  for (const [file, pattern] of [
+    ["app/api/maintenance/route.ts", /actor: auditActor\(guard\.scope\),\s*source: "job\.edit",/],
+    ["app/api/board/items/route.ts", /actor: auditActor\(guard\.scope\),\s*source: "board\.bulk",/],
+    ["app/api/board/route.ts", /actor: auditActor\(guard\.scope\),\s*source: "board\.move",/],
+    ["app/api/updates/route.ts", /actor: auditActor\(guard\.scope\),\s*source: "update\.posted",/],
+  ]) {
+    assert.match(code(await read(file)), pattern, file);
+  }
+  /* A contractor answering through their own link is a person handling the job:
+     without this, a job completed by a contractor with no coordinator involved
+     would keep an empty acknowledgement for ever and read as an SLA gap. */
+  const link = code(await read("app/api/job-link/[token]/route.ts"));
+  assert.match(link, /source: `job-link\.\$\{intent\}`,\s*human: true,\s*handled: true,/);
+  assert.match(link, /actorEmail: `contractor-link:\$\{scope\.id\}`/, "the token, not an invented address");
+  assert.equal((link.match(/recordContractorHandling\(db, scope, by, "/g) ?? []).length, 3, "blocked, completion and a note");
+  /* The bulk site-assign tool is a human write that deliberately records nothing. */
+  const siteAssign = await read("app/api/overview/site-assign/route.ts");
+  assert.doesNotMatch(code(siteAssign), /recordJobMilestones/);
+  assert.match(siteAssign, /WHY THIS DOOR RECORDS NO MILESTONE/);
   /* An archive, a group deletion, an option retirement and an import are not handling. */
   for (const file of ["app/api/options/route.ts", "app/api/import/route.ts"]) {
     assert.doesNotMatch(await read(file), /recordJobMilestones/, `${file} records no milestone`);
@@ -264,6 +344,18 @@ test("the recording's start is written once by the migration and nothing is back
   assert.match(lib, /and \$\{sql\.raw\(COLUMN\[milestone\]\)\} is null\s*returning id/, "write-once by a conditional update");
 });
 
+test("a stamp that exists is always shown; the verdict only decides what may be recorded", async () => {
+  const panel = await read("app/(app)/portal/job-milestones-panel.tsx");
+  const list = panel.indexOf("job-milestones__list");
+  const reason = panel.indexOf("{answer.reason ?");
+  assert.ok(list > 0 && reason > list, "the rows are drawn before the reason, and not instead of it");
+  assert.doesNotMatch(panel, /answer\.eligible \? \(\s*<>\s*<ul/, "the list is not behind the verdict");
+  assert.match(panel, /answer\.canRecord &&/, "only the buttons are");
+  assert.match(panel, /Recorded for jobs raised in this portal from \{sinceLabel\(answer\.since\)\}/, "the boundary names its date");
+  const route = code(await read("app/api/maintenance/milestones/route.ts"));
+  assert.ok(route.indexOf("milestones,") < route.indexOf("reason:"), "the route answers with the stamps whatever the reason says");
+});
+
 test("the drawer shows them on both widths and the history names them", async () => {
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(portal, /<JobMilestonesPanel\s+requestId=\{request\.id\}\s+hidden=\{activeTab !== "columns"\}/);
@@ -276,6 +368,35 @@ test("the drawer shows them on both widths and the history names them", async ()
   assert.match(history, /entry\.field === "milestone"/);
   const css = await read("app/(app)/portal/job-milestones-panel.css");
   assert.doesNotMatch(css, /@media|#[0-9a-f]{3,6}\b/i, "tokens only, no breakpoint");
+});
+
+/*
+ * F10 — THE RAW STATEMENTS, THROUGH THE POSTGRES TRANSLATOR.
+ *
+ * Three of this module's statements are written by hand rather than by the
+ * query builder (the epoch read, the row read and the write-once UPDATE), so
+ * they are the ones that can be valid SQLite and invalid Postgres. The shim
+ * translates them here exactly as it would at runtime, and the translation is
+ * checked for the rewrites that matter: the schema qualification and the
+ * placeholders.
+ */
+test("the module's hand-written SQL survives the Postgres translation", async () => {
+  const { translateSql } = await import("../db/sqlite-to-postgres.ts");
+  const statements = [
+    "select cast(started_at as text) as started_at from feature_epochs where feature = ?",
+    'select "maintenance_requests"."id" as id, cast("maintenance_requests"."created_at" as text) as created_at, ' +
+      'cast("maintenance_requests"."acknowledged_at" as text) as acknowledged_at from "maintenance_requests" ' +
+      'where "maintenance_requests"."organisation_id" = ? and "maintenance_requests"."id" in (?) ' +
+      'and "maintenance_requests"."deleted_at" is null and "maintenance_requests"."parent_id" is null',
+    "update maintenance_requests set acknowledged_at = ? where organisation_id = ? and id in (?) and acknowledged_at is null returning id",
+  ];
+  for (const statement of statements) {
+    const translated = translateSql(statement);
+    const text = typeof translated === "string" ? translated : translated.text ?? translated.sql ?? String(translated);
+    assert.ok(text.length > 0, statement.slice(0, 40));
+    assert.doesNotMatch(text, /\?/, "every placeholder is numbered for Postgres");
+    assert.match(text, /feature_epochs|maintenance_requests/);
+  }
 });
 
 /* ================================================================== */

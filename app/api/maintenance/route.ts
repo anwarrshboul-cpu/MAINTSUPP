@@ -71,6 +71,7 @@ import { sampleSeedingAllowed } from "../../lib/tenant-access";
 import { memberSiteCondition } from "../../lib/member-site-scope";
 import { jobWithinMemberScope, siteOutsideMemberScope, siteRequired } from "../../lib/job-site-scope";
 import { recordJobMilestones } from "../../lib/job-milestones";
+import { auditActor } from "../../lib/audit";
 function databaseError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
   if (process.env.NODE_ENV === "development") {
@@ -1096,6 +1097,7 @@ export async function PATCH(request: Request) {
     await recordJobMilestones(db, {
       organisationId: orgId,
       actorEmail: actor.email,
+      actor: auditActor(guard.scope),
       source: "job.edit",
       human: true,
       handled: true,

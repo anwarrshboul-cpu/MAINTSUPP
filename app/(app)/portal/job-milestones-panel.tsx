@@ -62,6 +62,14 @@ function sourceLabel(source: string | null) {
 /* The product's one formatter, in the product's one zone — as the history below. */
 const when = (value: string) => formatShortDateTime(value, { timeZone: "Europe/London" });
 
+/** The day recording began here, named rather than implied. */
+function sinceLabel(value: string) {
+  const at = new Date(value);
+  return Number.isNaN(at.getTime())
+    ? value
+    : at.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/London" });
+}
+
 export function JobMilestonesPanel({
   requestId,
   hidden,
@@ -139,9 +147,13 @@ export function JobMilestonesPanel({
         <span className="drawer-label">Response milestones</span>
       </div>
       {failure && !answer ? <p className="job-milestones__note">{failure}</p> : null}
-      {answer && !answer.eligible ? <p className="job-milestones__note">{answer.reason}</p> : null}
-      {answer && answer.eligible ? (
+      {answer ? (
         <>
+          {/* WHAT EXISTS IS ALWAYS SHOWN. A job outside the recording may still
+              carry a stamp — recorded before its row was, or by a gate that has
+              since changed — and the stage-and-status history below lists those
+              same events. Hiding them here would make one drawer disagree with
+              itself. The reason only explains why nothing NEW is recorded. */}
           <ul className="job-milestones__list">
             {ROWS.map((row) => {
               const entry = answer.milestones[row.key];
@@ -161,8 +173,10 @@ export function JobMilestonesPanel({
                           {by ? ` · ${by}` : ""}
                           {door ? ` (${door})` : ""}
                         </>
-                      ) : (
+                      ) : answer.eligible ? (
                         <>Not yet · {row.hint}</>
+                      ) : (
+                        <>Not recorded · {row.hint}</>
                       )}
                     </small>
                   </span>
@@ -170,6 +184,12 @@ export function JobMilestonesPanel({
               );
             })}
           </ul>
+          {answer.reason ? <p className="job-milestones__note">{answer.reason}</p> : null}
+          {answer.since ? (
+            <p className="job-milestones__note">
+              Recorded for jobs raised in this portal from {sinceLabel(answer.since)}.
+            </p>
+          ) : null}
           {answer.canRecord && (!answer.milestones.acknowledged || !answer.milestones.attended) ? (
             <div className="job-milestones__actions">
               {!answer.milestones.acknowledged ? (

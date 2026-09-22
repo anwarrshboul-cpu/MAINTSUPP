@@ -8,6 +8,7 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { recordJobMilestones } from "../../lib/job-milestones";
+import { auditActor } from "../../lib/audit";
 import {
   automationContext,
   dispatchAutomationEvents,
@@ -436,6 +437,7 @@ export async function POST(request: Request) {
   await recordJobMilestones(db, {
     organisationId: orgId,
     actorEmail: actor.email ?? null,
+    actor: auditActor(guard.scope),
     source: "update.posted",
     human: true,
     handled: true,

@@ -69,7 +69,10 @@ export function StatusHistory({ entries, since }: { entries: StatusHistoryEntry[
     <div className="status-history">
       <div className="drawer-section__title">
         <span className="drawer-label">Stage and status history</span>
-        <span>{entries.length} change{entries.length === 1 ? "" : "s"}</span>
+        {/* "Entries", not "changes": since decision N this list also carries the
+            job's first acknowledgement, assignment and attendance, which are
+            recorded events rather than transitions. */}
+        <span>{entries.length} entr{entries.length === 1 ? "y" : "ies"}</span>
       </div>
       {entries.length === 0 ? (
         <div className="drawer-history-state">No stage, status or milestone has been recorded for this job yet.</div>

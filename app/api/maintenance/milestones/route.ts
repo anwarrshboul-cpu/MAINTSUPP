@@ -88,7 +88,8 @@ async function describe(scope: ScopedDatabase, id: string) {
     .limit(10);
   const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   const workOrder = Boolean(row);
-  const eligible = workOrder && withinRecording(row?.requestedAt ?? null, epoch);
+  /* The ROW's creation, never its request date — see app/lib/job-milestones.ts. */
+  const eligible = workOrder && withinRecording(row?.createdAt ?? null, epoch);
   const milestones = Object.fromEntries(
     MILESTONES.map((milestone) => {
       const at = row
@@ -113,11 +114,18 @@ async function describe(scope: ScopedDatabase, id: string) {
     workOrder,
     eligible,
     since: epoch,
+    /*
+     * A REASON, NOT A CURTAIN. Whatever it says, every stamp this job already
+     * carries is in `milestones` above and the drawer draws it: the §23 history
+     * two sections down lists the same events, and a panel that hid them while
+     * the history showed them would be one drawer contradicting itself.
+     * `eligible` decides only whether anything NEW may be recorded.
+     */
     reason: !workOrder
       ? "Milestones are recorded for jobs on the Jobs board."
       : eligible
         ? null
-        : "This job was raised before these milestones began to be recorded, so none are shown — nothing is reconstructed.",
+        : "This job's row existed before these milestones began to be recorded, so nothing new is recorded for it — its earlier handling was never written down and is not reconstructed.",
     canRecord: eligible && !requireCapability(subject, "board.edit"),
   };
 }

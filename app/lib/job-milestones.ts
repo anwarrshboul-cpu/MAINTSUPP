@@ -26,12 +26,31 @@
  *
  * NOTHING HISTORICAL IS INVENTED. The three columns have existed on
  * `maintenance_requests` since the Overview's SLA work and nothing wrote them.
- * A job raised BEFORE this recording began may well have been handled already,
- * with no record of when — stamping "now" at its next edit would invent a
- * history. So milestones are recorded only for jobs raised on or after the
- * moment recording began (`feature_epochs`, written once by the migration on
- * each database's first boot with this code), and older jobs say so rather
- * than show a misleading time. No row is backfilled.
+ * A job that EXISTED before this recording began may well have been handled
+ * already, with no record of when — stamping "now" at its next edit would
+ * invent a history. So milestones are recorded only for rows CREATED on or
+ * after the moment recording began (`feature_epochs`, written once by the
+ * migration on each database's first boot with this code). No row is
+ * backfilled.
+ *
+ * THE GATE IS `created_at`, AND DELIBERATELY NOT `requested_at`. The request
+ * date is the customer's answer to "when did this happen": it is supplied at
+ * intake, it is an editable cell on the board and in the drawer
+ * (`request-fields.ts` maps the `requested` column to it), and a duplicate
+ * copies it verbatim. Gating on it would mean a job raised today with last
+ * week's request date could never record a milestone, a duplicate of an old job
+ * could never record one either, and correcting an old job's request date
+ * forward would make its next edit stamp an acknowledgement — the invented
+ * timestamp the owner ruled out. `created_at` is written by the insert and by
+ * nothing else, so it answers the only question this gate is asking: was this
+ * ROW in the database before anybody was recording?
+ *
+ * What that means for an imported job, said plainly because it must not be
+ * misread later: a job imported after recording began records milestones from
+ * the moment a person handles it HERE. That is a real event, and it is not a
+ * claim about what happened to that job before it arrived — the SLA stage
+ * measures from `requested_at`, so a long "time to acknowledge" on an imported
+ * job means "imported late", not "answered late".
  *
  * THE EXISTING HISTORY. Every stamp also writes a `job_status_history` row
  * (`field = "milestone"`, `to_value` the milestone, who, and which door) — the
@@ -133,12 +152,15 @@ export function instantOf(value: unknown): number {
   return Date.parse(text);
 }
 
-/** Whether a job raised at `requestedAt` falls inside the recording. */
-export function withinRecording(requestedAt: unknown, epoch: string | null): boolean {
+/**
+ * Whether a row CREATED at `createdAt` falls inside the recording — see the
+ * header for why this is the row's creation and never its request date.
+ */
+export function withinRecording(createdAt: unknown, epoch: string | null): boolean {
   if (!epoch) return false;
-  const raised = instantOf(requestedAt);
+  const born = instantOf(createdAt);
   const began = instantOf(epoch);
-  return Number.isFinite(raised) && Number.isFinite(began) && raised >= began;
+  return Number.isFinite(born) && Number.isFinite(began) && born >= began;
 }
 
 /* ── Reading ────────────────────────────────────────────────────────────── */
@@ -152,7 +174,14 @@ export function milestoneEpoch(db: Database): Promise<string | null> {
       .all<{ started_at: string | null }>(
         sql`select cast(started_at as text) as started_at from feature_epochs where feature = ${MILESTONE_EPOCH_KEY}`,
       )
-      .then((rows) => rows[0]?.started_at ?? null)
+      .then((rows) => {
+        const value = rows[0]?.started_at ?? null;
+        /* A missing row is not an answer worth keeping: the migration writes it
+           on the first boot, and a read that raced that write would otherwise
+           leave this instance with recording silently off until it recycled. */
+        if (value === null) epochMemo = null;
+        return value;
+      })
       .catch((error) => {
         epochMemo = null;
         console.error("[job-milestones] the recording epoch could not be read", error);
@@ -169,7 +198,8 @@ export function forgetMilestoneEpoch() {
 
 export type MilestoneRow = {
   id: string;
-  requestedAt: string | null;
+  /** When the ROW was created — the gate; see the header. */
+  createdAt: string | null;
   acknowledgedAt: string | null;
   assignedAt: string | null;
   attendedAt: string | null;
@@ -199,7 +229,7 @@ export async function readMilestoneRows(
     const slice = unique.slice(index, index + 50);
     const found = await db.all<Record<string, unknown>>(sql`
       select ${maintenanceRequests.id} as id,
-             cast(${maintenanceRequests.requestedAt} as text) as requested_at,
+             cast(${maintenanceRequests.createdAt} as text) as created_at,
              cast(${sql.raw('"maintenance_requests"."acknowledged_at"')} as text) as acknowledged_at,
              cast(${sql.raw('"maintenance_requests"."assigned_at"')} as text) as assigned_at,
              cast(${sql.raw('"maintenance_requests"."attended_at"')} as text) as attended_at
@@ -213,7 +243,7 @@ export async function readMilestoneRows(
     for (const row of found) {
       rows.push({
         id: String(row.id),
-        requestedAt: iso(row.requested_at),
+        createdAt: iso(row.created_at),
         acknowledgedAt: iso(row.acknowledged_at),
         assignedAt: iso(row.assigned_at),
         attendedAt: iso(row.attended_at),
@@ -240,6 +270,14 @@ export async function recordJobMilestones(
   input: {
     organisationId: string;
     actorEmail: string | null | undefined;
+    /**
+     * The actor as the audit log records everyone else — the account id and the
+     * role as well as the address, so a reader filtering the audit by role finds
+     * these three verbs with the rest. Doors that hold a scope pass
+     * `auditActor(scope)`; a door with only an address (an automation, an
+     * intake) passes nothing and the address below stands alone.
+     */
+    actor?: { userId?: string | null; email?: string | null; role?: string | null };
     /** Which door — the same vocabulary `recordJobStatusChanges` uses. */
     source: string;
     human: boolean;
@@ -248,6 +286,14 @@ export async function recordJobMilestones(
     request?: Request | null;
   },
 ): Promise<RecordedMilestone[]> {
+  /*
+   * DECLARED OUTSIDE THE TRY, because a stamp is write-once: if the column was
+   * written and the history insert or the audit write then failed, answering
+   * "nothing was recorded" would be a lie the caller can never correct — the
+   * conditional UPDATE will not match again. What was actually stamped is
+   * returned either way, and the failure is logged.
+   */
+  const recorded: RecordedMilestone[] = [];
   try {
     const wanted = new Map<string, Milestone[]>();
     for (const change of input.changes) {
@@ -259,11 +305,10 @@ export async function recordJobMilestones(
     if (!epoch) return [];
     const rows = await readMilestoneRows(db, input.organisationId, [...wanted.keys()]);
     const stamp = new Date().toISOString();
-    const recorded: RecordedMilestone[] = [];
     for (const milestone of MILESTONES) {
       const candidates = rows
         .filter((row) => (wanted.get(row.id) ?? []).includes(milestone))
-        .filter((row) => withinRecording(row.requestedAt, epoch) && !stampOf(row, milestone))
+        .filter((row) => withinRecording(row.createdAt, epoch) && !stampOf(row, milestone))
         .map((row) => row.id);
       for (let index = 0; index < candidates.length; index += 50) {
         const slice = candidates.slice(index, index + 50);
@@ -301,7 +346,7 @@ export async function recordJobMilestones(
       await recordAudit({
         db,
         organisationId: input.organisationId,
-        actor: { email: input.actorEmail ?? null },
+        actor: { ...(input.actor ?? {}), email: input.actor?.email ?? input.actorEmail ?? null },
         action: `job.${entry.milestone}`,
         entityType: "maintenance_request",
         entityId: entry.requestId,
@@ -313,6 +358,6 @@ export async function recordJobMilestones(
     return recorded;
   } catch (error) {
     console.error("[job-milestones] a milestone could not be recorded", error);
-    return [];
+    return recorded;
   }
 }

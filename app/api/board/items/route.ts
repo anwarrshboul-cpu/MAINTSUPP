@@ -10,6 +10,7 @@ import {
 } from "../../../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "../../../lib/job-status-history";
 import { recordJobMilestones } from "../../../lib/job-milestones";
+import { auditActor } from "../../../lib/audit";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { isBoardNotFound, nextReference, resolveBoard } from "../../../lib/board-registry";
 import { dateDecorationValue } from "../../../lib/board-cell-values";
@@ -772,6 +773,7 @@ export async function PATCH(request: Request) {
       await recordJobMilestones(db, {
         organisationId: orgId,
         actorEmail: actor.email,
+        actor: auditActor(guard.scope),
         source: "board.cell",
         human: true,
         handled: true,
@@ -979,6 +981,7 @@ export async function PATCH(request: Request) {
     await recordJobMilestones(db, {
       organisationId: orgId,
       actorEmail: actor.email,
+      actor: auditActor(guard.scope),
       source: "board.bulk",
       human: true,
       handled: true,

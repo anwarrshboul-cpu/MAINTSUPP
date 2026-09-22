@@ -3012,6 +3012,7 @@ export async function PATCH(request: Request) {
       await recordJobMilestones(db, {
         organisationId: orgId,
         actorEmail: actor.email,
+        actor: auditActor(guard.scope),
         source: "board.cell",
         human: true,
         handled: true,
@@ -3399,6 +3400,7 @@ export async function PATCH(request: Request) {
         await recordJobMilestones(db, {
           organisationId: orgId,
           actorEmail: actor.email,
+          actor: auditActor(guard.scope),
           source: "board.move",
           human: true,
           handled: true,
