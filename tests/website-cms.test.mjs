@@ -609,8 +609,10 @@ test("the console lists the screen because the screen has an API", async () => {
   /* SEVEN once the website CMS and the enquiries inbox are both merged: each
      phase added one entry, and each phase's own test said six while it was the
      only one landed. `platform-admin-shell.test.mjs` compares against its own
-     ENTRIES list rather than a literal, so it needed no change. */
-  assert.equal(PLATFORM_SECTIONS.length, 7);
+     ENTRIES list rather than a literal, so it needed no change.
+     Re-pointed 7 → 8 when the contractor applications inbox arrived with its own
+     API (`/api/contractor-applications/inbox`) — the same rule kept once more. */
+  assert.equal(PLATFORM_SECTIONS.length, 8);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -627,12 +629,16 @@ test("the console lists the screen because the screen has an API", async () => {
    * customer's `organisation_id` and belong to the platform anyway. Naming both
    * keeps the assertion strict — a third nullable entry has to be added here
    * deliberately, which is the point of the rule.
+   *
+   * And a third was: `applications`, the contractor applications inbox, for the
+   * leads entry's own reason — an anonymous application used to be filed under a
+   * client's workspace, and the rows belong to the platform either way.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["leads", "pages"],
-    "only the two platform-owned surfaces answer to no capability",
+    ["applications", "leads", "pages"],
+    "only the three platform-owned surfaces answer to no capability",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

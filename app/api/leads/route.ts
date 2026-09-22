@@ -1,3 +1,4 @@
+import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/init";
 import { leads, organisations } from "../../../db/schema";
 import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../db/website-leads-workspace";
@@ -17,6 +18,13 @@ import {
   LEAD_STATUSES,
   leadStatus,
 } from "../../lib/lead-status";
+import {
+  publicRetryAfter,
+  recordPublicAttempt,
+  requestIp,
+  tooManyAttempts,
+} from "../../lib/auth-session";
+import { LEAD_SUBMISSIONS } from "../../lib/form-throttle";
 
 function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -245,6 +253,19 @@ function unavailable(error?: unknown) {
 
 export async function POST(request: Request) {
   try {
+    /*
+     * THROTTLED FIRST, per address, before the body is read — so a honeypot hit
+     * counts too. The honeypot below stops a bot driving the page; it says
+     * nothing about a script posting here, and every accepted lead writes a row
+     * and queues two emails. See `LEAD_SUBMISSIONS`.
+     */
+    await ensureDatabase();
+    const d1 = await getD1();
+    const address = requestIp(request);
+    const wait = await publicRetryAfter(d1, LEAD_SUBMISSIONS, address);
+    if (wait > 0) return tooManyAttempts(wait);
+    await recordPublicAttempt(d1, LEAD_SUBMISSIONS, address);
+
     const payload = (await request.json()) as Record<string, unknown>;
     const name = clean(payload.name, 120);
     const company = clean(payload.company, 160);
@@ -320,7 +341,7 @@ export async function POST(request: Request) {
       );
     }
 
-    await ensureDatabase();
+    // The database was ensured at the top of this handler, for the throttle.
     // The public lead form has no account behind it by definition.
     const { db } = await scopedDb(request, { allowAnonymous: true });
 

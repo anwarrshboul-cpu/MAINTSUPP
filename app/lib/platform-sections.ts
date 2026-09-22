@@ -160,6 +160,22 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     blurb: "What the public enquiry form has taken, and where each one has got to.",
     capability: null,
   },
+  /*
+   * Contractor applications, added when its API arrived — the same rule again.
+   * `contractor_applications` had a writer (the public /contractors form) and no
+   * reader at all; now there is a read and a status write at
+   * `/api/contractor-applications/inbox`. `capability: null` for the leads
+   * entry's stronger reason: an anonymous application used to be filed under a
+   * client company's workspace, so a workspace capability would have shown that
+   * customer every contractor who applied to MAINTSUPP.
+   */
+  {
+    key: "applications",
+    label: "Contractor applications",
+    icon: "wrench",
+    blurb: "Who has applied to join the contractor network, and where each application has got to.",
+    capability: null,
+  },
 ] as const;
 
 export const PLATFORM_SECTION_KEYS: readonly string[] = PLATFORM_SECTIONS.map((s) => s.key);

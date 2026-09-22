@@ -1,10 +1,20 @@
+import { eq } from "drizzle-orm";
+import { getD1 } from "../../../db";
 import { ensureDatabase } from "../../../db/init";
-import { contractorApplications } from "../../../db/schema";
+import { contractorApplications, organisations } from "../../../db/schema";
+import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../db/website-leads-workspace";
 import { scopedDb } from "../../lib/tenant-db";
 import {
   notificationTargets,
   sendNotification,
 } from "../../lib/notifications";
+import {
+  publicRetryAfter,
+  recordPublicAttempt,
+  requestIp,
+  tooManyAttempts,
+} from "../../lib/auth-session";
+import { CONTRACTOR_APPLICATIONS } from "../../lib/form-throttle";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +29,11 @@ export const dynamic = "force-dynamic";
  * much trust and no more:
  *
  *   · it writes ONE table, `contractor_applications`, and nothing else;
- *   · the tenant is pinned by `scopedDb`, never read from the payload;
+ *   · it is THROTTLED per address before anything is read or written — the
+ *     same door-counter every public form uses (`CONTRACTOR_APPLICATIONS`);
+ *   · the workspace it files under is the PLATFORM'S intake workspace, never
+ *     read from the payload and never the one `scopedDb` resolves for an
+ *     anonymous visitor — see the note at the insert;
  *   · every field is read individually — an unknown key in the body is not
  *     copied anywhere, because nothing here spreads the request object;
  *   · `trades` is intersected with a fixed list, so the column cannot hold a
@@ -31,6 +45,7 @@ export const dynamic = "force-dynamic";
  * It grants no read access. There is no GET: an application register is
  * operator data and does not belong on a public route, and adding one "for
  * convenience" is how a public write endpoint turns into a public database.
+ * Platform staff read applications at `./inbox`, behind `platformAdmin`.
  */
 
 /** Exactly the eleven the form offers, in the order it offers them. */
@@ -64,6 +79,14 @@ function clean(value: unknown, max: number) {
 
 export async function POST(request: Request) {
   try {
+    await ensureDatabase();
+    /* Throttled first, per address, before the body is read or a row written. */
+    const d1 = await getD1();
+    const address = requestIp(request);
+    const wait = await publicRetryAfter(d1, CONTRACTOR_APPLICATIONS, address);
+    if (wait > 0) return tooManyAttempts(wait);
+    await recordPublicAttempt(d1, CONTRACTOR_APPLICATIONS, address);
+
     const payload = (await request.json()) as Record<string, unknown>;
 
     const company = clean(payload.company, 160);
@@ -110,14 +133,41 @@ export async function POST(request: Request) {
       );
     }
 
-    await ensureDatabase();
     // Public by definition — an applying contractor has no account.
-    const { db, orgId } = await scopedDb(request, { allowAnonymous: true });
+    const { db } = await scopedDb(request, { allowAnonymous: true });
+
+    /*
+     * ⚠️ THE WORKSPACE THIS IS FILED UNDER, AND WHY IT IS NOT `orgId` — the fault
+     * #59 corrected for leads, measured here too: an anonymous visitor resolves
+     * to `PRIMARY_ORGANISATION_ID`, which on this installation names Sunnamusk
+     * UK, a real client company. A local repro filed an application straight
+     * into that customer's workspace.
+     *
+     * A contractor applying to join MAINTSUPP's network is the platform's
+     * business, so the row goes to the same platform-owned intake workspace the
+     * website's enquiries use, resolved from the database by its fixed id
+     * (`db/website-leads-workspace.ts`). No fallback to a customer workspace: if
+     * it is missing this refuses with a 503, exactly as `POST /api/leads` does.
+     */
+    const [intake] = await db
+      .select({ id: organisations.id })
+      .from(organisations)
+      .where(eq(organisations.id, WEBSITE_LEADS_WORKSPACE_ID))
+      .limit(1);
+    if (!intake) {
+      console.error(
+        "[contractor-applications] the website intake workspace is missing; refusing rather than filing under a customer",
+      );
+      return Response.json(
+        { error: "Your application could not be submitted. Please try again in a moment." },
+        { status: 503 },
+      );
+    }
 
     const id = crypto.randomUUID();
     await db.insert(contractorApplications).values({
       id,
-      organisationId: orgId,
+      organisationId: intake.id,
       company,
       contactName,
       email,
@@ -160,7 +210,7 @@ export async function POST(request: Request) {
       .join("\n");
 
     const delivered = await sendNotification(db, {
-      organisationId: orgId,
+      organisationId: intake.id,
       channel: "email",
       event: "contractor.application",
       subjectType: "contractor-application",
