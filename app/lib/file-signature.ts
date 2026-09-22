@@ -97,16 +97,74 @@ const BY_EXTENSION: Record<string, string> = {
 };
 
 /**
- * True when `head` (the file's first bytes) is consistent with the declared
- * type — or, with no declared type, with the extension. Text and CSV have no
- * signature and always pass; every other allowed type must match its own.
+ * The declared types a file with this extension may honestly carry. A caller
+ * supplies both the name and the type, and the two used to be checked against
+ * the allowlist SEPARATELY — so `x.mp4` declared `text/plain` passed both,
+ * earned the 90 MB video limit from its name and skipped the byte check as
+ * text. They must now agree with each other. The alternatives are the ones
+ * real browsers send: Windows labels a CSV `application/vnd.ms-excel`, some
+ * browsers label an M4V as MP4, and HEIC/HEIF are used interchangeably.
+ */
+const TYPES_FOR_EXTENSION: Record<string, string[]> = {
+  jpg: ["image/jpeg"],
+  jpeg: ["image/jpeg"],
+  png: ["image/png"],
+  gif: ["image/gif"],
+  webp: ["image/webp"],
+  heic: ["image/heic", "image/heif"],
+  heif: ["image/heif", "image/heic"],
+  mp4: ["video/mp4"],
+  m4v: ["video/x-m4v", "video/mp4"],
+  mov: ["video/quicktime"],
+  webm: ["video/webm"],
+  mkv: ["video/x-matroska"],
+  pdf: ["application/pdf"],
+  doc: ["application/msword"],
+  docx: ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+  xls: ["application/vnd.ms-excel"],
+  xlsx: ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+  ppt: ["application/vnd.ms-powerpoint"],
+  pptx: ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+  txt: ["text/plain"],
+  csv: ["text/csv", "application/vnd.ms-excel"],
+  zip: ["application/zip", "application/x-zip-compressed"],
+};
+
+const extensionOf = (fileName: string) => fileName.split(".").pop()?.toLowerCase() ?? "";
+const undeclared = (type: string) => !type || type === "application/octet-stream";
+
+/** Whether the declared type is one this file's extension may carry. No declared type defers to the extension. */
+export function typeAgreesWithExtension(contentType: string, fileName: string): boolean {
+  const declared = (contentType ?? "").trim().toLowerCase();
+  if (undeclared(declared)) return true;
+  return (TYPES_FOR_EXTENSION[extensionOf(fileName)] ?? []).includes(declared);
+}
+
+/* What the file is claimed to be, once the extension has spoken for a missing
+   type and a CSV's Excel label has been read as the text it is. */
+function effectiveType(contentType: string, fileName: string): string {
+  const declared = (contentType ?? "").trim().toLowerCase();
+  const extension = extensionOf(fileName);
+  if (extension === "csv" && (undeclared(declared) || declared === "text/csv" || declared === "application/vnd.ms-excel")) {
+    return "text/csv";
+  }
+  if (extension === "txt" && (undeclared(declared) || declared === "text/plain")) return "text/plain";
+  if (undeclared(declared)) return BY_EXTENSION[extension] ?? "";
+  return declared;
+}
+
+/**
+ * True when `head` (the file's first bytes) is consistent with what the file
+ * claims to be. Plain text and CSV have no signature — and are accepted as such
+ * ONLY under a `.txt` or `.csv` name; every other allowed type must match its
+ * own signature.
  */
 export function signatureMatches(contentType: string, fileName: string, head: Uint8Array): boolean {
-  const declared = (contentType ?? "").trim().toLowerCase();
-  const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
-  if (declared === "text/plain" || declared === "text/csv") return true;
-  const type = declared || BY_EXTENSION[extension] || "";
-  if (!type && (extension === "txt" || extension === "csv")) return true;
+  const type = effectiveType(contentType, fileName);
+  if (type === "text/plain" || type === "text/csv") {
+    const extension = extensionOf(fileName);
+    return extension === "txt" || extension === "csv";
+  }
   const check = BY_TYPE[type];
   if (!check) return false;
   return head.length > 0 && check(head);

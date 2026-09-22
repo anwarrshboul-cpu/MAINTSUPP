@@ -36,17 +36,26 @@ import {
   resolveUploadTenant,
 } from "../upload-authority";
 import {
+  MAX_PENDING_UPLOADS_PER_UPLOADER,
   PART_URL_LIFETIME_SECONDS,
+  abandonUploadSession,
   claimFinalize,
   createUploadSession,
   directTransport,
   findUploadSession,
   partPlan,
+  partsMatchPlan,
+  pendingUploadCount,
   sessionRefusal,
   settleUploadSession,
   uploaderKey,
 } from "../../../lib/upload-sessions";
-import { SIGNATURE_BYTES, SIGNATURE_REFUSAL, signatureMatches } from "../../../lib/file-signature";
+import {
+  SIGNATURE_BYTES,
+  SIGNATURE_REFUSAL,
+  signatureMatches,
+  typeAgreesWithExtension,
+} from "../../../lib/file-signature";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -147,7 +156,13 @@ function isVideo(originalName: string, contentType: string) {
 function isAllowedFile(originalName: string, contentType: string) {
   const declared = (contentType ?? "").trim();
   const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(originalName));
+  /* And the two claims must agree with EACH OTHER — see `typeAgreesWithExtension`:
+     `x.mp4` declared `text/plain` earned the video limit and skipped the byte check. */
+  return (
+    typeOk &&
+    allowedExtensions.has(fileExtension(originalName)) &&
+    typeAgreesWithExtension(declared, originalName)
+  );
 }
 
 /*
@@ -469,12 +484,15 @@ async function authorizeUpload(
  * One expression for POST and PUT, so the two can never disagree about a person.
  */
 function uploaderOf(authorization: {
+  via: "job-token" | "request-token" | "capability";
   scopedToken: { id: string } | null;
   uploadToken: string;
   scope: { authenticated: boolean; session: { user: { id: string } } | null };
   actorEmail: string;
 }) {
   return uploaderKey({
+    // The grant that AUTHORISED this call names the uploader — see `uploaderKey`.
+    via: authorization.via,
     tokenId: authorization.scopedToken?.id ?? null,
     uploadToken: authorization.uploadToken,
     userId: authorization.scope.session?.user.id ?? null,
@@ -673,6 +691,18 @@ export async function POST(request: Request) {
         );
       }
 
+      /*
+       * A few uploads in flight per uploader, not an unbounded number: every part
+       * costs storage from the moment it lands, and a job link or a public
+       * report's token must not be a way to park bytes in the bucket.
+       */
+      if ((await pendingUploadCount(db, orgId, uploader)) >= MAX_PENDING_UPLOADS_PER_UPLOADER) {
+        return Response.json(
+          { error: "Too many uploads are in progress. Let them finish, then try again." },
+          { status: 429 },
+        );
+      }
+
       const fileId = crypto.randomUUID();
       const cleanName = safeFileName(originalName) || `upload-${fileId}`;
       /*
@@ -784,9 +814,9 @@ export async function POST(request: Request) {
       if (!session || session.uploader !== uploader) {
         return Response.json({ error: "The upload session is invalid." }, { status: 404 });
       }
-      // Only an upload still in progress is abandoned; a finished one is not undone.
-      if (session.state === "pending") {
-        await settleUploadSession(db, session.id, orgId, "aborted");
+      // Only an upload still in progress is abandoned, by whichever call wins
+      // the pending → aborted transition; a finishing or finished one is not undone.
+      if (session.state === "pending" && (await abandonUploadSession(db, session.id, orgId))) {
         await multipart.abort();
       }
       return Response.json({ aborted: true });
@@ -841,10 +871,8 @@ export async function POST(request: Request) {
           .where(and(eq(attachments.id, session.fileId), eq(attachments.organisationId, orgId)))
           .limit(1);
         if (done) {
-          return Response.json({
-            file: attachmentPayload(done),
-            request: workOrder ? requestPayload(workOrder) : null,
-          });
+          // The document only: a repeat must not become a way to re-read the job.
+          return Response.json({ file: attachmentPayload(done), request: null });
         }
       }
       const refused = sessionRefusal(session, uploader);
@@ -855,6 +883,8 @@ export async function POST(request: Request) {
         return Response.json({ error: "This upload is already being finished." }, { status: 409 });
       }
       let settled: "completed" | "failed" = "failed";
+      /* Whether storage has assembled the object — decides how a failure cleans up. */
+      let assembled = false;
       try {
         const plan = partPlan(Number(session.byteSize), Number(session.partSize));
         /*
@@ -870,10 +900,7 @@ export async function POST(request: Request) {
         let parts: Array<{ partNumber: number; etag: string }>;
         if (direct) {
           const listed = await direct.listParts();
-          const whole =
-            listed.length === plan.partCount &&
-            listed.every((part, index) => part.partNumber === index + 1 && part.size === plan.sizeOf(index + 1));
-          if (!whole) {
+          if (!partsMatchPlan(listed, plan)) {
             // Numbers only — which parts the bucket reported against the plan.
             console.error("[/api/files/multipart] parts do not match the plan", {
               planned: plan.partCount,
@@ -912,6 +939,7 @@ export async function POST(request: Request) {
         }
         try {
           await multipart.complete(parts);
+          assembled = true;
         } catch (error) {
           /*
            * The bucket's own size limit is enforced HERE, against the assembled
@@ -1243,6 +1271,16 @@ export async function POST(request: Request) {
           throw error;
         }
       } finally {
+        /*
+         * NOTHING OF A FAILED UPLOAD STAYS IN THE BUCKET, whatever failed —
+         * including a throw nobody anticipated between assembly and the row.
+         * Parts never assembled are discarded; an assembled object no row names
+         * is deleted. Both are no-ops when the refusal path already did it.
+         */
+        if (settled !== "completed") {
+          if (assembled) await storage.delete(key).catch(() => undefined);
+          else await multipart.abort().catch(() => undefined);
+        }
         await settleUploadSession(db, session.id, orgId, settled).catch(() => undefined);
       }
     }

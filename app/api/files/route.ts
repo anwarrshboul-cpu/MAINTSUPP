@@ -51,7 +51,12 @@ import {
   resolveUploadAuthority,
   resolveUploadTenant,
 } from "./upload-authority";
-import { SIGNATURE_BYTES, SIGNATURE_REFUSAL, signatureMatches } from "../../lib/file-signature";
+import {
+  SIGNATURE_BYTES,
+  SIGNATURE_REFUSAL,
+  signatureMatches,
+  typeAgreesWithExtension,
+} from "../../lib/file-signature";
 
 const MAX_STANDARD_FILE_SIZE = 25 * 1024 * 1024;
 const MAX_VIDEO_FILE_SIZE = 90 * 1024 * 1024;
@@ -150,7 +155,12 @@ function isAllowedFile(file: File) {
   // extension rather than refusing a legitimate upload outright.
   const declared = file.type.trim();
   const typeOk = declared ? allowedTypes.has(declared) : true;
-  return typeOk && allowedExtensions.has(fileExtension(file.name));
+  // And the name and the type must agree with each other — see `typeAgreesWithExtension`.
+  return (
+    typeOk &&
+    allowedExtensions.has(fileExtension(file.name)) &&
+    typeAgreesWithExtension(declared, file.name)
+  );
 }
 
 function requestPayload(

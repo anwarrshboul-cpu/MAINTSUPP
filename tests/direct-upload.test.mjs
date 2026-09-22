@@ -190,14 +190,51 @@ test("a 90 MB video is planned as 18 parts, the last one the remainder", () => {
   assert.equal(sessions.partPlan(10 * MiB).sizeOf(2), 5 * MiB, "an exact multiple ends on a full part");
 });
 
-test("an upload belongs to a link, a token, a user or — locally — an identity, in that order", async () => {
-  const base = { tokenId: null, uploadToken: "", userId: "u1", authenticated: true, actorEmail: "A@x.test" };
-  assert.equal(await sessions.uploaderKey({ ...base, tokenId: "t1", uploadToken: "raw" }), "link:t1");
-  const hashed = await sessions.uploaderKey({ ...base, uploadToken: "raw-secret-token" });
+test("an upload belongs to the grant that authorised it — link, token, user or (locally) identity", async () => {
+  const base = { via: "capability", tokenId: null, uploadToken: "", userId: "u1", authenticated: true, actorEmail: "A@x.test" };
+  assert.equal(await sessions.uploaderKey({ ...base, via: "job-token", tokenId: "t1", uploadToken: "raw" }), "link:t1");
+  const hashed = await sessions.uploaderKey({ ...base, via: "request-token", uploadToken: "raw-secret-token" });
   assert.match(hashed, /^token:[0-9a-f]{32}$/);
   assert.ok(!hashed.includes("raw-secret-token"), "a raw link is never stored");
   assert.equal(await sessions.uploaderKey(base), "user:u1");
   assert.equal(await sessions.uploaderKey({ ...base, authenticated: false }), "actor:a@x.test");
+  // A dead link sent beside an editor's session authorised nothing, so it names nobody.
+  assert.equal(await sessions.uploaderKey({ ...base, tokenId: "t9", uploadToken: "dead" }), "user:u1");
+});
+
+test("the bucket's part list must name exactly the planned parts; sizes count where the provider reports them", () => {
+  const plan = sessions.partPlan(12 * MiB);
+  const listed = (sizes) => sizes.map((size, index) => ({ partNumber: index + 1, size }));
+  assert.ok(sessions.partsMatchPlan(listed([5 * MiB, 5 * MiB, 2 * MiB]), plan));
+  assert.ok(sessions.partsMatchPlan(listed([0, 0, 0]), plan), "Supabase Storage reports Size 0 for every part");
+  assert.ok(!sessions.partsMatchPlan(listed([5 * MiB, 5 * MiB - 1, 2 * MiB]), plan), "a reported size must be the planned one");
+  assert.ok(!sessions.partsMatchPlan(listed([0, 0]), plan), "a missing part");
+  assert.ok(!sessions.partsMatchPlan(listed([0, 0, 0, 0]), plan), "an extra part");
+  assert.ok(!sessions.partsMatchPlan([{ partNumber: 1, size: 0 }, { partNumber: 3, size: 0 }, { partNumber: 4, size: 0 }], plan), "a gap");
+});
+
+test("a declared type must agree with the name, and only .txt/.csv are exempt from the byte check", () => {
+  const { typeAgreesWithExtension, signatureMatches } = signature;
+  for (const [type, name] of [
+    ["video/mp4", "clip.mp4"],
+    ["video/quicktime", "IMG_0559.MOV"],
+    ["video/mp4", "clip.m4v"],
+    ["image/heif", "IMG.HEIC"],
+    ["application/vnd.ms-excel", "export.csv"],
+    ["", "anything.pdf"],
+  ]) assert.ok(typeAgreesWithExtension(type, name), `${type} ${name} agree`);
+  for (const [type, name] of [
+    ["text/plain", "x.mp4"],
+    ["text/plain", "x.pdf"],
+    ["application/pdf", "x.jpg"],
+    ["video/mp4", "x.mov"],
+    ["image/png", "x.jpg"],
+  ]) assert.ok(!typeAgreesWithExtension(type, name), `${type} ${name} must not agree`);
+  const text = (value) => new TextEncoder().encode(value);
+  assert.ok(signatureMatches("application/vnd.ms-excel", "export.csv", text("a,b\n")), "Windows labels a CSV as Excel");
+  assert.ok(!signatureMatches("text/plain", "x.mp4", text("anything")), "text is text only under a text name");
+  assert.ok(signatureMatches("application/octet-stream", "a.pdf", text("%PDF-1.7")), "no real type: the extension decides");
+  assert.ok(!signatureMatches("application/octet-stream", "a.pdf", text("<html>")));
 });
 
 test("a session refuses everyone but its uploader, and says when it has ended", () => {
@@ -260,10 +297,16 @@ test("the session: scoped to its workspace, finished once, and swept when abando
   assert.equal(await sessions.claimFinalize(db, made.id, "org_b"), false, "nor claim it");
   assert.equal(await sessions.claimFinalize(db, made.id, "org_a"), true);
   assert.equal(await sessions.claimFinalize(db, made.id, "org_a"), false, "complete runs once");
-  await sessions.settleUploadSession(db, made.id, "org_a", "completed", now);
+  assert.equal(await sessions.abandonUploadSession(db, made.id, "org_a"), false, "an abort cannot interrupt a finishing upload");
+  assert.equal(await sessions.settleUploadSession(db, made.id, "org_a", "completed", now), true);
+  assert.equal(await sessions.settleUploadSession(db, made.id, "org_a", "failed", now), false, "an ending is never overwritten");
 
   const stale = await sessions.createUploadSession(db, values("org_a/k2"), now - sessions.UPLOAD_SESSION_LIFETIME_MS - 1000);
   const fresh = await sessions.createUploadSession(db, values("org_a/k3"), now);
+  // Just past expiry but still finishing: its `complete` may be running, so the sweep waits.
+  const finishing = await sessions.createUploadSession(db, values("org_a/k4"), now - sessions.UPLOAD_SESSION_LIFETIME_MS - 1000);
+  await sessions.claimFinalize(db, finishing.id, "org_a");
+  assert.equal(await sessions.pendingUploadCount(db, "org_a", "user:u1", now), 1, "only live pending sessions count");
   const aborted = [];
   const swept = await sessions.expireUploadSessions(db, async (key, uploadId) => aborted.push([key, uploadId]), { now });
   assert.deepEqual(aborted, [["org_a/k2", "up-org_a/k2"]], "only the abandoned upload is aborted in storage");
@@ -271,8 +314,10 @@ test("the session: scoped to its workspace, finished once, and swept when abando
   const after = await sessions.findUploadSession(db, { organisationId: "org_a", objectKey: "org_a/k2", uploadId: "up-org_a/k2" });
   assert.equal(after.state, "expired");
   assert.equal((await sessions.findUploadSession(db, { organisationId: "org_a", objectKey: "org_a/k3", uploadId: "up-org_a/k3" })).state, "pending");
+  assert.equal((await sessions.findUploadSession(db, { organisationId: "org_a", objectKey: "org_a/k4", uploadId: "up-org_a/k4" })).state, "finalizing");
+  assert.equal(await sessions.abandonUploadSession(db, fresh.id, "org_a"), true);
+  assert.equal(await sessions.abandonUploadSession(db, fresh.id, "org_a"), false, "abort is one transition");
   void stale;
-  void fresh;
 });
 
 /* ------------------------------------------------------------------ */
@@ -295,9 +340,20 @@ test("the route: authorise, then the session, then sign — and complete is clai
   const complete = post.slice(at('action === "complete"'));
   assert.ok(complete.indexOf("claimFinalize(") < complete.indexOf("multipart.complete(parts)"), "claimed before assembly");
   assert.ok(complete.indexOf("direct.listParts()") < complete.indexOf("multipart.complete(parts)"), "direct parts are measured by the bucket");
-  assert.match(complete, /part\.size === plan\.sizeOf\(index \+ 1\)/);
+  assert.match(complete, /if \(!partsMatchPlan\(listed, plan\)\)/);
   assert.ok(complete.indexOf("signatureMatches(") < complete.indexOf(".insert(attachments)"), "the bytes are checked before any row names them");
-  assert.match(complete, /finally \{\s*await settleUploadSession\(db, session\.id, orgId, settled\)/, "every ending is recorded");
+  assert.match(
+    complete,
+    /finally \{\s*if \(settled !== "completed"\) \{\s*if \(assembled\) await storage\.delete\(key\)[\s\S]*?else await multipart\.abort\(\)[\s\S]*?\}\s*await settleUploadSession\(db, session\.id, orgId, settled\)/,
+    "every failed ending cleans the bucket, and is recorded",
+  );
+  assert.ok(post.indexOf("pendingUploadCount(") < post.indexOf("createMultipartUpload("), "the in-flight cap is checked before storage is reserved");
+  assert.match(post, /session\.state === "pending" && \(await abandonUploadSession\(/, "abort only by winning pending → aborted");
+  for (const file of ["app/api/files/multipart/route.ts", "app/api/files/route.ts"]) {
+    assert.match(code(await read(file)), /typeAgreesWithExtension\(declared, /, `${file} requires the name and type to agree`);
+  }
+  const report = code(await read("app/api/report-job/route.ts"));
+  assert.ok(report.indexOf("publicRetryAfter(d1, REPORT_JOB_SUBMISSIONS") < report.indexOf("await request.json()"), "the anonymous report door is throttled first");
   const put = route.slice(route.indexOf("export async function PUT"));
   assert.ok(put.indexOf("sessionRefusal(") < put.indexOf("await request.arrayBuffer()"), "a proxied part is refused before its bytes are read");
   assert.match(put, /bytes\.byteLength !== expected/);
