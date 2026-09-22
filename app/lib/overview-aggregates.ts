@@ -2133,9 +2133,23 @@ export async function loadPerformance(
      *
      * Only jobs that actually CARRY one of the three stage timestamps, so this
      * costs the size of the measured population and not the size of the estate.
-     * On every estate today that is zero rows, which is what makes reading whole
-     * rows here acceptable: it grows only as somebody starts recording
-     * acknowledgements, and a stage nobody records costs nothing to not measure.
+     *
+     * RE-POINTED (decision N): it is no longer zero rows everywhere. The three
+     * columns are written now — acknowledged when a person first handles a job,
+     * assigned when one is given a person or an engineer, attended when
+     * somebody records attendance (`app/lib/job-milestones.ts`) — so this
+     * population grows by roughly the number of jobs HANDLED in the window, not
+     * by the size of the estate, and only for rows created since recording
+     * began.
+     *
+     * The `limit(5000)` below is therefore a real bound rather than a
+     * theoretical one, and what it does is worth stating: past 5,000 measured
+     * jobs in one window the ladder is computed from the first 5,000 the
+     * database returns, so the percentages describe a sample rather than the
+     * whole period. Today's largest workspace raises about 850 jobs a year, so
+     * that is years away for a yearly window — but it is a cap, not a promise,
+     * and a window that reaches it needs aggregation in SQL rather than a
+     * larger number here.
      *
      * The comparison happens in JS rather than SQL deliberately. §4.4 states its
      * targets in BUSINESS minutes, and minute-level arithmetic across both

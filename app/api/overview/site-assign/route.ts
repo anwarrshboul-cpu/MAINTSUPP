@@ -120,6 +120,18 @@ async function verifyJobs(scope: ScopedDatabase, ids: string[]): Promise<JobRow[
   return rows;
 }
 
+/*
+ * DECISION N — WHY THIS DOOR RECORDS NO MILESTONE, deliberately.
+ *
+ * It is a human write to jobs, so the question is fair. But it is a DATA REPAIR
+ * tool: it attaches jobs whose site was never recorded to the site they belong
+ * to, hundreds at a time, and it says nothing about anybody having answered,
+ * assigned or attended those jobs. Stamping "acknowledged" here would put one
+ * timestamp on every job in a backlog clean-up and make the SLA read as though
+ * a year of work had been answered in a single minute — the invented history
+ * decision N exists to prevent. A coordinator who then actually handles one of
+ * those jobs records it through the doors that mean it.
+ */
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
