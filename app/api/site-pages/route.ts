@@ -50,6 +50,7 @@ import {
   type PageInput,
 } from "../../lib/cms-repository.ts";
 import {
+  pageShape,
   pageSnapshot,
   restoreVersionFrom,
   summariseChange,
@@ -259,12 +260,20 @@ export async function PUT(request: Request) {
       return Response.json({ error: result.reason }, { status: 503 });
     }
     {
-      const previous = await latestSnapshot(scope.db, versionTarget);
+      /* A page that does not exist right now is being created — or, by a
+         restore, brought back after its deletion. Its latest version is then the
+         deletion marker, which carries the page as it was, so comparing with it
+         would record an undelete as "Saved with no change". */
+      const previous = before ? await latestSnapshot(scope.db, versionTarget) : null;
       const after = pageSnapshot(input);
       const summary = summariseChange("site_page", previous && !("absent" in (previous as object)) ? previous : null, after);
       const recorded = await recordConfigVersion(scope.db, versionTarget, {
         snapshot: after,
-        summary: restoring ? `Restored from version ${restoring} — ${summary}` : summary,
+        summary: !restoring
+          ? summary
+          : before
+            ? `Restored from version ${restoring} — ${summary}`
+            : `Brought back from version ${restoring} after its deletion — ${pageShape(after)}`,
         restoredFrom: restoring,
         actor: versionActor,
       });

@@ -45,6 +45,7 @@ test("a stored page and a page being saved become the same snapshot", () => {
   assert.match(created, /^Created — 2 blocks, published\.$/);
   const unpublished = model.summariseChange("site_page", model.pageSnapshot(saving), { ...model.pageSnapshot(saving), published: false, title: "U" });
   assert.match(unpublished, /^Retitled, unpublished — 2 blocks, draft\.$/);
+  assert.equal(model.pageShape({ ...model.pageSnapshot(saving), published: false, blocks: [{ kind: "heading", body: {} }] }), "1 block, draft.");
 });
 
 async function database() {
@@ -92,6 +93,10 @@ test("the page route: gate first, restore before every content rule, baseline be
   assert.ok(put.indexOf("loadRestoreSnapshot(") < put.indexOf("claimViolation("));
   assert.ok(put.indexOf("ensureConfigBaseline(") < put.indexOf("await writePage(") && put.indexOf("await writePage(") < put.indexOf("recordConfigVersion("));
   assert.match(put, /organisationId: null, subject: "site_page", key/);
+  /* An undelete is compared with nothing, not with the deletion marker's copy
+     of the page — which would read "Saved with no change". */
+  assert.match(put, /const previous = before \? await latestSnapshot\(scope\.db, versionTarget\) : null;/);
+  assert.match(put, /`Brought back from version \$\{restoring\} after its deletion — \$\{pageShape\(after\)\}`/);
   const del = route.slice(route.indexOf("export async function DELETE"));
   assert.ok(del.indexOf("const doomed = (await listPages(scope.db))") < del.indexOf("await deletePage("), "the page is read before it goes");
   assert.ok(del.indexOf("await deletePage(") < del.indexOf('kind: "deleted"'));
@@ -175,6 +180,7 @@ test("live: a page is saved, changed, deleted and brought back from its history"
     assert.equal(back?.title, "P38b QA first", "the page is back as version 1 had it");
     const final = await call(`/api/versions?subject=site_page&key=${slug}`, as);
     assert.equal(final.body.versions[0].restoredFromVersion, 1);
+    assert.match(final.body.versions[0].summary, /^Brought back from version 1 after its deletion — 1 block, draft\.$/);
     assert.equal(final.body.versions.length, 4, "saved, saved, deleted, restored — nothing removed");
     const stillDeleted = await call("/api/versions?subject=site_page&deleted=1", as);
     assert.ok(!stillDeleted.body.deleted.some((entry) => entry.key === slug), "no longer listed as deleted");

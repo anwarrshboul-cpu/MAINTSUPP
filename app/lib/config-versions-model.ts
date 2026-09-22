@@ -147,6 +147,11 @@ export function modulesRestoreSwitches(snapshot: ModulesSnapshot, currentKeys: r
 
 const listed = (keys: string[]) => (keys.length > 4 ? `${keys.slice(0, 4).join(", ")} and ${keys.length - 4} more` : keys.join(", "));
 
+/** A page's shape in a history line: "2 blocks, published." */
+export function pageShape(page: PageSnapshot): string {
+  return `${page.blocks.length} block${page.blocks.length === 1 ? "" : "s"}, ${page.published ? "published" : "draft"}.`;
+}
+
 export function summariseChange(subject: VersionSubject, before: unknown, after: unknown): string {
   if (subject === "theme") {
     const from = (before as ThemeSnapshot | null)?.tokens ?? {};
@@ -180,7 +185,7 @@ export function summariseChange(subject: VersionSubject, before: unknown, after:
     if (from && canonicalJson(from.blocks) !== canonicalJson(to.blocks)) parts.push("content changed");
     if (from && (from.metaTitle !== to.metaTitle || from.metaDescription !== to.metaDescription)) parts.push("search text changed");
     const said = parts.length ? parts.join(", ") : "Saved with no change";
-    return `${said[0].toUpperCase()}${said.slice(1)} — ${to.blocks.length} block${to.blocks.length === 1 ? "" : "s"}, ${to.published ? "published" : "draft"}.`;
+    return `${said[0].toUpperCase()}${said.slice(1)} — ${pageShape(to)}`;
   }
   const state = after as DashboardSnapshot;
   if (!state.present || state.items.length === 0) return `The built-in ${state.surface} layout.`;
