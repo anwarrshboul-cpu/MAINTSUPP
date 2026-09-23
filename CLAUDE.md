@@ -101,9 +101,18 @@ Three things follow, and the first is the one that bites:
 
 - **Adding a migration means the fingerprint changes.** You do not maintain it —
   `tests/schema-fingerprint.test.mjs` recomputes it and fails with the value to
-  paste. A red run there is not a flaky test; it is that test doing the only job
-  it has. Never relax it: it is what stands between a changed migration and a
-  database that believes it is already up to date.
+  **append** as a new last entry of `SCHEMA_GENERATIONS` in
+  `db/schema-fingerprint.ts`. A red run there is not a flaky test; it is that
+  test doing the only job it has. Never relax it: it is what stands between a
+  changed migration and a database that believes it is already up to date.
+- **Never edit or remove an entry of `SCHEMA_GENERATIONS`.** A build's position
+  in that list is its schema generation, and the boot path uses the order: a
+  build that finds a HIGHER generation recorded is older than the database and
+  touches nothing — no replay, no repairs, no write (`bootSchema` in
+  `db/init.ts`). Every superseded Production deployment shares the Production
+  database, and before this guard (2026-09-23) one woken at its own URL replayed
+  its older migrations over the newer schema. Builds from before generations
+  existed only ever write the legacy `migrations` row, which nothing reads now.
 - **A repair is not a migration.** Anything that reads live rows and fixes drift
   ordinary use can reintroduce belongs in `repairInvariants`, which runs on every
   boot regardless of the fingerprint. Anything that only ever has work to do once
