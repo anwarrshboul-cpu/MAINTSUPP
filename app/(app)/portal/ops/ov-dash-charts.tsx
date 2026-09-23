@@ -1632,28 +1632,37 @@ export function AreaTrend({
    * its own point and is clipped at the plot's edges, so every tap lands on the
    * month under the finger.
    *
-   * EXCEPT THAT THE TWO EDGE COLUMNS NEVER FALL BELOW 44PX — dashboard §9 item
-   * 40, "tap targets ≥ 44px". Clipped at the edge, the first and last columns
-   * are HALF a gap wide: measured on Production 2026-09-23 at 375, six months
-   * across a phone gave them 28.5px. So the boundary between the first two
-   * columns is `max(half a gap, 44px)` from the left edge, and its mirror is
-   * `min(…, 100% − 44px)` on the right. Where half a gap is already 44px or more
-   * — any desktop — both resolve to the midpoint and nothing moves; only on a
-   * narrow plot does an edge column borrow the few pixels it needs from its
-   * neighbour, and every column still contains its own point. Written as CSS
-   * `max()`/`min()` because the plot's width in pixels is the browser's to know.
+   * EXCEPT THAT NO COLUMN FALLS BELOW 44PX WHERE THE PLOT HAS ROOM FOR IT —
+   * dashboard §9 item 40, "tap targets ≥ 44px". Clipped at the edge, the first
+   * and last columns are HALF a gap wide: measured on Production 2026-09-23 at
+   * 375, six months across a phone gave them 28.5px. Pulling only the edge
+   * boundaries in (the first attempt) moved the shortfall next door — measured
+   * on the Preview, 44 / 41.5 / 57 / 57 / 41.5 / 44.
+   *
+   * So each boundary k is held between `44·k` px from the left and `44·(n−k)` px
+   * from the right, and otherwise stays at its midpoint. Left of centre it is
+   * `max(midpoint, min(44k, 100% − 44(n−k)))`, right of centre the mirror,
+   * `min(midpoint, max(100% − 44(n−k), 44k))`. Where the plot is at least 44px
+   * per column both bounds are possible and every column clears 44 — 285px and
+   * six months gives 44 / 44 / 54.5 / 54.5 / 44 / 44, each still containing its
+   * own point. Where it is not (twelve months on a phone) the inner bound is the
+   * impossible one, loses to the midpoint, and the columns are exactly as they
+   * were: nothing is squeezed to zero to make another wider. On a desktop the
+   * midpoints already clear 44 and nothing moves. CSS `max()`/`min()`, because
+   * the plot's width in pixels is the browser's to know.
    */
   const spacing = values.length > 1 ? 100 / (values.length - 1) : 100;
-  const EDGE_COLUMN_MIN_PX = 44;
+  const COLUMN_MIN_PX = 44;
   const boundaryAt = (k: number): string => {
+    const n = values.length;
     if (k <= 0) return "0%";
-    if (k >= values.length) return "100%";
+    if (k >= n) return "100%";
     const midpoint = `${spacing * (k - 0.5)}%`;
-    if (values.length > 2 && k === 1) return `max(${midpoint}, ${EDGE_COLUMN_MIN_PX}px)`;
-    if (values.length > 2 && k === values.length - 1) {
-      return `min(${midpoint}, calc(100% - ${EDGE_COLUMN_MIN_PX}px))`;
-    }
-    return midpoint;
+    const fromLeft = `${COLUMN_MIN_PX * k}px`;
+    const fromRight = `calc(100% - ${COLUMN_MIN_PX * (n - k)}px)`;
+    return k <= n / 2
+      ? `max(${midpoint}, min(${fromLeft}, ${fromRight}))`
+      : `min(${midpoint}, max(${fromRight}, ${fromLeft}))`;
   };
   const bandAt = (index: number) => {
     const from = boundaryAt(index);

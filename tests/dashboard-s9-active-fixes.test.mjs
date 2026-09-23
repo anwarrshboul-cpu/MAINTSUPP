@@ -43,12 +43,63 @@ test("item 7: only a surface that reads the job list fetches it — no latch re-
 
 /* ── item 40 ─────────────────────────────────────────────────────────────── */
 
-test("item 40: the Spend Trend's edge columns never fall below 44px, and a desktop plot is unchanged", async () => {
-  const charts = await read("app/(app)/portal/ops/ov-dash-charts.tsx");
-  assert.match(charts, /const EDGE_COLUMN_MIN_PX = 44;/);
-  assert.match(charts, /return `max\(\$\{midpoint\}, \$\{EDGE_COLUMN_MIN_PX\}px\)`;/, "the first boundary is at least 44px in");
-  assert.match(charts, /return `min\(\$\{midpoint\}, calc\(100% - \$\{EDGE_COLUMN_MIN_PX\}px\)\)`;/, "and its mirror on the right");
-  assert.match(charts, /style=\{\{ left: bandAt\(index\)\.left, width: bandAt\(index\)\.width \}\}/);
+/*
+ * The Spend Trend's tap columns, RUN rather than read. `boundaryAt` is sliced out
+ * of the component and its CSS evaluated at real plot widths — `%` against the
+ * width, `max`/`min`/`calc` as themselves — because a column's width in pixels is
+ * exactly the thing a source pin cannot see. The first fix pinned here moved the
+ * edges to 44px and left their neighbours at 41.5px on the Preview; this is the
+ * test that would have caught it.
+ */
+async function trendColumns() {
+  const source = await read("app/(app)/portal/ops/ov-dash-charts.tsx");
+  const block = source.slice(source.indexOf("  const spacing = values.length > 1"), source.indexOf("  const bandAt = (index: number) => {"));
+  assert.ok(block.includes("const boundaryAt"), "boundaryAt is where the trend defines its columns");
+  const js = block.replace(/\(k: number\): string =>/, "(k) =>");
+  const make = new Function("values", `${js}\nreturn boundaryAt;`);
+  const px = (css, width) =>
+    Function(`return ${css
+      .replace(/calc\(/g, "(")
+      .replace(/max\(/g, "Math.max(")
+      .replace(/min\(/g, "Math.min(")
+      .replace(/([\d.]+)%/g, (_, n) => `(${n} * ${width} / 100)`)
+      .replace(/([\d.]+)px/g, "$1")};`)();
+  return (points, width) => {
+    const boundaryAt = make(Array.from({ length: points }, () => 0));
+    const edges = Array.from({ length: points + 1 }, (_, k) => px(boundaryAt(k), width));
+    return edges.slice(1).map((edge, i) => ({ from: edges[i], to: edge, width: edge - edges[i] }));
+  };
+}
+
+test("item 40: every Spend Trend column clears 44px where the plot has room, and still holds its own month", async () => {
+  const columns = await trendColumns();
+  for (const [points, width] of [[6, 285], [6, 264.5], [7, 320], [12, 1100], [6, 900]]) {
+    const cols = columns(points, width);
+    const pointAt = (i) => (i / (points - 1)) * width;
+    cols.forEach((col, i) => {
+      assert.ok(col.width >= 44 - 1e-9, `${points} points over ${width}px: column ${i} is ${col.width.toFixed(1)}px`);
+      assert.ok(pointAt(i) >= col.from - 1e-9 && pointAt(i) <= col.to + 1e-9, `column ${i} still contains its own point`);
+    });
+    assert.ok(Math.abs(cols.reduce((sum, col) => sum + col.width, 0) - width) < 1e-6, "the columns tile the plot exactly");
+  }
+  /* Measured on the Preview: 285px, six months → 44 / 41.5 / 57 / 57 / 41.5 / 44. */
+  assert.deepEqual(columns(6, 285).map((col) => Math.round(col.width * 10) / 10), [44, 44, 54.5, 54.5, 44, 44]);
+});
+
+test("item 40: on a desktop plot the columns are the midpoints they always were", async () => {
+  const columns = await trendColumns();
+  const cols = columns(6, 900);
+  assert.deepEqual(cols.map((col) => Math.round(col.width * 10) / 10), [90, 180, 180, 180, 180, 90]);
+});
+
+test("item 40: with no room for 44px each, nothing is squeezed — every column keeps its midpoint width", async () => {
+  const columns = await trendColumns();
+  const cols = columns(12, 285);
+  const spacing = 285 / 11;
+  cols.forEach((col, i) => {
+    const expected = i === 0 || i === 11 ? spacing / 2 : spacing;
+    assert.ok(Math.abs(col.width - expected) < 1e-6, `column ${i}: ${col.width.toFixed(2)}px, the midpoint width`);
+  });
 });
 
 test("item 40: the portfolio select is itself the 44px target on a touch pointer", async () => {
