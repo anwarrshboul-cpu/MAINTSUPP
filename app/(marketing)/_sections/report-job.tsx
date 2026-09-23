@@ -6,6 +6,7 @@ import { track } from "./analytics";
 
 import { uploadEvidenceFile } from "../../lib/client-upload";
 import { submissionTitle } from "../../lib/submission-title";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION 2 — Report a Job.
@@ -174,7 +175,7 @@ function valueOf(form: HTMLFormElement, id: string) {
 
 /* ── the section ──────────────────────────────────────────────────────────── */
 
-export function ReportJob() {
+export function ReportJob({ copy = HOME_COPY.reportJob }: { copy?: HomeCopy["reportJob"] }) {
   const [urgency, setUrgency] = useState("");
   const [picked, setPicked] = useState<Picked[]>([]);
   const [filesError, setFilesError] = useState("");
@@ -579,10 +580,10 @@ export function ReportJob() {
     <section className="section" id="report">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Report a job</p>
+          <p className="eyebrow">{copy.eyebrow}</p>
           {/* The section heading IS the title. The card below opens on the
               fields — it used to repeat this line in its own header. */}
-          <h2 className="h2">Report a Job</h2>
+          <h2 className="h2">{copy.heading}</h2>
           <p className="lede">
             One form, straight into triage. Fields marked <span className="req">*</span> are
             required.

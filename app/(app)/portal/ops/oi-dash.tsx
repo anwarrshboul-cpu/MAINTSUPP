@@ -900,7 +900,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         </OiCard>
 
         {/* 5 — Engineer required */}
-        <OiCard title="Jobs by Engineer Required" pill="Field · Engineer Required">
+        <OiCard title="Jobs by Trade" pill="Field · Engineer Required">
           <OiBarList
             rows={engineerRows}
             visible={6}

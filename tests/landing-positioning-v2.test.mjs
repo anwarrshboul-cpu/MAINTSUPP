@@ -37,17 +37,27 @@ test("Report a Job moved down, and its anchor moved with it", async () => {
    * number, so adding a fifteenth section above it does not silently un-do the
    * instruction the way a hard-coded index would.
    */
-  const page = await read("app/(marketing)/page.tsx");
-  const body = page.slice(page.indexOf("HomePage"));
-  const order = [...body.matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map((m) => m[1]);
+  /* RE-POINTED (decision L): the order is data — `HOME_SECTIONS` in
+     `app/lib/site-content.ts` declares the fourteen and the shipped sequence, and
+     `page.tsx` maps each key to its component. The instruction being protected is
+     the same one, and it is now protected twice: Report a Job ships last AND the
+     registry fixes it there, so it cannot be dragged up the page from a console
+     either. */
+  const registry = await read("app/lib/site-content.ts");
+  const declared = registry.slice(
+    registry.indexOf("const HOME_SECTIONS"),
+    registry.indexOf("export const HOME_SECTION_ORDER"),
+  );
+  const order = [...declared.matchAll(/key: "([A-Za-z]+)"/g)].map((match) => match[1]);
 
   assert.equal(
-    order.indexOf("ReportJob"),
+    order.indexOf("reportJob"),
     order.length - 1,
-    `Report a Job is last, above the footer; found at ${order.indexOf("ReportJob")} of ${order.length}`,
+    `Report a Job is last, above the footer; found at ${order.indexOf("reportJob")} of ${order.length}`,
   );
-  assert.ok(order.indexOf("WhoWeHelp") < order.indexOf("ReportJob"), "who it is for comes first");
-  assert.ok(order.indexOf("Services") < order.indexOf("ReportJob"), "then what it covers");
+  assert.match(registry, /key: "reportJob",[\s\S]{0,400}?fixed:/, "and it cannot be moved from there");
+  assert.ok(order.indexOf("whoWeHelp") < order.indexOf("reportJob"), "who it is for comes first");
+  assert.ok(order.indexOf("services") < order.indexOf("reportJob"), "then what it covers");
   /* The footer is the layout's, so "above the footer" is a statement about
      being last in <main> — there is nothing else in the layout between them. */
   const layout = await read("app/(marketing)/layout.tsx");
@@ -82,7 +92,10 @@ test("the portal section is trimmed to exactly what the brief keeps", async () =
   const portal = await read("app/(marketing)/_sections/portal.tsx");
 
   /* Kept */
-  assert.match(portal, /Total visibility\. Total control\./);
+  /* RE-POINTED (decision L): the section's heading is `HOME_COPY.portal.heading`.
+     Kept — in the file that owns the words, with the section drawing it. */
+  assert.match(await read("app/(marketing)/_sections/copy.ts"), /Total visibility\. Total control\./);
+  assert.match(portal, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "and the section draws it");
   for (const bullet of [
     "Open jobs by priority and site",
     "Assignment and attendance status in real time",
@@ -93,7 +106,13 @@ test("the portal section is trimmed to exactly what the brief keeps", async () =
   ]) {
     assert.ok(portal.includes(bullet), `kept bullet missing: ${bullet}`);
   }
-  assert.match(portal, /Every client gets portfolio visibility/);
+  /* RE-POINTED (decision L): the closing line is `HOME_COPY.portal.promise`. Kept,
+     in the file that owns the words, with the section drawing it. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /Every client gets portfolio visibility/,
+  );
+  assert.match(portal, /\{copy\.promise\}/, "and the section draws it");
 
   /* Deleted — the eleven widget explainers and the hover hint */
   for (const gone of [
@@ -477,10 +496,34 @@ test("the store count is one number, and it is not the certificate deadline", as
   const hero = await read("app/(marketing)/_sections/hero.tsx");
   const caseStudy = await read("app/(marketing)/_sections/case-study.tsx");
 
-  assert.match(hero, /<span>21 stores currently coordinated<\/span>/, "the hero trust line");
+  /* RE-POINTED (decision L): the chip is `HOME_COPY.hero.pills[2]`. Both
+     directions of the 21/21 trap below still hold — the portfolio count and the
+     certificate deadline are still the same digits in files that name their unit —
+     and the count is now pinned in the one file that owns it. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /"21 stores currently coordinated"/,
+    "the hero trust line",
+  );
+  assert.match(hero, /<span>\{copy\.pills\[2\]\}<\/span>/, "drawn by the hero");
   assert.match(caseStudy, /\{ value: "21", label: "stores coordinated" \}/, "the case-study stat tile");
-  assert.match(caseStudy, /<h2 className="h2">21 stores\. One point of contact\.<\/h2>/, "the case-study heading");
-  assert.match(caseStudy, /A UK fragrance retailer with 21 stores and kiosks/, "the case-study lede");
+  /* RE-POINTED (decision L): `HOME_COPY.caseStudy.heading`. The 21/21 trap this
+     test is about is unaffected — the heading still says the portfolio count and
+     the deadline still says its unit — and the count is now pinned where it lives,
+     with the section checked to draw it. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /heading: "21 stores\. One point of contact\."/,
+    "the case-study heading",
+  );
+  assert.match(caseStudy, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "drawn by the section");
+  /* RE-POINTED (decision L): the lede is `HOME_COPY.caseStudy.lede`. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /A UK fragrance retailer with 21 stores and kiosks/,
+    "the case-study lede",
+  );
+  assert.match(caseStudy, /<p className="lede">\{copy\.lede\}<\/p>/, "drawn by the section");
 
   /* No survivor of the old notation, anywhere in either file — a "+20 stores"
      left behind would leave the page claiming two portfolio sizes at once.
@@ -511,11 +554,47 @@ test("the store count is one number, and it is not the certificate deadline", as
     1,
     "one deadline, in the feed line, and nowhere else",
   );
+  /* RE-POINTED (decision L): the trust chip's words live in `_sections/copy.ts`
+     now (`HOME_COPY.hero.pills`) while the feed line above is still the hero's
+     own. Both counts are still exactly one, each checked in the file that holds
+     it — which is the property: one deadline and one store count, never two of
+     either to be confused. */
+  const heroCopy = (await read("app/(marketing)/_sections/copy.ts"))
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+  assert.equal([...heroRendered.matchAll(/21 stores/g)].length, 0, "the hero holds no count of its own any more");
+  /*
+   * ONE PHRASING EACH, which is what the trap is really about. `copy.ts` holds two
+   * sentences carrying the count — the hero's trust chip and the case study's
+   * heading — so they are counted BY PHRASE rather than by the digits: each appears
+   * exactly once, and neither may pick up the deadline's wording. A
+   * search-and-replace that turned a store count into a day count would break one
+   * of the four assertions below.
+   */
   assert.equal(
-    [...heroRendered.matchAll(/21 stores/g)].length,
+    [...heroCopy.matchAll(/21 stores currently coordinated/g)].length,
     1,
     "and one store count, in the trust chip, so the two can never be confused for each other",
   );
+  assert.equal(
+    [...heroCopy.matchAll(/21 stores\. One point of contact\./g)].length,
+    1,
+    "and one in the case study's heading",
+  );
+  /*
+   * EVERY sentence in the shipped copy that carries the count, listed — so the
+   * check is about the PHRASING rather than about a total that moves whenever a
+   * sentence is moved into this file. Three: the hero's chip, the case study's
+   * heading, and the case study's opening line. A fourth would have to be added
+   * here deliberately, which is the moment to ask whether it says 21 stores or 21
+   * days.
+   */
+  const counted = [...heroCopy.matchAll(/[^"\n]*21 stores[^"\n]*/g)].map((match) => match[0].trim());
+  assert.equal(counted.length, 3, `the shipped copy carries the count ${counted.length} times: ${counted.join(" | ")}`);
+  for (const sentence of counted) {
+    assert.doesNotMatch(sentence, /21 days/, "no sentence may carry both numbers");
+  }
+  assert.equal([...heroCopy.matchAll(/21 days/g)].length, 0, "the deadline is not copy; it is the hero's feed line");
 });
 
 test("every approved asset the page asks for is actually in the repository", async () => {
@@ -662,7 +741,9 @@ test("the founder section renders nothing in place of the photograph", async () 
   const founder = await read("app/(marketing)/_sections/founder.tsx");
   assert.match(founder, /Who runs Maintsupp/);
   assert.match(founder, /Anwar Shboul — Founder &amp; Director/);
-  assert.match(founder, /Maintsupp is founder-led\./);
+  /* RE-POINTED (decision L): the section's opening line is `HOME_COPY.founder.lede`. */
+  assert.match(await read("app/(marketing)/_sections/copy.ts"), /Maintsupp is founder-led\./);
+  assert.match(founder, /<p className="lede">\{copy\.lede\}<\/p>/, "drawn by the section");
   assert.match(founder, /\/assets\/photos\/founder-anwar\.jpg/, "the named slot is the only source");
   assert.match(founder, /const FOUNDER_PHOTO_SUPPLIED = false;/, "and it is not supplied yet");
   /*
@@ -689,10 +770,26 @@ test("the contractor page asks the eleven questions, in order", async () => {
   /* `absolute`, because the root layout appends "| MAINTSUPP" to every title
      and the brief specifies this one exactly — a plain string rendered as
      "Join the Contractor Network — Maintsupp | MAINTSUPP". */
-  assert.match(page, /title: \{ absolute: "Join the Contractor Network — Maintsupp" \}/);
-  assert.match(page, /<h1 className="h1">Join the Maintsupp contractor network<\/h1>/);
-  assert.match(page, /Maintsupp coordinates maintenance across multi-site commercial portfolios in/);
-  assert.match(page, /Approval\s+requires document checks before any work is assigned\./);
+  assert.match(page, /title: \{ absolute: contractors\.seo\.title \}/);
+  /* RE-POINTED (decision L): the page's heading is `PAGE_COPY.contractors.heading`
+     in `_sections/copy.ts`, and the page draws it. The brief's wording is pinned
+     where it now lives. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /heading: "Join the Maintsupp contractor network"/,
+  );
+  assert.match(page, /<h1 className="h1">\{copy\.heading\}<\/h1>/, "drawn by the page");
+  /* RE-POINTED (decision L): the page's introduction is `PAGE_COPY.contractors.lede`. */
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /Maintsupp coordinates maintenance across multi-site commercial portfolios in/,
+  );
+  assert.match(page, /<p className="lede">\{copy\.lede\}<\/p>/, "drawn by the page");
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /Approval requires document checks before any work is assigned\./,
+    "and the introduction still says what approval requires",
+  );
 
   const form = await read("app/(marketing)/contractors/apply-form.tsx");
   const order = [...form.matchAll(/htmlFor="(company|contactName|email|phone|regions|yearsTrading|certifications|notes|consent)"/g)].map(

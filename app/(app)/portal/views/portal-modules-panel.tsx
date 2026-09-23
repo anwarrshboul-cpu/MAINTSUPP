@@ -177,6 +177,21 @@ export function PortalModulesPanel() {
             Nothing is deleted. The records behind a module stay exactly as they
             are and come back with the switch.
           </p>
+          {/*
+            * THE OWNER'S ANSWER TO #98's OPEN QUESTION (2026-09-23). A switch
+            * governs SCREENS. Work a workspace has scheduled is not a screen, so it
+            * keeps running until it is paused on its own schedule. A statutory
+            * visit must not stop because a menu item was hidden. #98 already built
+            * it that way (no cron route reads a switch); this sentence is the part
+            * that was missing, because the natural reading of "switched off" is
+            * "stopped". `portal-module-registry.test.mjs` pins both halves.
+            */}
+          <p className="portal-modules__scope">
+            Scheduled work keeps running. With Planned switched off, planned
+            maintenance still raises its visits, and with Reports switched off,
+            scheduled reports still send. To stop one, pause it on its own
+            schedule.
+          </p>
         </div>
       </div>
 

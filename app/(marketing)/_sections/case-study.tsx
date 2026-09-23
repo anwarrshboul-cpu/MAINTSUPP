@@ -1,4 +1,5 @@
 import { PhotoSlot } from "./photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION 8 — Case study.
@@ -39,24 +40,18 @@ const STATS = [
   { value: "Photo-verified", label: "close-outs" },
 ] as const;
 
-export function CaseStudy() {
+export function CaseStudy({ copy = HOME_COPY.caseStudy }: { copy?: HomeCopy["caseStudy"] }) {
   return (
     <section className="section" id="case-study">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Case study</p>
-          <h2 className="h2">21 stores. One point of contact.</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
         </div>
 
         <div className="casestudy reveal">
           <div className="casestudy__body">
-            <p className="lede">
-              A UK fragrance retailer with 21 stores and kiosks needed one accountable
-              contact for every repair, compliance date and store project. Maintsupp runs
-              intake and triage, assigns vetted contractors, chases attendance, verifies
-              completion with photo evidence, and reports monthly on jobs, spend and
-              compliance status.
-            </p>
+            <p className="lede">{copy.lede}</p>
             <ul className="kpis casestudy__stats">
               {STATS.map((stat) => (
                 <li className="kpi" key={stat.label}>

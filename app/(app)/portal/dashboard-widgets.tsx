@@ -37,6 +37,18 @@ import { createPortal } from "react-dom";
 import { Icon } from "../../components";
 import { VersionHistory } from "./views/version-history";
 import { useUnsavedChanges } from "../../lib/use-unsaved-changes";
+import { WidgetConfigProvider } from "./widget-config";
+import {
+  WIDGET_TITLE_LIMIT,
+  cleanWidgetConfig,
+  mergeLayout,
+  type LayoutItem,
+  type WidgetConfig,
+} from "./widget-layout";
+
+/* The arrangement's rules live in a module with no React in it, so the tests
+   can call them; re-exported here because this is where callers look for them. */
+export { mergeLayout, type LayoutItem, type WidgetConfig };
 
 export type DashboardWidget = {
   key: string;
@@ -48,35 +60,7 @@ export type DashboardWidget = {
   wide?: boolean;
 };
 
-export type LayoutItem = { key: string; hidden: boolean };
 
-/**
- * The order to draw in, given what is saved and what exists.
- *
- * Saved entries keep their order and their hidden flag, but only if the
- * registry still has them — a panel removed from the product must not leave a
- * gap in everyone's dashboard. Anything the registry has and the layout does
- * not is appended, visible.
- */
-export function mergeLayout(
-  widgets: DashboardWidget[],
-  saved: LayoutItem[],
-): LayoutItem[] {
-  const known = new Map(widgets.map((widget) => [widget.key, widget]));
-  const merged: LayoutItem[] = [];
-  const placed = new Set<string>();
-
-  for (const item of saved) {
-    if (!known.has(item.key) || placed.has(item.key)) continue;
-    merged.push({ key: item.key, hidden: item.hidden });
-    placed.add(item.key);
-  }
-  for (const widget of widgets) {
-    if (placed.has(widget.key)) continue;
-    merged.push({ key: widget.key, hidden: false });
-  }
-  return merged;
-}
 
 export function DashboardWidgets({
   surface,
@@ -188,6 +172,24 @@ export function DashboardWidgets({
     });
   };
 
+  /* Decision O — one panel's own configuration, saved the moment it changes,
+     to the person's own layout exactly as a move or a hide is. */
+  const configure = (index: number, change: WidgetConfig) => {
+    setLayout((current) => {
+      if (!current) return current;
+      const next = current.map((item, position) => {
+        if (position !== index) return item;
+        const config = cleanWidgetConfig({ ...item.config, ...change });
+        const updated: LayoutItem = { key: item.key, hidden: item.hidden };
+        if (config) updated.config = config;
+        return updated;
+      });
+      if (JSON.stringify(next) === JSON.stringify(current)) return current;
+      void persist(next, "user");
+      return next;
+    });
+  };
+
   const toggle = (index: number) => {
     setLayout((current) => {
       if (!current) return current;
@@ -262,8 +264,11 @@ export function DashboardWidgets({
       {editing && (
         <div className="widget-editor panel">
           <p className="widget-editor__hint">
-            Move a panel with the arrows, or use the checkbox to show and hide
-            it. Changes save as you make them, and apply to your account only.
+            Tick a panel to add it to your dashboard and untick it to remove it;
+            move it with the arrows; rename it, or set how wide it sits. Changes
+            save as you make them and apply to your account only — use
+            <strong> Save as the workspace default</strong> to give everybody the
+            same arrangement.
           </p>
           <ul className="widget-editor__list">
             {effective.map((item, index) => {
@@ -279,6 +284,37 @@ export function DashboardWidgets({
                     />
                     <span>{widget.label}</span>
                   </label>
+                  <span className="widget-editor__config">
+                    {/* The built-in name stays in the row above, so a renamed
+                        panel never leaves a reader guessing what it measures. */}
+                    <input
+                      type="text"
+                      defaultValue={item.config?.title ?? ""}
+                      maxLength={WIDGET_TITLE_LIMIT}
+                      placeholder={widget.label}
+                      aria-label={`Name for ${widget.label}`}
+                      onBlur={(event) => configure(index, { title: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                    />
+                    <select
+                      value={item.config?.width ?? "default"}
+                      aria-label={`Width of ${widget.label}`}
+                      onChange={(event) =>
+                        configure(index, {
+                          width:
+                            event.target.value === "full" || event.target.value === "half"
+                              ? event.target.value
+                              : undefined,
+                        })
+                      }
+                    >
+                      <option value="default">Default width</option>
+                      <option value="half">Half width</option>
+                      <option value="full">Full width</option>
+                    </select>
+                  </span>
                   <span className="widget-editor__moves">
                     <button
                       type="button"
@@ -337,13 +373,12 @@ export function DashboardWidgets({
         {visible.map((item) => {
           const widget = byKey.get(item.key);
           if (!widget) return null;
-          return widget.wide ? (
-            <div className="insight-grid__wide" key={item.key}>
-              {widget.render()}
-            </div>
-          ) : (
-            <div className="insight-grid__cell" key={item.key}>
-              {widget.render()}
+          /* The configured width wins over the panel's own default; with none
+             set, the panel decides, exactly as it did before. */
+          const wide = item.config?.width ? item.config.width === "full" : Boolean(widget.wide);
+          return (
+            <div className={wide ? "insight-grid__wide" : "insight-grid__cell"} key={item.key}>
+              <WidgetConfigProvider config={item.config ?? null}>{widget.render()}</WidgetConfigProvider>
             </div>
           );
         })}

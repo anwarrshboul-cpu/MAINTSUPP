@@ -89,28 +89,52 @@ test("the page is fourteen sections, in the V3 order, each exactly once", async 
    * back in the middle of it.
    */
   const page = await read("app/(marketing)/page.tsx");
-  const rendered = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
-    (match) => match[1],
+  /*
+   * RE-POINTED (decision L): THE ORDER IS DATA NOW, so this reads it where it
+   * lives instead of counting self-closing tags in `page.tsx`.
+   *
+   * `app/lib/site-content.ts` declares the fourteen sections and the sequence the
+   * site ships in (`HOME_SECTIONS`, in order); `page.tsx` maps each of those keys
+   * to the component that draws it and renders whatever order staff have saved.
+   * So the contract MOVED rather than went — and it is checked in both halves
+   * here: the registry's list and sequence, and that every key has a component.
+   * A section could otherwise be dropped from the page by deleting one line of a
+   * record, with nothing to say so.
+   */
+  const registry = await read("app/lib/site-content.ts");
+  const declared = registry.slice(
+    registry.indexOf("const HOME_SECTIONS"),
+    registry.indexOf("export const HOME_SECTION_ORDER"),
   );
-  assert.deepEqual(rendered, [
-    "Hero",
-    "WhoWeHelp",
-    "Services",
-    "Problem",
-    "WhatThisReplaces",
-    "HowItWorks",
-    "ContractorChoice",
-    "Pricing",
-    "CaseStudy",
-    "Founder",
-    "Portal",
-    "Faq",
-    "TrustStrip",
-    "FinalCta",
-    "ReportJob",
-  ], "fourteen sections; one of them is two components — a dark band and the form beneath it");
-  assert.equal(new Set(rendered).size, rendered.length, "each exactly once");
-  assert.equal(rendered.at(-1), "ReportJob", "Report a Job is the last thing above the footer");
+  const sections = [...declared.matchAll(/key: "([A-Za-z]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(sections, [
+    "hero",
+    "whoWeHelp",
+    "services",
+    "problem",
+    "replaces",
+    "how",
+    "yourContractors",
+    "pricing",
+    "caseStudy",
+    "founder",
+    "portal",
+    "faq",
+    "finalCta",
+    "reportJob",
+  ], "fourteen sections, in the V3 order — `finalCta` is two components, a dark band and the form beneath it");
+  assert.equal(new Set(sections).size, sections.length, "each exactly once");
+  assert.equal(sections.at(-1), "reportJob", "Report a Job is the last thing above the footer");
+  const componentFor = page.slice(page.indexOf("const SECTIONS"), page.indexOf("export default"));
+  for (const key of sections) {
+    assert.match(componentFor, new RegExp(`\\n  ${key}: `), `${key} must name the component that draws it`);
+  }
+  /* The two components of `finalCta`, still in that order and still one section. */
+  assert.match(
+    page,
+    /finalCta: [^\n]*\n\s*<>\n\s*<TrustStrip \/>\n\s*<FinalCta copy=/,
+    "the trust strip is the CTA panel's own heading and is drawn with it",
+  );
 });
 
 /* ── 2. Copy rules ───────────────────────────────────────────────────────── */
@@ -553,7 +577,15 @@ test("availability is stated in words, never in colour alone", async () => {
      is beside the choice rather than inside it — the structural half of what
      the table's <caption> and row headers used to provide. */
   assert.match(pricing, /<section className="section section--tint" id="pricing">/);
-  assert.match(pricing, /<h2 className="h2">Simple per-store pricing/, "and carries its heading");
+  /* RE-POINTED (decision L): the heading is `HOME_COPY.pricing.heading` now. The
+     words are checked where they live and the section is checked to draw them —
+     the price FIGURES are still `rates.ts`, and no console may type one. */
+  assert.match(pricing, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "and carries its heading");
+  assert.match(
+    await read("app/(marketing)/_sections/copy.ts"),
+    /heading: "Simple per-store pricing/,
+    "which is the shipped heading",
+  );
   /*
    * RE-POINTED: the smaller option is no longer a card beside the choice, it
    * is a line of small print under it.

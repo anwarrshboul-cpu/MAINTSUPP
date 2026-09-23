@@ -1,3 +1,4 @@
+import { HOME_COPY, type HomeCopy } from "./copy";
 /**
  * SECTION — Your contractors or ours. New in Homepage V3.
  *
@@ -80,18 +81,14 @@ const ROUTES = [
   },
 ] as const;
 
-export function ContractorChoice() {
+export function ContractorChoice({ copy = HOME_COPY.yourContractors }: { copy?: HomeCopy["yourContractors"] }) {
   return (
     <section className="section" id="your-contractors">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Your contractors or ours</p>
-          <h2 className="h2">Keep the trades you trust. Use ours for the rest.</h2>
-          <p className="lede">
-            Coming to Maintsupp does not mean replacing your contractors. Bring the ones
-            who already know your sites, use our vetted panel where you have no cover, and
-            run both through one process — with one report at the end of the month.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
+          <p className="lede">{copy.lede}</p>
         </div>
 
         <ul className="choice reveal" role="list">

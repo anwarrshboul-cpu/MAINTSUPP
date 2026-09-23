@@ -340,7 +340,17 @@ export function parseFilters(url: URL | string): DashboardFilters {
       (FAMILY_KEYS as string[]).includes(value),
     ),
     statuses: readList(params, "status"),
-    engineers: readList(params, "engineer"),
+    /*
+     * Decision O — the TRADE dimension, under both names.
+     *
+     * The field is `engineer` and the board column is monday's "Engineer
+     * Required"; the product, the Master specification and every screen that
+     * already speaks of it call it the trade. Both parameters are read and
+     * folded into one list, so a link written either way filters the same
+     * dimension — and `serialiseFilters` writes `trade`, which is what a reader
+     * copying a URL out of the address bar should see.
+     */
+    engineers: [...new Set([...readList(params, "trade"), ...readList(params, "engineer")])].slice(0, 60),
     labels: readList(params, "label"),
     tiers: readList(params, "tier", 20),
     natures: readList(params, "nature").filter((value): value is NatureKey =>
@@ -373,7 +383,7 @@ export function serialiseFilters(filters: DashboardFilters): string {
   append("priority", filters.priorities);
   append("family", filters.families);
   append("status", filters.statuses);
-  append("engineer", filters.engineers);
+  append("trade", filters.engineers);
   append("label", filters.labels);
   append("tier", filters.tiers);
   append("nature", filters.natures);

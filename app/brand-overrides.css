@@ -6823,6 +6823,31 @@ body[data-theme="light"] :is(.login-card, .login-card h1) {
   min-height: 44px;
 }
 
+/* Decision O — a panel's own name and width, edited in its row. The row wraps
+   on a phone rather than taking a breakpoint of its own; the controls keep the
+   44px touch minimum and the 16px floor the global rule gives typed controls. */
+.widget-editor__config {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.widget-editor__config input,
+.widget-editor__config select {
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--line, rgba(148, 173, 190, 0.28));
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.widget-editor__config input {
+  width: 150px;
+}
+
 .widget-editor__moves {
   display: inline-flex;
   gap: 4px;

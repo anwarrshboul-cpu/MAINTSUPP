@@ -1,3 +1,4 @@
+import { HOME_COPY, type HomeCopy } from "./copy";
 /* ── 5. THE PROBLEM — before / after comparison ───────────────────────────── */
 
 /** Icon path markup, copied verbatim from the source's `P` object. */
@@ -60,15 +61,13 @@ const PAIRS: ReadonlyArray<{ before: string; after: string }> = [
   },
 ];
 
-export function Problem() {
+export function Problem({ copy = HOME_COPY.problem }: { copy?: HomeCopy["problem"] }) {
   return (
     <section className="section section--tint" id="problem">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">The operating problem</p>
-          <h2 className="h2">
-            Stop managing maintenance through scattered calls and spreadsheets.
-          </h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
         </div>
 
         {/*

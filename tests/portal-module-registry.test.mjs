@@ -1204,6 +1204,33 @@ test("the panel treats a refusal as an answer, not an outage", async () => {
   );
 });
 
+test("a switched-off module stops its screens, not the work scheduled behind it — and says so", async () => {
+  /*
+   * The owner's answer to the question #98 left open (2026-09-23): planned
+   * maintenance generation and scheduled reports carry on until their OWN schedule
+   * is paused. A switch hides screens. It must not silently cancel a statutory
+   * visit.
+   *
+   * Two halves, because either alone is a trap. The behaviour: no cron route reads
+   * a module switch, directly or through the guard modules. The words: without
+   * them, the natural reading of "switched off" is "stopped", and a workspace
+   * would believe its reports had ended while they were still being emailed.
+   */
+  const guards = /module-guard|page-guard|portal-module-repository|portal-modules|readModuleOverrides|requireModuleAccess/;
+  for (const route of ["daily", "planned-maintenance", "reminders", "retention"]) {
+    const source = await read(`app/api/cron/${route}/route.ts`);
+    assert.doesNotMatch(source, guards, `the ${route} cron must not consult a module switch`);
+  }
+  const panel = (await read("app/(app)/portal/views/portal-modules-panel.tsx")).replace(/\s+/g, " ");
+  assert.match(panel, /Scheduled work keeps running\./);
+  assert.match(panel, /planned maintenance still raises its visits/);
+  assert.match(panel, /scheduled reports still send\. To stop one, pause it on its own schedule\./);
+  /* "Pause it on its own schedule" is a promise, so both schedules must have a pause. */
+  const schema = await read("db/schema.ts");
+  assert.match(schema, /generationState: text\("generation_state"\)/, "a planned-maintenance plan can be paused");
+  assert.match(schema, /\/\*\* `active` \| `paused`\.[^*]*\*\/\s*state: text\("state"\)/, "a report schedule can be paused");
+});
+
 test("the panel's stylesheet spends no colour literal and no breakpoint", async () => {
   /*
    * Tokens only, so a workspace that has recoloured the product finds this card

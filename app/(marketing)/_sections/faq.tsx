@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { faq } from "./content";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION — Frequently asked questions. Back on the homepage in V3.
@@ -29,21 +30,27 @@ import { faq } from "./content";
  * `page.tsx`. Two URLs publishing the same `FAQPage` for the same nine
  * questions is a duplicate, not twice the coverage.
  */
-export function Faq() {
+export function Faq({
+  copy = HOME_COPY.faq,
+  items = faq,
+}: {
+  copy?: HomeCopy["faq"];
+  /* The questions in force — `content.ts` when nothing has been saved, the
+     stored list when staff have edited it (decision L). Still ONE list: the
+     same resolver feeds `/faqs` and its FAQPage markup. */
+  items?: readonly { q: string; a: string }[];
+}) {
   return (
     <section className="section section--tint" id="faq">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Straight answers</p>
-          <h2 className="h2">Frequently asked questions</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
           {/* No count in the copy. "The nine below" would be a number this
               section does not own — the array is in content.ts and /faqs
               renders it too — so a tenth question would silently make the
               sentence false. */}
-          <p className="lede">
-            The questions we are asked before every portfolio review, answered the way we
-            answer them on the call.
-          </p>
+          <p className="lede">{copy.lede}</p>
         </div>
 
         {/*
@@ -56,7 +63,7 @@ export function Faq() {
           `aria-expanded`, <details> carries `[open]`.
         */}
         <div className="faq__list reveal">
-          {faq.map((entry, index) => (
+          {items.map((entry, index) => (
             /*
               The first is open. A column of closed rows gives a reader nothing
               to judge the answers by, and the first question — whether

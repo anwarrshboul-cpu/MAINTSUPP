@@ -52,6 +52,8 @@ const page = await read(PAGE);
 const charts = await read(CHARTS);
 const css = await read(CSS);
 const shell = await read(SHELL);
+/* Where the card rung the Overview's cards read is declared (decision P). */
+const globals = await read("app/globals.css");
 
 const ts = (await import("typescript")).default;
 
@@ -467,7 +469,11 @@ test("the brief's type scale: 13.5px card titles, 26–30px headline numbers, sm
   assert.match(css, /\.oi-card__title \{[^}]*font-size: 13\.5px;[^}]*font-weight: 700;/);
   assert.match(css, /\.oi-kpi__value \{[^}]*font-size: 28px;[^}]*font-weight: 800;/);
   assert.match(css, /\.oi-kpi__value \{\s*font-size: 30px;/);
-  assert.match(css, /\.oi-card \{[^}]*border-radius: 15px;/, "cards at 14–16px radius");
+  /* RE-POINTED (decision P, 2026-09-23): the card reads the corner scale's card
+     rung, so a workspace's corner style reaches the Overview. The brief's 14–16px
+     is that rung's shipped value, asserted where the rung is declared. */
+  assert.match(css, /\.oi-card \{[^}]*border-radius: var\(--radius-card\);/, "cards read the card rung");
+  assert.match(globals, /--radius-card: 15px;/, "which ships at 15px: cards at 14–16px radius");
 });
 
 test("below 768 every grid is ONE column (max-width: 767px); two from 768; three and four from 1024", () => {

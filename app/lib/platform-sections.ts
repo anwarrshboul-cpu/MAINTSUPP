@@ -172,6 +172,21 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     capability: null,
   },
   /*
+   * Website copy (decision L, §77 item 9), added with its API
+   * (`/api/site-content`) and beside the other website screens, because it edits
+   * the pages that ship with the site — the homepage, `/contractors` and `/faqs`
+   * — rather than the pages written in the CMS. `capability: null` for the reason
+   * the pages entry gives: MAINTSUPP's own site is in no workspace, so no
+   * workspace capability can reach it; `platformAdmin` is the gate.
+   */
+  {
+    key: "copy",
+    label: "Website copy",
+    icon: "edit",
+    blurb: "The words on the pages that ship with maintsupp.com: headings, introductions, the hero, the questions and each page's search-engine text.",
+    capability: null,
+  },
+  /*
    * Website media (decision K, §77 item 12), added with its API
    * (`/api/cms-media` and its upload route) and beside the other two website
    * screens. `capability: null` for the same reason: MAINTSUPP's own site, whose

@@ -50,7 +50,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line, #d8e0e5);
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   background: var(--surface-card);
   box-shadow: var(--shadow-lg, 0 24px 60px rgba(5, 19, 29, 0.28));
 }
