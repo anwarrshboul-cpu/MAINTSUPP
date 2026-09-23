@@ -222,18 +222,54 @@ ids — a filename-substring sweep has repeatedly eaten other fixtures.
 
 ## Known local-environment issue
 
-The local D1 attachment estate is depleted (**5 rows**; everything else intact).
-Five data-volume tests fail deterministically as a result — two in
-`tests/stage-twentythree-viewer.test.mjs`, three in
-`tests/stage-twentytwo-fix-tracker.test.mjs`. Four of the five already failed at
-the last verified reference.
+**The local D1 is a scratch development database with no Monday data.** It is
+full of test-fixture tenants (RBAC and browser-QA organisations, demo workspace).
+Measured on 2026-09-23 against `5e02159`, read-only, on a copy:
 
-**No seeder can fix this.** `db/init.ts` seeds board structure and inserts zero
-attachments; `pg:seed`/`pg:reset` target Phase 2's Postgres. The real estate came
-from a one-time Monday import whose 3.4 GB payload is gitignored and absent.
-Restore only from an exact backup of the sqlite file or a separately authorised
-Monday import. Treat these five as a known environment limitation, not a
-regression, and do not weaken them to get green.
+| | local D1 | what the estate tests expect |
+| --- | --- | --- |
+| attachments | **235** | more than 2,000 (the old pin: 2,968) |
+| jobs (`maintenance_requests`) | **323** | exactly 776 |
+| Monday comments (`item_updates` `monday-%`) | **0** | at least 269 |
+| sites | **233** | exactly 10 |
+
+This paragraph used to say the attachment estate held 5 rows with everything
+else intact, and that five tests fail. Both were wrong by then.
+
+**10 tests in 4 files fail deterministically** when the suite runs with no dev
+server; with the database absent they skip or pass instead:
+- `stage-twentytwo-fix-tracker` ×3;
+- `stage-twentythree-viewer` ×2;
+- `stage-twentyfour-comment-assets` ×3;
+- `workstream-five-sites` ×2.
+
+Three more tests also need estate data but need a live dev server as well:
+`stage-twentyfour-update-thread` ×1 and `stage-twentytwo-share-link` ×2.
+
+**Seven of the ten are missing data.** The other three would not stay green after
+a restore:
+- **stage-22's "the tabs carry counts":** the demo jobs `demo-job-ac1`/`ac2`, which
+  the boot path re-seeds (`db/demo-workspace.ts`), are `Booked` outside the "Jobs
+  Booked" group, and so is the local QA job `MN-1110`.
+- **the two `workstream-five-sites` register tests:** they fail on leftover "W2
+  Scope Shared Name …" live-test fixtures.
+
+**No seeder can restore the estate.** `db/init.ts` seeds board structure and
+inserts zero attachments; `pg:seed`/`pg:reset` target Phase 2's Postgres. The
+real estate came from a one-time Monday import whose 3.4 GB payload is gitignored
+and absent. Restore only from an exact backup of the sqlite file or a separately
+authorised Monday import.
+
+The owner reclassified restoring it on 2026-09-23 as **optional**
+developer-environment cleanup. It is not required by the original dashboard master
+prompt. Treat the ten as a known environment limitation, not a regression, and do
+not weaken them to get green.
+
+**These tests can pass without checking anything.** The stage-22 and stage-23 data
+tests `return` early, and so report "ok", when the database cannot be opened. That
+happens in a fresh worktree, or on Windows when the path passes 260 characters,
+which a copy under a deep temp directory does. Confirm the file actually opens
+before trusting a pass.
 
 ## Editing notes
 
