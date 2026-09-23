@@ -1,9 +1,15 @@
 import { seedColumns, seedGroups, seedUiColumns } from "./seed-board-structure";
 import {
   SCHEMA_FINGERPRINT,
-  SCHEMA_STATE_KEY,
-  schemaStateValue,
+  SCHEMA_GENERATION,
+  SCHEMA_GENERATION_KEY,
+  decideSchemaBoot,
+  parseSchemaGenerationValue,
+  schemaGenerationValue,
+  type SchemaBootDecision,
+  type SchemaBuild,
 } from "./schema-fingerprint";
+import { watchPending } from "./pending-watch";
 import {
   DEMO_WORKSPACE_ID,
   ensureDemoWorkspaceOrganisation,
@@ -80,10 +86,12 @@ async function ensureSchemaState(d1: D1DatabaseLike) {
  * changes — including an organisation being suspended, not only one being
  * added.
  *
- * A fresh database has no `organisations` table yet, and that is not an error
- * here: it means nothing has been migrated, the count is zero, and the
- * fingerprint will not match whatever is stored (nothing), so the full replay
- * runs and creates it.
+ * NO LONGER CALLED ON A DATABASE THAT MAY LACK THE TABLE, and so no longer
+ * swallowing errors. It used to `.catch(() => null)` so that a fresh database,
+ * which has no `organisations` yet, read as zero tenants. That same catch read a
+ * TRANSIENT failure as zero tenants too — a mismatch, and a full replay. The
+ * stamp is now read only where the table must exist: after a replay, or when a
+ * completed run at this very generation is on record. A failure is thrown.
  */
 async function activeOrganisationStamp(d1: D1DatabaseLike): Promise<string> {
   const row = (await d1
@@ -91,8 +99,7 @@ async function activeOrganisationStamp(d1: D1DatabaseLike): Promise<string> {
       `SELECT count(*) AS total, coalesce(max(id), '') AS newest
          FROM organisations WHERE status = 'active'`,
     )
-    .first()
-    .catch(() => null)) as { total?: number | string; newest?: string } | null;
+    .first()) as { total?: number | string; newest?: string } | null;
   const total = Number(row?.total ?? 0);
   /*
    * THE COUNT ALONE IS NOT ENOUGH, and the hole is small but real: suspend one
@@ -106,88 +113,140 @@ async function activeOrganisationStamp(d1: D1DatabaseLike): Promise<string> {
   return `${Number.isFinite(total) ? total : 0}/${row?.newest ?? ""}`;
 }
 
-/** The fingerprint this database last completed a full replay at, or null. */
-async function readSchemaState(d1: D1DatabaseLike): Promise<string | null> {
+/**
+ * The schema generation this database last completed a run at, or null when
+ * none is recorded.
+ *
+ * A FAILED READ THROWS. It used to be caught and returned as null, and null
+ * meant "never migrated" — so one transient failure (measured on 2026-09-23 by
+ * reproducing it against the real boot path) replayed all 341 migration
+ * statements on a database that was already current. An unreadable state says
+ * nothing about the schema; the honest outcome is a failed boot, which
+ * `ensureDatabase()` retries on the next request.
+ */
+async function readSchemaGeneration(d1: D1DatabaseLike) {
   const row = (await d1
     .prepare("SELECT value FROM schema_state WHERE key = ?")
-    .bind(SCHEMA_STATE_KEY)
-    .first()
-    .catch(() => null)) as { value?: string } | null;
-  return typeof row?.value === "string" ? row.value : null;
+    .bind(SCHEMA_GENERATION_KEY)
+    .first()) as { value?: unknown } | null;
+  return parseSchemaGenerationValue(row?.value);
 }
 
 /**
- * Record a COMPLETED replay.
+ * Record a COMPLETED run — and never lower the generation on record.
  *
  * Called only after every stage has resolved. Two statements rather than one
  * upsert because the SQLite-to-Postgres translator rewrites `INSERT OR IGNORE`
  * and not `ON CONFLICT … DO UPDATE`, and this path must behave identically on
- * both databases; an `UPDATE` followed by an `INSERT OR IGNORE` reaches the
- * same state from either starting point, in either dialect.
+ * both databases.
  *
- * Concurrent cold instances can both arrive here with the same value, which is
- * why the last writer winning is not a race worth locking against.
+ * THE UPDATE IS CONDITIONAL. Two builds can boot during one deploy — the
+ * outgoing one's instances are still warm — and both may find the same older
+ * generation and replay. Whichever finishes last used to win, so the OLDER
+ * build could leave its record on a database the newer one had just migrated.
+ * `CAST(substr(value, 1, 6) AS INTEGER) <= ?` makes the database refuse that:
+ * the six-digit prefix is the generation (`schemaGenerationValue`), and a row
+ * holding a higher one is simply not matched. The `INSERT OR IGNORE` only ever
+ * creates the row; it never replaces one.
  */
-async function writeSchemaState(d1: D1DatabaseLike, value: string) {
+async function writeSchemaGeneration(d1: D1DatabaseLike, build: SchemaBuild, organisations: string) {
+  const value = schemaGenerationValue(build.generation, build.fingerprint, organisations);
   const now = new Date().toISOString();
   await d1
-    .prepare("UPDATE schema_state SET value = ?, updated_at = ? WHERE key = ?")
-    .bind(value, now, SCHEMA_STATE_KEY)
+    .prepare(
+      "UPDATE schema_state SET value = ?, updated_at = ? WHERE key = ? AND CAST(substr(value, 1, 6) AS INTEGER) <= ?",
+    )
+    .bind(value, now, SCHEMA_GENERATION_KEY, build.generation)
     .run();
   await d1
     .prepare("INSERT OR IGNORE INTO schema_state (key, value, updated_at) VALUES (?, ?, ?)")
-    .bind(SCHEMA_STATE_KEY, value, now)
+    .bind(SCHEMA_GENERATION_KEY, value, now)
     .run();
 }
 
+/** This build, as the boot path compares it against the database. */
+const THIS_BUILD: SchemaBuild = { generation: SCHEMA_GENERATION, fingerprint: SCHEMA_FINGERPRINT };
+
 async function initialize() {
-  const d1 = await getD1();
+  await bootSchema(await getD1(), THIS_BUILD);
+}
+
+/**
+ * THE BOOT, as one function a test can run with any build against any database.
+ *
+ * `initialize()` passes this build and the real stages; tests pass an older or
+ * newer build, and stages that count their calls, to prove what each case does.
+ * Every stage runs under `watchPending`, so a boot that stalls says WHICH stage
+ * it is stuck in after ten seconds instead of dying silently at sixty.
+ *
+ * THE MIGRATION REPLAY IS SKIPPED WHEN NOTHING HAS CHANGED, and it is NEVER run
+ * by a build older than the database. Everything `applyMigrations` does is
+ * idempotent by construction — `CREATE TABLE IF NOT EXISTS`, guarded
+ * `addColumn`, `INSERT OR IGNORE` — which is why replaying it on every cold start
+ * was pure cost: 349 statements, measured at 47 SECONDS for the first request of
+ * an instance. `schema-fingerprint.ts` holds the reasoning for the skip, and for
+ * the generation order that decides who may migrate at all.
+ *
+ * The record is written only after every stage has resolved, so a run that
+ * throws records nothing and the next request replays from the beginning. There
+ * is no path that marks a half-applied schema as complete.
+ */
+export async function bootSchema(
+  d1: D1DatabaseLike,
+  build: SchemaBuild = THIS_BUILD,
+  stages: {
+    applyMigrations: (d1: D1DatabaseLike) => Promise<void>;
+    repairInvariants: (d1: D1DatabaseLike) => Promise<void>;
+  } = { applyMigrations, repairInvariants },
+): Promise<SchemaBootDecision> {
+  await watchPending("boot: create schema_state", () => ensureSchemaState(d1));
+  const stored = await watchPending("boot: read schema generation", () => readSchemaGeneration(d1));
+  const decision = await watchPending("boot: read tenant stamp", () =>
+    decideSchemaBoot(stored, build, () => activeOrganisationStamp(d1)),
+  );
 
   /*
-   * THE MIGRATION REPLAY IS SKIPPED WHEN NOTHING HAS CHANGED.
-   *
-   * Everything below `applyMigrations` is idempotent by construction —
-   * `CREATE TABLE IF NOT EXISTS`, guarded `addColumn`, `INSERT OR IGNORE` — and
-   * that is exactly why replaying it on every cold start was pure cost: 349
-   * prepared statements, measured at 47 SECONDS for the first request of an
-   * instance against 0.98s for every request after it. Whoever opened the site
-   * while an instance was cold watched a blank page for most of a minute.
-   *
-   * `schema-fingerprint.ts` holds the reasoning in full. The short version is
-   * that the stored value covers BOTH the migration code and the number of
-   * active organisations, because several stages fan out per tenant and an
-   * organisation created at runtime must still get its board, its status map
-   * and its meters.
-   *
-   * It is written only after every stage has resolved, so a run that throws
-   * records nothing and the next request replays from the beginning. There is
-   * no path that marks a half-applied schema as complete.
+   * AN OLDER BUILD TOUCHES NOTHING — not the migrations, not the repairs, not
+   * the record. Its migration set predates the database's: replaying it could
+   * re-create an index a newer build replaced, and its repairs were written
+   * against rules a newer build may have changed. It serves its requests on the
+   * schema as it finds it, which is additive and therefore a superset of its
+   * own. One line per instance says so, because an old deployment being woken
+   * against Production is worth knowing about.
    */
-  await ensureSchemaState(d1);
-  const expected = schemaStateValue(SCHEMA_FINGERPRINT, await activeOrganisationStamp(d1));
-  const stored = await readSchemaState(d1);
-  if (stored !== expected) {
-    await applyMigrations(d1);
+  if (decision.action === "newer-schema") {
+    console.warn(`[db-init] ${decision.reason}`);
+    return decision;
+  }
+
+  if (decision.action === "migrate") {
+    const started = Date.now();
+    console.log(`[db-init] migrating: ${decision.reason}`);
+    await watchPending("boot: apply migrations", () => stages.applyMigrations(d1));
     /*
-     * RECOMPUTED, not reused. `expected` was measured before the replay, and on
-     * a database that had never booted there was no `organisations` table to
-     * count — so it read zero, and storing it would have left the next boot
-     * comparing zero against three and replaying the whole thing a second time.
-     * The stamp records the state the run FINISHED in, which is the state the
-     * next boot will be comparing against.
+     * RECOMPUTED after the replay, not before it. On a database that had never
+     * booted there was no `organisations` table to count, and the stamp must
+     * record the state the run FINISHED in, which is what the next boot will
+     * compare against.
      */
-    await writeSchemaState(d1, schemaStateValue(SCHEMA_FINGERPRINT, await activeOrganisationStamp(d1)));
+    const organisations = await watchPending("boot: read tenant stamp", () => activeOrganisationStamp(d1));
+    await watchPending("boot: record schema generation", () => writeSchemaGeneration(d1, build, organisations));
+    console.log(
+      `[db-init] schema generation ${build.generation} recorded after ${((Date.now() - started) / 1000).toFixed(1)}s`,
+    );
   }
 
   /*
-   * THE REPAIRS RUN EVERY TIME, fingerprint or not.
+   * THE REPAIRS RUN ON EVERY BOOT OF A CURRENT OR NEWER BUILD, migration or not.
    *
    * A migration's effect is a function of the CODE; a repair's is a function of
    * the DATA. "The code has not changed" therefore says nothing about whether a
    * repair has work to do, and skipping one would turn a self-healing invariant
-   * into drift that accumulates silently.
+   * into drift that accumulates silently. Only a build OLDER than the database
+   * skips them, above.
    */
-  await repairInvariants(d1);
+  await watchPending("boot: repair invariants", () => stages.repairInvariants(d1));
+  return decision;
 }
 
 /**

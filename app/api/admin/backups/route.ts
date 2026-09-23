@@ -11,8 +11,9 @@
  *   - whether file storage is the private bucket or a fallback (the same four
  *     `S3_*` variables the storage driver requires);
  *   - whether the database's migrations match this code: the fingerprint the
- *     last complete migration run stored (`schema_state`) against the one this
- *     build carries (`SCHEMA_FINGERPRINT`).
+ *     last complete migration run stored (`schema_state`, the generation row a
+ *     generation-aware build writes) against the one this build carries
+ *     (`SCHEMA_FINGERPRINT`).
  *
  * Platform staff only — the same two conditions as every screen in /admin.
  * Read-only: there is no POST, and there must never be one without a real
@@ -21,7 +22,11 @@
 
 import { getD1 } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
-import { SCHEMA_FINGERPRINT, SCHEMA_STATE_KEY } from "../../../../db/schema-fingerprint";
+import {
+  SCHEMA_FINGERPRINT,
+  SCHEMA_GENERATION_KEY,
+  parseSchemaGenerationValue,
+} from "../../../../db/schema-fingerprint";
 import { currentRuntime, databasePosture, S3_VARIABLES } from "../../../lib/integrations/posture";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 
@@ -50,9 +55,14 @@ export async function GET(request: Request) {
     const d1 = await getD1();
     const stored = (await d1
       .prepare("SELECT value, updated_at FROM schema_state WHERE key = ?")
-      .bind(SCHEMA_STATE_KEY)
+      .bind(SCHEMA_GENERATION_KEY)
       .first()) as { value?: string; updated_at?: string } | null;
-    const storedFingerprint = stored?.value ? stored.value.split(":")[0] : null;
+    /*
+     * The generation row, not the legacy `migrations` one: from generation 2 the
+     * boot path reads and writes only this, and a superseded pre-generation
+     * deployment can still scribble on the legacy row when it is woken.
+     */
+    const storedFingerprint = parseSchemaGenerationValue(stored?.value)?.fingerprint ?? null;
 
     return Response.json({
       backups: {

@@ -92,6 +92,7 @@ import {
   translateSql,
   type TranslateOptions,
 } from "./sqlite-to-postgres.ts";
+import { describeStatement, watchPending } from "./pending-watch.ts";
 import { isPoolerAtCapacity } from "./pooler-capacity.ts";
 
 /* ----------------------------------------------------------------- node -- */
@@ -182,6 +183,8 @@ interface Sql {
   begin<T>(run: (tx: Sql) => Promise<T>): Promise<T>;
   reserve?(): Promise<ReservedSql>;
   end(options?: { timeout?: number }): Promise<void>;
+  /** postgres.js's resolved options; only `ssl` is read, for the serving line. */
+  options?: { ssl?: unknown };
 }
 
 interface ReservedSql extends Sql {
@@ -964,7 +967,9 @@ class NodePgConnection {
      * through here, so a portal starting up while the pooler is briefly full
      * used to fail its bootstrap rather than wait 50 ms for room.
      */
-    const reserved = await withPoolerRetry(() => pool.reserve!());
+    const reserved = await watchPending("pool: reserve a connection for a batch", () =>
+      withPoolerRetry(() => pool.reserve!()),
+    );
     return { sql: reserved, release: () => reserved.release() };
   }
 
@@ -1109,7 +1114,15 @@ class NodePgPreparedStatement {
         sql
           .unsafe(translated, this.params, this.connection.queryOptions)
           .values();
-      const result = on ? await send() : await withPoolerRetry(send);
+      /*
+       * Watched, so a statement that never answers names itself after ten
+       * seconds (`db/pending-watch.ts`): its verb and first table, never its
+       * text or its parameters.
+       */
+      const result = await watchPending(
+        `query: ${describeStatement(this.sql)}${on ? " (inside a batch)" : ""}`,
+        () => (on ? send() : withPoolerRetry(send)),
+      );
       if (tracing) recordTrace(translated, performance.now() - startedAt);
       return {
         columns: result.columns ?? [],
@@ -1175,13 +1188,31 @@ class NodePgDatabase {
     this.connection = new NodePgConnection(url);
   }
 
-  /** Host and database only — the password must never reach a log line. */
+  /**
+   * Host and database only — the password must never reach a log line — and
+   * whether the connection is encrypted.
+   *
+   * `tls=` is postgres.js's RESOLVED `ssl` option, which is exactly what decides
+   * the question: postgres.js sends an SSLRequest only when it is truthy
+   * (`socket.on('connect', ssl ? secure : connected)`), and it is `false` unless
+   * the URL carries `sslmode`/`ssl`, the options set it, or `PGSSL` does. So
+   * `tls=off` means the socket to the pooler is plaintext, and `tls=require`
+   * means TLS or no connection at all. Read from the resolved options, never
+   * from the URL, so no other query parameter can reach the log.
+   */
   get describe(): string {
+    let tls = "unknown";
+    try {
+      const ssl = this.connection.connection().options?.ssl;
+      tls = !ssl ? "off" : ssl === true ? "on" : typeof ssl === "string" ? ssl : "custom";
+    } catch {
+      /* A log line must never be what fails a boot; the URL case below says why. */
+    }
     try {
       const parsed = new URL(this.connection.url);
-      return `${parsed.host}${parsed.pathname} (search_path=${SEARCH_PATH})`;
+      return `${parsed.host}${parsed.pathname} (search_path=${SEARCH_PATH}, tls=${tls})`;
     } catch {
-      return `(unparseable connection string) (search_path=${SEARCH_PATH})`;
+      return `(unparseable connection string) (search_path=${SEARCH_PATH}, tls=${tls})`;
     }
   }
 
@@ -1252,10 +1283,10 @@ class NodePgDatabase {
 
     const { sql, release } = reserved;
     try {
-      await sql.unsafe("BEGIN");
+      await watchPending("batch: BEGIN", () => Promise.resolve(sql.unsafe("BEGIN")));
       try {
         const results = await run(sql);
-        await sql.unsafe("COMMIT");
+        await watchPending("batch: COMMIT", () => Promise.resolve(sql.unsafe("COMMIT")));
         return results;
       } catch (cause) {
         /*
