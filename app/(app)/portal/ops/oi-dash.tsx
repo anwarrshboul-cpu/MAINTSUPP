@@ -1194,9 +1194,17 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
   const repeatDrill = drillTo(rpRepeatQuery(scope, sites));
   const issueSlices = toOvSlices(repeat.byIssue, oiSeriesColours(repeat.byIssue.map((slice) => slice.key)));
   const siteSlices = toOvSlices(repeat.bySite, oiSeriesColours(repeat.bySite.map((slice) => slice.key)));
+  /*
+   * The share line names the WHOLE, in full — dashboard §9 item 40, "abbreviated
+   * figures reveal full values on tap". Both repeat donuts print their total
+   * abbreviated in the centre ("£29.1k"), and a tap pins a slice's tooltip, not
+   * the centre's: measured on Production 2026-09-23, tapping "AC" revealed
+   * £9,028.82 and 31% but never the £29,087 the centre stood for. The accessible
+   * name already carries it (`centreLabel`); this puts it under a finger too.
+   */
   const repeatTip = (slices: readonly RpSpendSlice[]) => (slice: OvSlice, share: number) => [
     ovPoundsExact(slice.value),
-    `${Math.round(share * 100)}% of repeat spend`,
+    `${Math.round(share * 100)}% of ${rpPounds(repeat.spendPence)} repeat spend`,
     plural(slices.find((entry) => entry.key === slice.key)?.jobs ?? 0, "repeat job", "repeat jobs"),
   ];
   const repeatLegend = (
