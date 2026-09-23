@@ -153,6 +153,23 @@ test("a trade this workspace does not offer is refused; the one a job already ho
   assert.equal(trade.TRADE_FIELD, "engineer");
 });
 
+test("a workspace with no trade list is not frozen by the gate", async () => {
+  /* Measured in Production on 2026-09-23: 2 of 4 active workspaces have no
+     `engineer_required` register (one created without a template, and the
+     demonstration workspace, which keeps its own vocabulary). Before this case
+     existed, the gate refused EVERY trade there, including the chips on the
+     workspace's own board. */
+  const { db } = await database([]);
+  assert.equal(await trade.tradeWriteRefusal(db, "org_a", "Cleaning", "Electrical"), null, "an empty register controls nothing");
+  assert.equal(await trade.tradeWriteRefusal(db, "org_without_a_set", "Plumbing", null), null, "nor does an absent one");
+  const retired = await database([["Roofer", false]]);
+  assert.equal(await trade.tradeWriteRefusal(retired.db, "org_a", "Roofer", null), null, "every trade retired is the same as none");
+  assert.deepEqual(await trade.listTrades(db, "org_a"), [], "and the dialog sees the same empty list, so it offers its fallback");
+  /* The moment a list exists, it is enforced. */
+  const listed = await database([["Electrician", true]]);
+  assert.ok(await trade.tradeWriteRefusal(listed.db, "org_a", "Cleaning", "Electrical"));
+});
+
 test("the doors that used to trim a trade now refuse an invented one", async () => {
   const whole = code(await read("app/api/maintenance/route.ts"));
   const route = whole.slice(whole.indexOf("export async function PATCH"));

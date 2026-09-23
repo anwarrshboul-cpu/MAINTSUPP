@@ -25,14 +25,16 @@
  *     refusing them would mean a coordinator could not edit the site or the
  *     due date of an old job without first fixing a value they may not be able
  *     to fix. The same rule `resolveJobTypeWrite` applies to a deactivated job
- *     type, for the same reason.
+ *     type, for the same reason;
+ *   - a workspace with NO active trades is not gated at all. See
+ *     `tradeWriteRefusal` for the measurement behind that.
  *
  * The refusal names where the list is edited, as `validateOption` does for a
  * site's fields, because a person who cannot see how to add a trade will type
  * one into whatever field will take it.
  */
 
-import { isConfiguredValue, listActiveOptionValues } from "./options-repository";
+import { listActiveOptionValues } from "./options-repository";
 import type { getDb } from "../../db";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -64,7 +66,20 @@ export async function tradeWriteRefusal(
   const value = candidate.trim();
   if (!value) return null;
   if (value === (current ?? "").trim()) return null;
-  if (await isConfiguredValue(db, organisationId, TRADE_OPTION_SET, value)) return null;
+  /*
+   * A WORKSPACE WITH NO TRADE LIST HAS NOTHING TO CONTROL AGAINST, so it is left
+   * as it was. Measured in Production on 2026-09-23: 2 of the 4 active workspaces
+   * have no `engineer_required` register at all. `createWorkspace` copies
+   * registers only from a template, and the demonstration workspace builds its
+   * own vocabulary on purpose. Refusing every value there would not control the
+   * trade. It would freeze it: no job could be given one, and the refusal's
+   * advice to "add it to the Trade list" would name a list nobody had made. The
+   * dialog uses the same test to fall back to the built-in trades, so the two
+   * agree about which workspaces are controlled.
+   */
+  const trades = await listActiveOptionValues(db, organisationId, TRADE_OPTION_SET);
+  if (!trades.length) return null;
+  if (trades.some((row) => row.value === value)) return null;
   return tradeRefusal(value);
 }
 
