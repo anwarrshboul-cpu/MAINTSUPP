@@ -44,6 +44,40 @@ function surfaceFrom(value: unknown) {
   return SURFACES.has(text) ? text : "overview";
 }
 
+/** How long a workspace's own name for a panel may be. */
+const TITLE_LIMIT = 60;
+
+/**
+ * A PANEL'S OWN CONFIGURATION — decision O, and the one thing that may be
+ * stored beside its place in the order.
+ *
+ * Two answers, both presentation: what this workspace CALLS the panel, and
+ * whether it spans the row. Neither changes what a panel counts, which is why
+ * they can be stored in an arrangement at all — a stored FILTER would make the
+ * layout a second source of truth for the figures, and the page's own period
+ * and portfolio pickers are that source.
+ *
+ * Anything else a caller sends is dropped, so this blob cannot grow into a
+ * place to keep arbitrary data, and an empty configuration is omitted entirely
+ * so an untouched layout is stored exactly as it was before this existed.
+ */
+type StoredConfig = { title?: string; width?: "full" | "half" };
+
+function cleanConfig(value: unknown): StoredConfig | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const title = typeof record.title === "string" ? record.title.trim().slice(0, TITLE_LIMIT) : "";
+  const width: StoredConfig["width"] =
+    record.width === "full" || record.width === "half" ? record.width : undefined;
+  if (!title && !width) return undefined;
+  const config: StoredConfig = {};
+  if (title) config.title = title;
+  if (width) config.width = width;
+  return config;
+}
+
+type StoredItem = { key: string; hidden: boolean; config?: StoredConfig };
+
 /**
  * The stored list, cleaned.
  *
@@ -52,16 +86,17 @@ function surfaceFrom(value: unknown) {
  * anyone can put a megabyte, and duplicate keys would render a panel twice.
  */
 function cleanItems(value: unknown) {
-  if (!Array.isArray(value)) return [] as Array<{ key: string; hidden: boolean }>;
+  if (!Array.isArray(value)) return [] as StoredItem[];
   const seen = new Set<string>();
-  const items: Array<{ key: string; hidden: boolean }> = [];
+  const items: StoredItem[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object") continue;
     const record = entry as Record<string, unknown>;
     const key = typeof record.key === "string" ? record.key.trim().slice(0, 60) : "";
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    items.push({ key, hidden: record.hidden === true });
+    const config = cleanConfig(record.config);
+    items.push({ key, hidden: record.hidden === true, ...(config ? { config } : {}) });
     if (items.length >= 60) break;
   }
   return items;
