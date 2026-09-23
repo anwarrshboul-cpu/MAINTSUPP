@@ -29,13 +29,19 @@ separate act, and it always has been.
   vinext's server loop and calls the bundle's `fetch`). All security headers
   (`X-Frame-Options: DENY` etc.) live in `worker/index.ts` and therefore apply
   on Vercel too. Static assets go to the CDN with immutable caching + nosniff.
-- **Database**: Supabase **Postgres through the SESSION pooler (port 5432)**.
-  The app keeps speaking SQLite-shaped SQL; `db/node-pg-d1.ts` +
-  `db/sqlite-to-postgres.ts` translate on the wire into the **`portal`
-  schema** (search_path is pinned, so the Phase 2 `public` schema is
-  untouchable). Never use the transaction pooler (6543): a measured deadlock,
-  documented in the adapter. The pool is 2 connections per instance on Vercel
-  against Supabase's 15-client session ceiling.
+- **Database**: Supabase **Postgres through Supavisor's TRANSACTION pooler
+  (port 6543)** — in Production since 2026-09-09, and the mode Supabase
+  documents for serverless functions. The app keeps speaking SQLite-shaped SQL;
+  `db/node-pg-d1.ts` + `db/sqlite-to-postgres.ts` translate on the wire into the
+  **`portal` schema** (search_path is pinned, so the Phase 2 `public` schema is
+  untouchable; Supavisor honours it as a startup parameter in transaction mode).
+  The adapter turns prepared statements off on 6543 and keeps each `batch()`
+  transaction on one reserved connection. The pool is 2 connections per
+  instance; transaction mode admits 200 such clients, where session mode (5432)
+  refused this app at 15. The old "never 6543 — a measured deadlock" line
+  described the Phase 2 API (`packages/db`), not this adapter; do not move back
+  to 5432 on its strength — a mode change needs fresh evidence and the owner's
+  approval.
 - **Migrations**: automatic and additive at boot. `ensureDatabase()` replays
   `CREATE TABLE IF NOT EXISTS` + guarded `addColumn` + `INSERT OR IGNORE`
   seeds on first request per instance; there is no DROP TABLE, no column
@@ -85,7 +91,7 @@ database and bucket, never production.
 | Variable | Side | Required | Vercel env | Purpose / source |
 | --- | --- | --- | --- | --- |
 | `PG_D1=1` | server | REQUIRED | Prod + Preview | Selects Postgres over the SQLite shim |
-| `DATABASE_URL` | server | REQUIRED | Prod + Preview (staging DB) | Supabase **session pooler :5432**, `postgres.<ref>@aws-0-<region>.pooler.supabase.com` |
+| `DATABASE_URL` | server | REQUIRED | Prod + Preview (staging DB) | Supabase **transaction pooler :6543**, `postgres.<ref>@aws-0-<region>.pooler.supabase.com` (what Production uses; see Database above) |
 | `S3_ENDPOINT` | server | REQUIRED | Prod + Preview | `https://<ref>.supabase.co/storage/v1/s3` |
 | `S3_BUCKET` | server | REQUIRED | Prod + Preview | Private bucket name |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | server | REQUIRED | Prod + Preview | Supabase Storage → S3 access keys |

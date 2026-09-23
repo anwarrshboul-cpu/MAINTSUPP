@@ -19,7 +19,7 @@
 >
 > | Variable | Where to get it |
 > | --- | --- |
-> | `DATABASE_URL` | Settings → Database → Connection string → **Session pooler**. Copy it verbatim: **port 5432, not 6543** — the transaction pooler deadlocks this app. |
+> | `DATABASE_URL` | Settings → Database → Connection string → **Transaction pooler** (port **6543**), which is what Production has used since 2026-09-09. *Corrected 2026-09-23: this line used to demand the session pooler on 5432 because "the transaction pooler deadlocks this app" — a claim measured on the Phase 2 API, not on the portal; see `docs/DEPLOYMENT-PORTAL.md`.* |
 > | `S3_ACCESS_KEY_ID` | Storage → S3 Access Keys → *New access key* |
 > | `S3_SECRET_ACCESS_KEY` | Shown once, at creation, beside the key id |
 >
@@ -128,10 +128,12 @@ holds no management credential.
 2. **Take the database password.** Settings → Database. If it is unknown, reset
    it *now* rather than later — this is a fresh environment, so a reset costs
    nothing, whereas resetting after go-live drops live connections.
-3. **Build the connection string on the SESSION pooler, port 5432.** Not 6543.
-   The transaction pooler deadlocks this app — a documented failure, see
-   `docs/DEPLOYMENT-PORTAL.md`. Supabase permits 15 clients and the app opens 2
-   per instance.
+3. **Build the connection string on the TRANSACTION pooler, port 6543** — the
+   mode Supabase documents for serverless functions, and the one Production has
+   run on since 2026-09-09. *(Corrected 2026-09-23: this step used to say the
+   opposite, citing a deadlock measured on the Phase 2 API rather than the
+   portal. Session mode, 5432, refused this app at 15 clients in Production; see
+   `docs/DEPLOYMENT-PORTAL.md`.)*
 4. **Create the storage bucket** `job-media`, **private**. It must not be public:
    every read is brokered through `/api/files`, so a public bucket would turn
    object keys into bearer credentials.

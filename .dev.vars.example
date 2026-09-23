@@ -9,10 +9,13 @@
 
 # ── Database (Supabase Postgres) ─────────────────────────────────────────────
 # PG_D1=1 switches the D1 shim to Postgres; without it the shim uses SQLite.
-# DATABASE_URL must be the SESSION pooler (port 5432) — the transaction pooler
-# (6543) deadlocks this workload; db/node-pg-d1.ts refuses it loudly.
+# DATABASE_URL: Production uses the TRANSACTION pooler (port 6543); the adapter
+# turns prepared statements off there automatically. (This comment used to say
+# 6543 deadlocks this workload — that was measured on the Phase 2 API, not the
+# portal; see docs/DEPLOYMENT-PORTAL.md.) db/node-pg-d1.ts still logs a warning
+# on 6543 until its next change; the warning is out of date, not a fault.
 # PG_D1=1
-# DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
+# DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres"
 
 # ── Storage (Supabase Storage over its S3-compatible API) ────────────────────
 # All four or none — a partial set falls back to the local-filesystem driver,
