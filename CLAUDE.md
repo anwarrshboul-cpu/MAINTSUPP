@@ -82,8 +82,24 @@ schema**, reached through two shims that absorb every difference:
 Because of that split, a query can pass locally and fail deployed. Anything
 touching raw SQL, booleans, or `RETURNING` deserves a check against both.
 
-Use the **session pooler (5432)**, never the transaction pooler (6543) — a
-documented deadlock. Supabase allows 15 clients; the app runs 2 per instance.
+**Production uses Supavisor TRANSACTION mode, port 6543** — the shared pooler,
+`aws-0-<region>.pooler.supabase.com:6543` — and has since 2026-09-09. That is the
+mode Supabase documents for serverless functions, and it is right for this
+deployment: every Vercel instance opens its own pool (2 connections), and the
+transaction pooler multiplexes up to 200 such clients onto the server-side pool,
+where SESSION mode (5432) pins one backend per client and refused this app at 15
+(`EMAXCONNSESSION … pool_size: 15`, 181 times in 20 days before the switch). The
+adapter turns prepared statements off automatically on 6543, and `batch()` keeps
+each transaction on one reserved connection, which is what transaction pooling
+requires.
+
+This file used to say "never 6543 — a documented deadlock". That deadlock was
+measured on 2026-08-14 against the **Phase 2 API** (`packages/db`, a different
+client and workload) and was only ever cited, never reproduced, for the portal;
+the portal has run on 6543 in Production since, full migration replays included,
+with no Postgres deadlock logged. **Do not switch Production back to 5432 because
+of the old warning.** Any future change of connection mode needs fresh evidence
+and the owner's approval. The investigation is in the master handoff (2026-09-23).
 
 **Migrations are automatic and additive.** `ensureDatabase()` in `db/init.ts`
 applies `CREATE TABLE IF NOT EXISTS`, guarded `addColumn` and `INSERT OR IGNORE`
