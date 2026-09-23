@@ -96,11 +96,30 @@ async function paletteBlocks() {
 /* ------------------------------------------------------------------ */
 
 test("every token declares its kind, and only the two typefaces are fonts", () => {
+  /*
+   * RE-POINTED for the third kind, and DELIBERATELY NOT WEAKENED.
+   *
+   * `"choice"` joined `"colour"` and `"font"` when corners, depth and the board's
+   * row height arrived. The contract this test protects is not "there are two
+   * kinds" — it is that **every token declares one**, because the kind is what
+   * stops a token being stored, audited, echoed back and shown as changed while
+   * emitting nothing (see the silent-drop test below, which now covers all three).
+   * So the list of kinds is widened and the two counts that say WHICH tokens are
+   * which are kept exactly as they were.
+   */
+  const KINDS = new Set(["colour", "font", "choice"]);
   for (const token of THEME_TOKEN_CATALOGUE) {
-    assert.ok(
-      token.kind === "colour" || token.kind === "font",
-      `${token.key} must declare a kind`,
-    );
+    assert.ok(KINDS.has(token.kind), `${token.key} must declare a kind`);
+    /* A choice token's bound IS its option list, so an empty one would be a
+       control that offers nothing and a validator that refuses everything. */
+    if (token.kind === "choice") {
+      assert.ok(
+        Array.isArray(token.options) && token.options.length >= 2,
+        `${token.key} must offer at least two options`,
+      );
+    } else {
+      assert.equal(token.options, undefined, `${token.key} must not carry options`);
+    }
   }
   assert.deepStrictEqual(
     THEME_TOKEN_CATALOGUE.filter((t) => t.kind === "font").map((t) => t.key),
@@ -318,8 +337,14 @@ test("the three dead --font-geist-sans references are gone", async () => {
 
 test("the panel offers a select for a face and a swatch for a colour", async () => {
   const panel = await read("app/(app)/portal/views/brand-colours-panel.tsx");
-  assert.match(panel, /kind: "colour" \| "font";/, "the kind is read, not inferred");
-  assert.match(panel, /token\.kind === "font" \? \(/);
+  /*
+   * RE-POINTED: the panel's type gained `"choice"`, and the branch that chooses a
+   * select now reads `!== "colour"` rather than `=== "font"`. The contract is the
+   * same one and is still asserted — the kind is READ from the server rather than
+   * inferred from the key, and a COLOUR is the only kind that gets a swatch.
+   */
+  assert.match(panel, /kind: "colour" \| "font" \| "choice";/, "the kind is read, not inferred");
+  assert.match(panel, /token\.kind !== "colour" \? \(/, "one list control, for every kind that has a list");
   assert.match(panel, /<select/);
   assert.match(panel, /type="color"/, "the colour control is unchanged");
   assert.ok(
@@ -346,7 +371,13 @@ test("the panel says what the typeface does NOT reach", async () => {
   assert.match(panel, /sizes<\/em> are not\s*\n?\s*configurable/);
   assert.match(panel, /iPhones zoom in and never zoom back out/,
     "and the reason for the 16px floor is recorded where somebody would change it");
-  assert.match(panel, /Brand colours and typeface/, "the heading names both");
+  /* RE-POINTED: the card now also carries the surface group, so the heading names
+     all three rather than two. */
+  assert.match(
+    panel,
+    /Brand colours, typeface and surface style/,
+    "the heading names what the card contains",
+  );
 });
 
 /* ------------------------------------------------------------------ */

@@ -54,6 +54,29 @@ function blockAt(css, startLine) {
   return tokens;
 }
 
+/*
+ * RE-POINTED: THE SHIPPED VALUES NO LONGER ALL LIVE IN ONE FILE.
+ *
+ * `app/board-metrics.css` declares the board's geometry — row, header, group and
+ * subitem heights — on its own `:root`, and its header says why it is separate:
+ * "COLOUR IS NOT COPIED. Every value below is a dimension." `layout.board_density`
+ * seeds four of those dimensions, so the test that proves a seed matches what
+ * ships has to read the file that ships it. The CONTRACT is unchanged and is the
+ * whole reason this test exists: a seed that disagrees with the stylesheet would
+ * make a workspace paint a stale value the moment it overrode anything unrelated.
+ *
+ * Only the `:root` block is read, and only from files the layout actually loads in
+ * this order — globals, then board-metrics — so the merge below is the cascade the
+ * browser performs, not an invention.
+ */
+async function shippedMetrics() {
+  const css = await read("app/board-metrics.css");
+  const lines = css.split("\n");
+  const rootLine = lines.findIndex((line) => /^:root\s*\{/.test(line)) + 1;
+  assert.ok(rootLine > 0, "board-metrics.css must declare its metrics on a bare :root");
+  return blockAt(css, rootLine);
+}
+
 async function shippedPalette() {
   const css = await read("app/globals.css");
   const lines = css.split("\n");
@@ -65,7 +88,10 @@ async function shippedPalette() {
   assert.ok(lightLine > 0, "globals.css must declare the light palette on a bare :root");
   assert.ok(darkLine > 0, "globals.css must declare a dark palette block");
 
-  const light = blockAt(css, lightLine);
+  const metrics = await shippedMetrics();
+  /* The board's dimensions are mode-independent — board-metrics.css has no dark
+     block — so they join both sides exactly as the cascade delivers them. */
+  const light = { ...metrics, ...blockAt(css, lightLine) };
   const dark = blockAt(css, darkLine);
   /* The dark block restates only what differs, so anything it does not name is
      inherited from the light block — the same resolution a browser performs. */
