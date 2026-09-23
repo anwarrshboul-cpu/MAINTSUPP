@@ -65,15 +65,33 @@ test("GET /api/leads is no longer a 501", async () => {
 test("both new methods answer to platform staff, and neither to a capability", async () => {
   const route = await read("app/api/leads/route.ts");
 
+  /*
+   * Re-pointed 2026-09-22 (the enquiry export): the check is no longer written
+   * inline in each handler. It is `platformLeadsRefusal`, one exported function,
+   * because `GET /api/leads/csv` must answer to EXACTLY this gate and a copy of it
+   * in a second file is the one way the leak described below could return. So the
+   * pin now asserts three things instead of two — the gate's own rule, that each
+   * handler asks it before it reads, and that the refusal is still a 403 — which is
+   * strictly more than it checked before.
+   */
+  assert.match(
+    route,
+    /export function platformLeadsRefusal\([\s\S]{0,600}?\): Response \| null \{\s*if \(scope\.platformAdmin === true && scope\.authenticated\) return null;/,
+    "the gate is platform staff AND a proved session, in one exported function",
+  );
+  assert.match(route, /\{ status: 403 \}/, "and it refuses with 403");
   for (const method of ["GET", "PATCH"]) {
     const slice = route.slice(route.indexOf(`export async function ${method}(`));
     assert.match(
       slice.slice(0, 700),
-      /scope\.platformAdmin !== true \|\| !scope\.authenticated/,
-      `${method} must be gated on platform staff before it reads anything`,
+      /platformLeadsRefusal\(\s*scope\b/,
+      `${method} must ask the gate before it reads anything`,
     );
-    assert.match(slice.slice(0, 900), /status: 403/, `${method} must refuse with 403`);
   }
+  /* And the export, in its own file, asks the same function rather than its own. */
+  const csv = await read("app/api/leads/csv/route.ts");
+  assert.match(csv, /import \{ platformLeadsRefusal, readLeadEnquiries \} from "\.\.\/route";/);
+  assert.doesNotMatch(csv, /platformAdmin/, "the export has no opinion of its own about who may read a lead");
 
   /*
    * NOT a capability, and this is the strongest version of that argument in the
@@ -434,9 +452,14 @@ test("the console lists the inbox because the inbox now has a server side", asyn
      Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
      `/api/site-navigation`.
      Re-pointed 10 → 11 for Website media (decision K), which arrived with
-     `/api/cms-media` and its upload route. */
-  /* TWELVE since decision L added Website copy with `/api/site-content`. */
-  assert.equal(PLATFORM_SECTIONS.length, 12);
+     `/api/cms-media` and its upload route.
+     Re-pointed 11 → 12 for Search across workspaces, which arrived with
+     `/api/admin/search` — the owner's optional follow-up to §36, and the same rule
+     kept again: listed because there is a server side behind it.
+     Re-pointed 12 → 13 for Website copy (decision L), which arrived with
+     `/api/site-content`. Search and Website copy were built in parallel and each
+     said twelve on its own branch; both are in the catalogue now. */
+  assert.equal(PLATFORM_SECTIONS.length, 13);
 
   /* `capability: null`, for the reason the catalogue records: there is no
      per-workspace capability that could be right about a row that belongs to the
@@ -523,19 +546,30 @@ test("the inbox states its own gaps, and the screen prints them", async () => {
   assert.ok(LEAD_OMISSIONS.some((entry) => /delet/i.test(entry)));
 });
 
-test("there is no export path, and no delete path", async () => {
+test("there is still no delete path, and the export that now exists is a read", async () => {
   const route = decommented(await read("app/api/leads/route.ts"));
-  const view = decommented(await read("app/(app)/admin/leads-view.tsx"));
+  const csv = decommented(await read("app/api/leads/csv/route.ts"));
 
   /*
-   * These rows carry other companies' contact details. Where they are allowed to go
-   * is a separate decision from whether they can be read, and a delete would let
-   * something that arrived vanish — spam is a status instead, so the count of real
-   * enquiries stays honest.
+   * Re-pointed 2026-09-22. This pin used to assert there was no export AT ALL, and
+   * the reason it gave was the right one: "where these rows are allowed to go is a
+   * separate decision from whether they can be read". That decision has now been
+   * taken — the owner asked for the export — so the pin protects the part of the
+   * contract that has NOT changed, and the new path is held to the terms the
+   * decision was made on:
+   *   · a DELETE still does not exist. Spam is a status, so the count of real
+   *     enquiries stays honest and nothing that arrived can vanish;
+   *   · the export WRITES NOTHING — no status moves, nothing is marked exported,
+   *     and no audit row is added, because a download is a read;
+   *   · it answers to the platform gate above, which the first test in this file
+   *     now asserts for the export's file as well as this one.
+   * `tests/leads-export.test.mjs` owns the rest of the export's contract.
    */
   assert.doesNotMatch(route, /export async function DELETE/);
+  assert.doesNotMatch(csv, /export async function (DELETE|POST|PATCH|PUT)/, "the export is a GET and nothing else");
+  assert.doesNotMatch(csv, /recordAudit|\.update\(|\.insert\(|\.delete\(/, "a download changes nothing");
+  /* The inbox route itself still serves JSON only: the file half is its own route. */
   assert.doesNotMatch(route, /text\/csv|Content-Disposition/);
-  assert.doesNotMatch(view, /csv|download/i);
 });
 
 test("the screen reuses the admin kit rather than restating it", async () => {
@@ -551,6 +585,9 @@ test("the screen reuses the admin kit rather than restating it", async () => {
     );
   }
   assert.match(view, /useAdminResource|adminWrite/);
+  /* The export link is the kit's own `secondary-button`, not a control of its own —
+     added 2026-09-22 with the enquiry export. The toolbar it sits in is shared. */
+  assert.match(view, /className="secondary-button leads-admin__export"/);
 });
 
 test("the stylesheet spends no literal and opens no breakpoint", async () => {

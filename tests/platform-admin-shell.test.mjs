@@ -69,6 +69,9 @@ const decommented = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
  */
 const ENTRIES = [
   ["", "app/(app)/admin/page.tsx", "/admin"],
+  /* TWELVE: Search across workspaces arrived with `/api/admin/search`, and is
+     listed SECOND because it is a way into everything else in this rail. */
+  ["search", "app/(app)/admin/search/page.tsx", "/admin/search"],
   ["clients", "app/(app)/admin/clients/page.tsx", "/admin/clients"],
   ["users", "app/(app)/admin/users/page.tsx", "/admin/users"],
   ["roles", "app/(app)/admin/roles/page.tsx", "/admin/roles"],

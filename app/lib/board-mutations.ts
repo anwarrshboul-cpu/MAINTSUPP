@@ -27,6 +27,7 @@ import {
   maintenanceRequests,
 } from "../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "./job-status-history";
+import { recordJobMilestones } from "./job-milestones";
 import type { RequestStage } from "./types";
 import { statusForStage } from "./stage-status";
 import { selectInChunks } from "./sql-batching";
@@ -477,6 +478,18 @@ export async function moveItemsToGroup(
       action: archive ? "request.archived" : "request.group_changed",
       actorEmail: actor.email,
       detail: JSON.stringify({ groupId: group.id, groupName: group.name }),
+    });
+  }
+  /* Decision N — a PERSON moving a job to another group has handled it. An
+     archive is housekeeping and a rule is not a person, so neither counts. */
+  if (source === "board.move" && movedFrom.length) {
+    await recordJobMilestones(db, {
+      organisationId: orgId,
+      actorEmail: actor.email,
+      source,
+      human: true,
+      handled: true,
+      changes: movedFrom.map(({ requestId }) => ({ requestId, before: null, after: null })),
     });
   }
   return { group, items, requests, statusChanges, movedFrom };

@@ -57,6 +57,7 @@ import { recordExportHistory } from "./history";
 import type { DocumentBranding } from "../../../lib/exports/document-model";
 import { documentLogo } from "../../../lib/organisation-logo";
 import { everySiteRefusal } from "../../../lib/job-site-scope";
+import { moduleRefusal } from "../../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -322,6 +323,10 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const { denied, scope } = await scopedDbWithCapability(request, "data.export");
     if (denied) return denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(scope.siteScope, "a report document");
     if (everySite) return everySite;
 
@@ -349,6 +354,10 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const { denied, scope } = await scopedDbWithCapability(request, "data.export");
     if (denied) return denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(scope, "reports");
+    if (switchedOff) return switchedOff;
     const everySite = everySiteRefusal(scope.siteScope, "a report document");
     if (everySite) return everySite;
 

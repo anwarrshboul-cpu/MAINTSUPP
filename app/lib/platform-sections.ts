@@ -89,6 +89,25 @@ export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
     blurb: "Every client workspace on this installation, and what each holds.",
     capability: "clients.view_all",
   },
+  /*
+   * SEARCH ACROSS WORKSPACES — the owner's optional follow-up to §36, which
+   * shipped single-workspace deliberately: `/api/search` takes its organisation
+   * from the session and has no parameter to point it elsewhere, and that is the
+   * property that makes it safe. So this is a second route, `/api/admin/search`,
+   * behind the platform gate, and it is listed SECOND because it is a way into
+   * everything else in the rail rather than a thing of its own.
+   *
+   * `capability: null` for the reason the website entries below give: every
+   * capability in this product is per-workspace, and this answer is about all of
+   * them at once. `platformAdmin` is the only honest gate.
+   */
+  {
+    key: "search",
+    label: "Search",
+    icon: "search",
+    blurb: "Find a job, store, contractor, person, page or enquiry in any workspace on this installation.",
+    capability: null,
+  },
   {
     key: "clients",
     label: "Clients",

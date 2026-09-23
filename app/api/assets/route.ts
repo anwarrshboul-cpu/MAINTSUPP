@@ -91,6 +91,7 @@ import {
 } from "../../lib/asset-model";
 import { memberSiteCondition } from "../../lib/member-site-scope";
 import { siteOutsideMemberScope } from "../../lib/job-site-scope";
+import { moduleRefusal } from "../../lib/module-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -590,6 +591,10 @@ export async function GET(request: Request) {
     await ensureDatabase();
     const viewGuard = await scopedDbWithCapability(request, "board.view");
     if (viewGuard.denied) return viewGuard.denied;
+    /* The switch holds at the API too, not only in the navigation — see
+       `module-guard.ts`. */
+    const switchedOff = await moduleRefusal(viewGuard.scope, "assets");
+    if (switchedOff) return switchedOff;
     const { db, orgId, siteScope } = viewGuard.scope;
     const url = new URL(request.url);
     const id = text(url.searchParams.get("id"), 120);
@@ -815,6 +820,8 @@ export async function POST(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "assets");
+    if (switchedOff) return switchedOff;
     const { actor, db, orgId, siteScope } = guard.scope;
     /*
      * `?? {}` because a body of literal `null` PARSES. `request.json()` returns
@@ -1016,6 +1023,8 @@ export async function PATCH(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "assets");
+    if (switchedOff) return switchedOff;
     const { actor, db, orgId, siteScope } = guard.scope;
     /*
      * `?? {}` because a body of literal `null` PARSES. `request.json()` returns
@@ -1225,6 +1234,8 @@ export async function DELETE(request: Request) {
     await ensureDatabase();
     const guard = await scopedDbWithCapability(request, "sites.edit");
     if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "assets");
+    if (switchedOff) return switchedOff;
     const { actor, db, orgId, siteScope } = guard.scope;
     /*
      * `?? {}` because a body of literal `null` PARSES. `request.json()` returns

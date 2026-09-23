@@ -237,7 +237,13 @@ test("the admin console's hand-built subjects carry the ceiling, and workspace a
 test("the audit log reads only the workspaces where audit.read holds under their own site scope", async () => {
   const audit = code(await read("app/api/audit/route.ts"));
   assert.match(audit, /const readable = scope\.crossOrganisation \? scope\.organisationIds : await auditReadable\(scope\);/);
-  assert.match(audit, /resolvePermissions\(scope\.db, id, role, siteScopeInOrganisation\(scope, id\)\);\s*if \(can\(subject, "audit\.read"\)\) readable\.push\(id\);/);
+  /* Re-pointed 2026-09-22 (the module-switch batch): the push is now guarded by
+     two `continue`s rather than one `if`, because a workspace that has switched
+     Audit OFF drops out of the list as well. The contract this pin protects is
+     unchanged and still asserted — the capability is judged per workspace, with
+     that workspace's own role and site scope. See `app/lib/module-guard.ts`. */
+  assert.match(audit, /resolvePermissions\(scope\.db, id, role, siteScopeInOrganisation\(scope, id\)\);\s*if \(!can\(subject, "audit\.read"\)\) continue;/);
+  assert.match(audit, /if \(await moduleSwitchedOff\(scope\.db, id, "audit"\)\) continue;\s*readable\.push\(id\);/);
 });
 
 test("the bin: restoring or purging structure is refused, and a purge's subitems are checked first", async () => {
@@ -267,7 +273,12 @@ test("what covers every site — the ledger, report documents, the contractor re
   const finance = code(await read("app/lib/finance/access.ts"));
   assert.match(finance, /if \(guard\.denied\) return guard;\s*const everySite = everySiteRefusal\(guard\.scope\.siteScope, "the finance ledger"\);\s*if \(everySite\) return \{ denied: everySite \};/);
   const search = code(await read("app/api/search/route.ts"));
-  assert.match(search, /can\(subject, FINANCE_CAPABILITIES\["ledger\.read"\]\)\s*&& !scope\.siteScope;/);
+  /* Re-pointed 2026-09-22 (the module-switch batch): one more condition now
+     follows on the same expression — the workspace's Invoice Tracker switch —
+     so the site-scope test is no longer the last line of it. The contract this
+     pin protects is unchanged: a site-restricted member gets no finance group.
+     `tests/module-api-enforcement.test.mjs` owns the switch half. */
+  assert.match(search, /can\(subject, FINANCE_CAPABILITIES\["ledger\.read"\]\)\s*&& !scope\.siteScope\s*&& !\(await moduleOff\(scope, "invoice-tracker"\)\);/);
   const helpers = code(await read("app/lib/reporting/route-helpers.ts"));
   assert.match(helpers, /everySiteRefusal\(guarded\.scope\.siteScope, "a report document"\)/);
   const exports = code(await read("app/api/reports/exports/route.ts"));

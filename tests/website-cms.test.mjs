@@ -631,9 +631,14 @@ test("the console lists the screen because the screen has an API", async () => {
      Re-pointed 9 → 10 for Website navigation (decision J), which arrived with
      `/api/site-navigation`.
      Re-pointed 10 → 11 for Website media (decision K), which arrived with
-     `/api/cms-media` and its upload route. */
-  /* TWELVE since decision L added Website copy with `/api/site-content`. */
-  assert.equal(PLATFORM_SECTIONS.length, 12);
+     `/api/cms-media` and its upload route.
+     Re-pointed 11 → 12 for Search across workspaces, which arrived with
+     `/api/admin/search` — the owner's optional follow-up to §36, and the same rule
+     kept again: listed because there is a server side behind it.
+     Re-pointed 12 → 13 for Website copy (decision L), which arrived with
+     `/api/site-content`. Search and Website copy were built in parallel and each
+     said twelve on its own branch; both are in the catalogue now. */
+  assert.equal(PLATFORM_SECTIONS.length, 13);
 
   /* `capability: null` is the honest answer and the first entry to need it. The
      other five name the capability their own API enforces so the two cannot drift;
@@ -665,15 +670,22 @@ test("the console lists the screen because the screen has an API", async () => {
    * And a sixth: `media` (decision K), the same reason again — the website's own
    * files, in a bucket of their own, belonging to no workspace.
    *
-   * And a seventh: `copy` (decision L) — the words on the pages that ship with
-   * the site. Same reason a third time, and the list is asserted rather than
-   * counted so that adding one is a deliberate act.
+   * And a seventh: `search`, for a DIFFERENT reason worth stating rather than
+   * folding in. The six above answer to no capability because their rows are not
+   * in a workspace. This one's rows are — jobs, stores, contractors, people, all
+   * a workspace's — and the reason no capability fits is that the answer is about
+   * EVERY workspace at once, while every capability in this product is granted
+   * inside one. `platformAdmin` is the only gate that can be right about it.
+   *
+   * And an eighth: `copy` (decision L) — the words on the pages that ship with
+   * the site. The pages entry's reason again, and the list is asserted rather
+   * than counted so that adding one is a deliberate act.
    */
   const nullable = PLATFORM_SECTIONS.filter((entry) => entry.capability === null).map((entry) => entry.key);
   assert.deepEqual(
     nullable.sort(),
-    ["applications", "backups", "copy", "leads", "media", "navigation", "pages"],
-    "only the seven platform-owned surfaces answer to no capability — Website copy joined them with decision L",
+    ["applications", "backups", "copy", "leads", "media", "navigation", "pages", "search"],
+    "only the eight platform-owned surfaces answer to no capability — Website copy joined them with decision L",
   );
   for (const other of PLATFORM_SECTIONS.filter((entry) => !nullable.includes(entry.key))) {
     assert.ok(other.capability, `${other.key} answers to a capability and must keep naming it`);

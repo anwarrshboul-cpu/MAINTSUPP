@@ -175,6 +175,13 @@ export function LeadsInboxView() {
             ))}
           </select>
         </label>
+        {/* The list the reader is looking at, as a spreadsheet. A link rather than a
+            button, and `download`, so it is one request with no JavaScript between
+            the click and the file — the same shape the Assets export uses. The
+            filter travels in the query, so the download and the screen agree. */}
+        <a className="secondary-button leads-admin__export" href={`/api/leads/csv?status=${encodeURIComponent(filter)}`} download>
+          <Icon name="download" size={15} /> Export CSV
+        </a>
       </div>
 
       {/* The finding, stated on the screen rather than only in the code. It reads
@@ -197,6 +204,14 @@ export function LeadsInboxView() {
             : "No enquiry matches that filter."}
         </AdminNotice>
       ) : (
+        /* The list is wider than a phone once there are rows in it, so it gets its
+           own scroll strip — measured at 390: the table is 377px inside a 354px
+           column and WAS pushing the whole page sideways, which is the same failure
+           the recycle bin had (`recycle-bin-section.tsx`) and the reason
+           `.platform-table-wrap` exists on the other console screens. It shows
+           only when the filter has rows, which is why Production never showed it:
+           it has no open enquiries. Found by this batch's QA against Staging. */
+        <div className="leads-admin__scroll">
         <table className="admin-table leads-admin__list">
           <thead>
             <tr>
@@ -259,6 +274,7 @@ export function LeadsInboxView() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {expanded

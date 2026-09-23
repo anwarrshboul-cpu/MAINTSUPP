@@ -418,6 +418,12 @@ async function applyMigrations(d1: D1DatabaseLike) {
      not an unfinished one). See `ensureOrganisationLogos`. */
   await ensureOrganisationLogos(d1);
 
+  /* Decision N — when this database began recording a job's acknowledged,
+     assigned and attended times. One guarded table and one INSERT OR IGNORE,
+     written once on the first boot with this code and never moved. See
+     `ensureFeatureEpochs`. */
+  await ensureFeatureEpochs(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -7968,4 +7974,35 @@ async function ensureOrganisationLogos(d1: D1DatabaseLike) {
        )`,
     ),
   ]);
+}
+
+/**
+ * WHEN A RECORDING BEGAN — decision N's "nothing historical is invented".
+ *
+ * `maintenance_requests.acknowledged_at`, `assigned_at` and `attended_at` have
+ * existed since the Overview's SLA stage and nothing has ever written them. A
+ * job raised before they started being written may have been acknowledged,
+ * assigned or attended already, with no record of when; stamping "now" at its
+ * next edit would invent a history. So `app/lib/job-milestones.ts` records
+ * milestones only for jobs raised on or after the moment in this table.
+ *
+ * `INSERT OR IGNORE`, with the time taken HERE: on each database it is the
+ * first boot that runs this stage — the deployment that shipped it — and every
+ * later replay (a changed fingerprint replays every stage) keeps the original
+ * row. One-time work, so it belongs in `applyMigrations`, not in the repairs.
+ * `started_at` is ISO text written by the app, compared in JavaScript.
+ */
+async function ensureFeatureEpochs(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS feature_epochs (
+         feature TEXT PRIMARY KEY NOT NULL,
+         started_at TEXT NOT NULL
+       )`,
+    ),
+  ]);
+  await d1
+    .prepare("INSERT OR IGNORE INTO feature_epochs (feature, started_at) VALUES (?, ?)")
+    .bind("job_milestones", new Date().toISOString())
+    .run();
 }

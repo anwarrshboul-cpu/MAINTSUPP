@@ -891,7 +891,11 @@ export const jobStatusHistory = sqliteTable(
     id: text("id").primaryKey(),
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
     requestId: text("request_id").notNull(),
-    /** `stage` or `status`. */
+    /**
+     * `stage`, `status`, or `milestone` — decision N writes the job's first
+     * acknowledgement, assignment and attendance into this same history, with
+     * the milestone's name in `to_value` and no `from_value`.
+     */
     field: text("field").notNull(),
     /** NULL when the job was created in this state. */
     fromValue: text("from_value"),

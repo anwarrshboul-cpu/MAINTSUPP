@@ -53,6 +53,7 @@ import {
   sites,
 } from "../../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "../../lib/job-status-history";
+import { recordJobMilestones } from "../../lib/job-milestones";
 import { invalidateOptionCache } from "../../lib/options-repository";
 import {
   CONTRACTOR_COMMENTS_KEY,
@@ -3007,6 +3008,17 @@ export async function PATCH(request: Request) {
       // One writer for cells — `setBoardCell` — shared with the automation
       // engine, which needs the previous value so the change can be named.
       const { before, after } = await setBoardCell(db, orgId, boardId, requestId, columnId, value);
+      /* Decision N — a person editing one of the job's cells has handled it. */
+      await recordJobMilestones(db, {
+        organisationId: orgId,
+        actorEmail: actor.email,
+        actor: auditActor(guard.scope),
+        source: "board.cell",
+        human: true,
+        handled: true,
+        changes: [{ requestId, before: null, after: null }],
+        request,
+      });
       let ran = 0;
       if (!column.system) {
         const event = cellChangedEvent(
@@ -3380,6 +3392,20 @@ export async function PATCH(request: Request) {
           actorEmail: actor.email,
           source: "board.move",
           changes: statusChangesBetween(requestId, requestBefore, updatedRequest),
+        });
+      }
+      /* Decision N — dragging a job into another group is a person handling it;
+         reordering within its group is not. */
+      if (existingItem.groupId !== groupId) {
+        await recordJobMilestones(db, {
+          organisationId: orgId,
+          actorEmail: actor.email,
+          actor: auditActor(guard.scope),
+          source: "board.move",
+          human: true,
+          handled: true,
+          changes: [{ requestId, before: null, after: null }],
+          request,
         });
       }
 

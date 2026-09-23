@@ -59,6 +59,7 @@ import {
   sites,
 } from "../../db/schema";
 import { recordJobStatusChanges, statusChangesBetween } from "./job-status-history";
+import { recordJobMilestones } from "./job-milestones";
 import {
   highestJobReference,
   jobReferenceWindowInconclusive,
@@ -922,6 +923,26 @@ export async function createSubmission(
     actorEmail: input.actor?.email ?? null,
     source: `created:${input.source}`,
     changes: statusChangesBetween(allocated.request.id, null, allocated.request),
+  });
+  /*
+   * Decision N — creation is not handling, so nothing is acknowledged here; a
+   * job raised already naming a contractor (a planned visit) is assigned.
+   *
+   * THE CRON COUNTS, and that is the intended answer, not an oversight. The
+   * planned-maintenance generator reaches this function with the schedule's own
+   * contractor, so the job is assigned to them from the moment it exists — a
+   * real assignment, made when the schedule was written, and recorded at the
+   * only instant the job can carry. It is never an ACKNOWLEDGEMENT: `human` is
+   * false here for every door, so a generated visit still waits for a person to
+   * answer it.
+   */
+  await recordJobMilestones(db, {
+    organisationId: input.organisationId,
+    actorEmail: input.actor?.email ?? null,
+    source: `created:${input.source}`,
+    human: false,
+    handled: false,
+    changes: [{ requestId: allocated.request.id, before: null, after: allocated.request }],
   });
 
   return {
