@@ -99,8 +99,8 @@ test("every token declares its kind, and only the two typefaces are fonts", () =
   /*
    * RE-POINTED for the third kind, and DELIBERATELY NOT WEAKENED.
    *
-   * `"choice"` joined `"colour"` and `"font"` when corners, depth and the board's
-   * row height arrived. The contract this test protects is not "there are two
+   * `"choice"` joined `"colour"` and `"font"` when corners and depth arrived.
+   * The contract this test protects is not "there are two
    * kinds" — it is that **every token declares one**, because the kind is what
    * stops a token being stored, audited, echoed back and shown as changed while
    * emitting nothing (see the silent-drop test below, which now covers all three).

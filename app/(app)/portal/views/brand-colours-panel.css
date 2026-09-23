@@ -68,7 +68,7 @@
 
 /*
  * THE LIST CONTROL. Named `__face` because the typeface was the first token that
- * needed one; it now also carries the corner, depth and row-height choices, which
+ * needed one; it now also carries the corner and depth choices, which
  * are chosen from a list for the same safety reason. The name is kept rather than
  * churned because it is the selector the panel and this file already share, and a
  * rename would be a diff with no reader on the other end of it.

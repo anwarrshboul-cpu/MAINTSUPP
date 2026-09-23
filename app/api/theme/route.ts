@@ -113,8 +113,7 @@ function describe(overrides: Readonly<Record<string, string>>) {
       token.kind === "font"
         ? FONT_KEYS.map((key) => ({ key, label: FONT_STACKS[key].label }))
         : /*
-           * A `choice` token carries its own list — corners, depth, the board's row
-           * height. Sent from the server for the same reason the faces are: this is
+           * A `choice` token carries its own list — corners and depth. Sent from the server for the same reason the faces are: this is
            * the same list `validateThemeToken` refuses anything outside, so a copy in
            * the panel would be a second source of truth for a safety boundary, and
            * the first divergence would be a control offering something the API
