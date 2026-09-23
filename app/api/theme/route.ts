@@ -89,9 +89,9 @@ function describe(overrides: Readonly<Record<string, string>>) {
     group: token.group,
     description: token.description,
     /*
-     * Colour or typeface. The panel needs it to decide between a swatch and a
-     * select, and it is sent rather than inferred from the key so a later token
-     * cannot be mis-rendered by a client guessing from its name.
+     * Colour, typeface or bounded choice. The panel needs it to decide between a
+     * swatch and a select, and it is sent rather than inferred from the key so a
+     * later token cannot be mis-rendered by a client guessing from its name.
      */
     kind: token.kind,
     /* What the control shows: the chosen value, or the shipped one. For a colour
@@ -112,7 +112,21 @@ function describe(overrides: Readonly<Record<string, string>>) {
     choices:
       token.kind === "font"
         ? FONT_KEYS.map((key) => ({ key, label: FONT_STACKS[key].label }))
-        : null,
+        : /*
+           * A `choice` token carries its own list — corners and depth. Sent from the server for the same reason the faces are: this is
+           * the same list `validateThemeToken` refuses anything outside, so a copy in
+           * the panel would be a second source of truth for a safety boundary, and
+           * the first divergence would be a control offering something the API
+           * rejects. The `note` travels with it so the panel can say what an option
+           * does without this file's vocabulary being duplicated there.
+           */
+          token.kind === "choice"
+          ? (token.options ?? []).map((option) => ({
+              key: option.key,
+              label: option.label,
+              note: option.note,
+            }))
+          : null,
   }));
 }
 
@@ -190,6 +204,9 @@ export async function PUT(request: Request) {
         writes.push({ key, value: null });
         continue;
       }
+      /* One validator for all three kinds — a hex, a face key or an option key.
+         See `validateThemeToken`: every branch stores something this server
+         produced rather than something a caller sent. */
       const checked = validateThemeToken(key, raw);
       if (!checked.ok) {
         return Response.json({ error: checked.reason }, { status: 400 });

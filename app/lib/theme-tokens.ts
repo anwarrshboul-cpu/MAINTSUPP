@@ -62,6 +62,53 @@
  * already hold a risk-scored order for that migration; it is its own phase, not a
  * control.
  *
+ * SHAPE AND DEPTH ARE NOW IN SCOPE, AND THEY ARE THE THIRD KIND OF TOKEN.
+ *
+ * A colour is a hex and a typeface is a key into a whitelist. A corner style is
+ * neither: it is one name standing for a whole small family of measurements.
+ * `TokenKind` gains `"choice"` for it, and the rule that makes fonts safe is the
+ * rule that makes these safe — **the stored value is a KEY and nothing a caller
+ * sends ever reaches the `<style>` element.** `"rounded"` is looked up here; the
+ * pixels come from this file.
+ *
+ * WHICH AXES ARE OFFERED, AND THE ONE TEST EACH HAD TO PASS: does the property
+ * FUNNEL? A control that saves and changes almost nothing is the same fault as a
+ * control that changes something and does not save, and this product has been
+ * bitten by both. Measured on this commit, across `app/**` with the marketing
+ * site excluded, counting declarations and how many of them read a `var()`:
+ *
+ *   border-radius   1,129 declarations,   242 read a var()   -> OFFERED
+ *   box-shadow        229 declarations,   122 read a var()   -> OFFERED
+ *   the board grid   every dimension in `app/board-metrics.css` is a var()  -> WITHDRAWN
+ *   font-size       1,898 declarations,     2 read a var()   -> refused
+ *   padding         1,833 declarations,    12 read a var()   -> refused
+ *   line-height       303 declarations,     1 read a var()   -> refused
+ *   font-weight       639 declarations,     0 read a var()   -> refused
+ *   letter-spacing    205 declarations,     0 read a var()   -> refused
+ *
+ * So a TEXT SCALE and a general SPACING DENSITY are still not offered, and the
+ * reason is arithmetic rather than taste: either would move a handful of rules
+ * and leave nineteen hundred behind. `docs/vibe-tokens.reference.css` and
+ * `docs/vibe-token-mapping.md` hold a risk-scored order for that migration; it is
+ * its own phase, not a switch in front of one.
+ *
+ * THE BOARD'S ROW HEIGHT WAS BUILT, MEASURED AND WITHDRAWN — 2026-09-23. A
+ * `layout.board_density` token set the four `--board-*` heights, and the variables
+ * really are read by every rule in `app/board-metrics.css`. But NO rendered
+ * component carries any class that file styles: the job board people use is
+ * `.live-sheet`, whose cells take literal heights per breakpoint in `globals.css`
+ * (36, 40 and 44px), and `board-visibility.ts` sizes skipped groups from the
+ * measured 40px. Set to its tallest option on a Preview, the token changed the
+ * computed height of **0** elements on the Overview, the jobs board, Reports and
+ * Settings. It was a control that saves and changes nothing, so it is not offered.
+ * Wiring it for real means moving `.live-sheet`'s heights and `board-visibility.ts`'s
+ * constants onto the variables together, which is its own unit.
+ *
+ * NO OPTION CHANGES A DIMENSION ANYBODY HAS TO HIT. Typed controls are pinned at a
+ * literal 16px because a smaller field makes iPhones zoom in and never zoom back
+ * out, and the touch minimum is 44px. `sharp` corners and `flat` shadows change
+ * shape and depth, never a size.
+ *
  * CHART PALETTES ARE NO LONGER OUT OF SCOPE, and this sentence used to say they
  * were. The always-dark dashboards' accents now come from `--chart-*`, which every
  * brand and status token below derives alongside its own family — so a workspace
@@ -103,14 +150,36 @@ export type TokenFamily = Record<string, string>;
  * a stored value and nothing a submitter could see". A discriminator is what stops
  * the third.
  */
-export type TokenKind = "colour" | "font";
+export type TokenKind = "colour" | "font" | "choice";
+
+/** One option of a `choice` token: what it is called, and what it paints. */
+export type ThemeTokenOption = {
+  key: string;
+  label: string;
+  /** A sentence for the person choosing, not for a developer. */
+  note: string;
+  /** The custom properties this option sets, per mode. */
+  family: Record<ThemeMode, TokenFamily>;
+};
 
 export type ThemeTokenDefinition = {
   key: string;
   label: string;
   group: string;
-  /** Colour or typeface. Decides validation, emission and whether contrast applies. */
+  /**
+   * Colour, typeface or bounded choice. Decides validation, emission and whether
+   * contrast applies.
+   */
   kind: TokenKind;
+  /**
+   * For a `choice` token: the options a workspace may pick from, in the order the
+   * control offers them.
+   *
+   * REQUIRED for that kind and absent for the others, and it is the whole of the
+   * safety story: `validateThemeToken` refuses anything not in this list, so the
+   * bound is the list rather than a range check somebody could widen by accident.
+   */
+  options?: readonly ThemeTokenOption[];
   /** Written for the person choosing a colour, not for a developer. */
   description: string;
   /**
@@ -199,6 +268,143 @@ export const FONT_KEYS: readonly string[] = Object.keys(FONT_STACKS);
 /** The stack a stored key names, or null. Never echoes an unknown string. */
 export function fontStack(key: string): string | null {
   return FONT_STACKS[key]?.stack ?? null;
+}
+
+/* ------------------------------------------------------------------ */
+/* The bounded choices                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Both modes, for a family that is the same in each. `blockAt` merges the dark
+    block over the light one, so a mode-independent value is stated twice here for
+    the same reason `--rail-*` is. */
+function bothModes(family: TokenFamily): Record<ThemeMode, TokenFamily> {
+  return { light: { ...family }, dark: { ...family } };
+}
+
+/**
+ * CORNERS — the three rungs of the product's radius scale, together.
+ *
+ * `--radius-sm` carries the buttons, inputs, chips and small cards (203 rules),
+ * `--radius` the panels and drawers, `--radius-lg` the largest surfaces. They move
+ * as a set, because a workspace choosing "squared" means the product, not one
+ * control — and because a scale whose rungs can cross is not a scale.
+ *
+ * `--radius-card` IS THE FOURTH RUNG, added when the first three were measured on
+ * the Overview: set to `sharp`, they changed **4** of its 816 visible elements,
+ * because its cards and KPI tiles (30 of them) and the job dialogs are drawn at
+ * 15px, which is none of the three. Moving those onto 13px or 20px would have
+ * changed the shipped look to make the control work. A rung at exactly 15px
+ * changes nothing until somebody chooses otherwise.
+ *
+ * WHAT THIS DOES NOT REACH, which the panel says out loud rather than leaving to be
+ * discovered: 587 `border-radius` declarations in the portal's stylesheets are a
+ * px literal from 1 to 98px (measured 2026-09-23, marketing excluded, anything
+ * reading a `var()` excluded) and keep their own shape, and every deliberately
+ * circular thing —
+ * avatars, the 999px pills — is left alone on purpose. A pill that squared off
+ * with the panels would read as a bug rather than as a style.
+ */
+const CORNER_OPTIONS: readonly ThemeTokenOption[] = [
+  {
+    key: "sharp",
+    label: "Squared",
+    note: "Almost flat corners, for a technical, spreadsheet-like feel.",
+    family: bothModes({ "--radius-sm": "2px", "--radius": "4px", "--radius-card": "4px", "--radius-lg": "6px" }),
+  },
+  {
+    key: "soft",
+    label: "Soft (MAINTSUPP default)",
+    note: "The shipped scale.",
+    family: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-card": "15px", "--radius-lg": "20px" }),
+  },
+  {
+    key: "rounded",
+    label: "Rounded",
+    note: "Noticeably rounder panels, cards and buttons.",
+    family: bothModes({ "--radius-sm": "12px", "--radius": "18px", "--radius-card": "20px", "--radius-lg": "24px" }),
+  },
+];
+
+/**
+ * DEPTH — the shadow scale, which is mode-dependent and has to be.
+ *
+ * The light theme's shadows are a blue-grey ink (`rgba(7, 24, 38, …)`) because they
+ * fall on a pale ground; the dark theme's are black, because a blue-grey shadow on
+ * a dark ground is invisible. That is why every option below states both, and why
+ * `derive` takes the mode.
+ *
+ * A shadow carries no text and no hit area, so no option here can fail contrast or
+ * shrink a target. `flat` still keeps a hairline rather than going to `none`: a
+ * panel needs SOME edge, and `--line` is not always enough on the dark theme.
+ * Nothing in this product draws a focus ring from `--shadow-*` — the rings read
+ * `--focus-ring` — so flattening cannot take a keyboard affordance with it.
+ */
+const DEPTH_OPTIONS: readonly ThemeTokenOption[] = [
+  {
+    key: "flat",
+    label: "Flat",
+    note: "Hairlines instead of shadows. Panels sit in the page rather than above it.",
+    family: {
+      light: {
+        "--shadow-sm": "0 1px 1px rgba(7, 24, 38, 0.03)",
+        "--shadow-md": "0 2px 6px rgba(7, 24, 38, 0.05)",
+        "--shadow-lg": "0 4px 14px rgba(7, 24, 38, 0.08)",
+      },
+      dark: {
+        "--shadow-sm": "0 1px 1px rgba(0, 0, 0, 0.18)",
+        "--shadow-md": "0 2px 6px rgba(0, 0, 0, 0.24)",
+        "--shadow-lg": "0 4px 14px rgba(0, 0, 0, 0.32)",
+      },
+    },
+  },
+  {
+    key: "soft",
+    label: "Soft (MAINTSUPP default)",
+    note: "The shipped depth.",
+    family: {
+      light: {
+        "--shadow-sm": "0 1px 2px rgba(7, 24, 38, 0.04)",
+        "--shadow-md": "0 12px 36px rgba(7, 24, 38, 0.09)",
+        "--shadow-lg": "0 28px 80px rgba(7, 24, 38, 0.16)",
+      },
+      dark: {
+        "--shadow-sm": "0 1px 2px rgba(0, 0, 0, 0.3)",
+        "--shadow-md": "0 14px 38px rgba(0, 0, 0, 0.34)",
+        "--shadow-lg": "0 28px 80px rgba(0, 0, 0, 0.5)",
+      },
+    },
+  },
+  {
+    key: "raised",
+    label: "Raised",
+    note: "Deeper shadows, so dialogs and drawers lift further off the page.",
+    family: {
+      light: {
+        "--shadow-sm": "0 2px 4px rgba(7, 24, 38, 0.07)",
+        "--shadow-md": "0 18px 48px rgba(7, 24, 38, 0.14)",
+        "--shadow-lg": "0 36px 96px rgba(7, 24, 38, 0.24)",
+      },
+      dark: {
+        "--shadow-sm": "0 2px 4px rgba(0, 0, 0, 0.4)",
+        "--shadow-md": "0 20px 50px rgba(0, 0, 0, 0.46)",
+        "--shadow-lg": "0 36px 96px rgba(0, 0, 0, 0.62)",
+      },
+    },
+  },
+];
+
+/** The option a key names, for one mode, or null. Never echoes an unknown key. */
+function optionFamily(
+  options: readonly ThemeTokenOption[],
+  key: string,
+  mode: ThemeMode,
+): TokenFamily | null {
+  return options.find((option) => option.key === key)?.family[mode] ?? null;
+}
+
+/** The keys a choice token accepts. The bound the validator enforces. */
+export function tokenOptionKeys(token: ThemeTokenDefinition): readonly string[] {
+  return (token.options ?? []).map((option) => option.key);
 }
 
 /**
@@ -481,6 +687,51 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     },
     derive: (key) => ({ "--type-display": fontStack(key) ?? FONT_STACKS.manrope.stack }),
   },
+  {
+    /*
+     * CORNERS. The seed restates `globals.css`'s three rungs verbatim, which
+     * `tests/theme-token-foundation.test.mjs` checks against the file itself, and
+     * the `soft` option restates the same three — a test asserts those two agree,
+     * so "the default option" and "what ships" cannot drift apart.
+     */
+    key: "shape.corners",
+    label: "Corner style",
+    group: "Surface",
+    kind: "choice",
+    description:
+      "How rounded panels, cards, buttons, inputs and chips are. Pills and avatars stay round.",
+    seedInput: "soft",
+    options: CORNER_OPTIONS,
+    seed: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-card": "15px", "--radius-lg": "20px" }),
+    derive: (key, mode) =>
+      optionFamily(CORNER_OPTIONS, key, mode) ??
+      (optionFamily(CORNER_OPTIONS, "soft", mode) as TokenFamily),
+  },
+  {
+    key: "surface.depth",
+    label: "Panel depth",
+    group: "Surface",
+    kind: "choice",
+    description:
+      "How far panels, dialogs and drawers lift off the page. Each theme keeps its own shadow ink.",
+    seedInput: "soft",
+    options: DEPTH_OPTIONS,
+    seed: {
+      light: {
+        "--shadow-sm": "0 1px 2px rgba(7, 24, 38, 0.04)",
+        "--shadow-md": "0 12px 36px rgba(7, 24, 38, 0.09)",
+        "--shadow-lg": "0 28px 80px rgba(7, 24, 38, 0.16)",
+      },
+      dark: {
+        "--shadow-sm": "0 1px 2px rgba(0, 0, 0, 0.3)",
+        "--shadow-md": "0 14px 38px rgba(0, 0, 0, 0.34)",
+        "--shadow-lg": "0 28px 80px rgba(0, 0, 0, 0.5)",
+      },
+    },
+    derive: (key, mode) =>
+      optionFamily(DEPTH_OPTIONS, key, mode) ??
+      (optionFamily(DEPTH_OPTIONS, "soft", mode) as TokenFamily),
+  },
 ] as const;
 
 export const THEME_TOKEN_KEYS: readonly string[] = THEME_TOKEN_CATALOGUE.map(
@@ -518,6 +769,20 @@ export function validateThemeToken(key: unknown, value: unknown): TokenValidatio
   }
 
   const definition = themeTokenDefinition(key);
+  if (definition?.kind === "choice") {
+    /*
+     * A KEY FROM THIS TOKEN'S OWN LIST, and nothing else. Same principle as the
+     * font branch below and the hex branch under it: what arrives is discarded and
+     * what is stored is an index into a list this file owns, so no part of a
+     * request can reach the `<style>` element. The bound is the list, which is why
+     * it is declared beside the pixels rather than as a range somebody could widen.
+     */
+    const allowed = tokenOptionKeys(definition);
+    if (!allowed.includes(value)) {
+      return { ok: false, reason: `${key} must be one of: ${allowed.join(", ")}` };
+    }
+    return { ok: true, key, value };
+  }
   if (definition?.kind === "font") {
     /*
      * A whitelist INDEX, not a sanitised string. `fontStack` returns null for
@@ -570,6 +835,7 @@ function isOverrideSet(
   value: string | undefined,
 ): boolean {
   if (!value) return false;
+  if (token.kind === "choice") return tokenOptionKeys(token).includes(value);
   return token.kind === "font" ? fontStack(value) !== null : parseHex(value) !== null;
 }
 
@@ -703,10 +969,11 @@ export function themeContrastWarnings(
   overrides: ThemeOverrides,
 ): ContrastWarning[] {
   /*
-   * Colour tokens only. A typeface has no ratio to measure — the contrast a font
-   * participates in is between the INK and the GROUND, which the colour tokens
-   * already own. Running a font through this would compare a font stack to a
-   * background and report nonsense.
+   * Colour tokens only, and the `parseHex` guard in the loop below is what keeps it
+   * so. A typeface has no ratio to measure — the contrast a font participates in is
+   * between the INK and the GROUND, which the colour tokens already own — and
+   * neither has a corner radius, a shadow or a row height. Running any of them
+   * through this would compare a keyword to a background and report nonsense.
    */
   const warnings: ContrastWarning[] = [];
 

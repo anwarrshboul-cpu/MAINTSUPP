@@ -45,22 +45,24 @@ type ThemeToken = {
   group: string;
   description: string;
   /*
-   * Colour or typeface, decided by the SERVER. Read rather than inferred from the
-   * key, so a token added later cannot be mis-rendered by this file guessing from
-   * its name.
+   * Colour, typeface or bounded choice, decided by the SERVER. Read rather than
+   * inferred from the key, so a token added later cannot be mis-rendered by this
+   * file guessing from its name.
    */
-  kind: "colour" | "font";
+  kind: "colour" | "font" | "choice";
   value: string;
   isDefault: boolean;
   seedInput: string;
   /*
-   * The typefaces a workspace may choose, for a font token only. The server owns
-   * this list because it is the same list `validateThemeToken` refuses anything
-   * outside — a copy here would be a second source of truth for what is really a
-   * safety boundary, and the first divergence would be a select offering a face the
-   * API rejects.
+   * What a non-colour token may be set to: the typefaces for a font token, the
+   * corner or depth options for a choice token. The server owns the
+   * list because it is the same list `validateThemeToken` refuses anything outside
+   * — a copy here would be a second source of truth for what is really a safety
+   * boundary, and the first divergence would be a select offering something the API
+   * rejects. `note` is the server's own sentence about an option, for the same
+   * reason: one vocabulary, in one place.
    */
-  choices: Array<{ key: string; label: string }> | null;
+  choices: Array<{ key: string; label: string; note?: string }> | null;
 };
 
 type ContrastWarning = {
@@ -126,7 +128,7 @@ export function BrandColoursPanel() {
             <Icon name="image" size={19} />
           </span>
           <div>
-            <h2>Brand colours and typeface</h2>
+            <h2>Brand colours, typeface and surface style</h2>
             <p>{failure}</p>
           </div>
         </div>
@@ -183,7 +185,7 @@ export function BrandColoursPanel() {
           <Icon name="image" size={19} />
         </span>
         <div>
-          <h2>Brand colours and typeface</h2>
+          <h2>Brand colours, typeface and surface style</h2>
           <p>
             {canEdit
               ? "Applies to everyone in this workspace, on both the dark and light themes."
@@ -229,6 +231,29 @@ export function BrandColoursPanel() {
             their own face, and the pages handed to contractors and to people
             accepting an invitation keep the MAINTSUPP face.
           </p>
+          {/*
+            * THE SURFACE GROUP'S OWN BOUNDARY, on the same principle as the two
+            * paragraphs above: what a control reaches is a promise, so what it does
+            * NOT reach is said here rather than left for somebody to hunt for.
+            *
+            * Corners reach the 249 border-radius rules that read the product's
+            * radius scale (measured 2026-09-23), the Overview's cards among them.
+            * Corners written as their own measurement elsewhere, and everything
+            * deliberately circular — avatars, pills — keep their own shape: a pill
+            * that squared off with the panels would read as a bug, not a style.
+            *
+            * Spacing and row height are not offered, for the reasons
+            * `theme-tokens.ts` measures: the product sets padding per surface in
+            * 1,833 places and twelve of them read a variable, and the job board's
+            * row heights are literals a variable could not reach.
+            */}
+          <p className="brand-colours__scope">
+            Corner style and panel depth apply to the panels, cards, buttons,
+            inputs and dialogs that share the product’s own scales; anything drawn
+            deliberately round — avatars, status pills — stays round. Neither
+            changes the size of anything you tap or type into. General spacing is
+            not configurable.
+          </p>
         </div>
       </div>
 
@@ -237,7 +262,15 @@ export function BrandColoursPanel() {
           const value = draft[token.key] ?? token.value;
           return (
             <div className="brand-colour" key={token.key}>
-              {token.kind === "font" ? (
+              {/*
+                 * RE-POINTED, not widened by accident: this used to read
+                 * `token.kind === "font"`. A `choice` token — corners, depth — is
+                 * chosen from a list for exactly the same
+                 * safety reason a face is, so the two share one control and the test
+                 * that pinned the font branch now pins this one. A COLOUR is still
+                 * the only kind that gets a swatch.
+                 */}
+              {token.kind !== "colour" ? (
                 /*
                  * A SELECT, not a text field, and that is the safety boundary made
                  * visible. `validateThemeToken` accepts only a key from
@@ -300,6 +333,16 @@ export function BrandColoursPanel() {
               <div className="brand-colour__body">
                 <strong>{token.label}</strong>
                 <small>{token.description}</small>
+                {/* What the CHOSEN option does, in the server's own words. A face
+                    has no note; corners and depth do, and reading it
+                    under the control is how somebody knows what they picked
+                    without saving to find out. */}
+                {token.kind === "choice"
+                  ? (() => {
+                      const note = token.choices?.find((choice) => choice.key === value)?.note;
+                      return note ? <small className="brand-colour__note">{note}</small> : null;
+                    })()
+                  : null}
                 {/* A hex is worth showing literally; a font KEY is not — the
                     select already shows the label, and "inter" underneath it would
                     be noise. */}

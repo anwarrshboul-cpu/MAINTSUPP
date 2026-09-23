@@ -311,7 +311,7 @@ body[data-theme] .ov-dash.oi-dash .oi-section__subtitle {
   min-width: 0;
   padding: 16px 18px;
   border: 1px solid var(--ov-card-border);
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   background: var(--ov-card);
   color: var(--text-primary);
   text-decoration: none;
@@ -379,7 +379,7 @@ body[data-theme] .ov-dash.oi-dash .oi-kpi__caption {
   min-width: 0;
   padding: 16px 16px 18px;
   border: 1px solid var(--ov-card-border);
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   background: var(--ov-card);
 }
 
@@ -1219,7 +1219,7 @@ body[data-theme] .ov-dash.oi-dash .oi-volume__unit {
 /* ── Loading, failure and the empty section ───────────────────────────────── */
 
 .ov-dash.oi-dash .ov-skeleton {
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   background-color: var(--ov-frame);
 }
 
