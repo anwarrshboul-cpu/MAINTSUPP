@@ -1,0 +1,131 @@
+/*
+ * SETTINGS → SLA TARGETS (`sla-targets-panel.tsx`) — dashboard §9 item 25.
+ *
+ * Its own stylesheet, and not `.setting-row`: in `app/globals.css` a
+ * `.setting-row input` is the invisible 38x22 overlay of a toggle switch, so a
+ * number field placed in one is drawn at zero opacity. Tokens only, no hex, so
+ * the panel follows the light/dark toggle with the cards beside it.
+ *
+ * Phone first. One column at every width below 768, where each row puts its
+ * field under its label; from 768 the field sits beside it. Every input and the
+ * save button clear 44px on a touch pointer, per §1.8.
+ */
+
+.sla-targets__rows {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.sla-targets__row {
+  display: grid;
+  gap: 8px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+}
+
+.sla-targets__label {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sla-targets__label small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sla-targets__source {
+  font-variant-numeric: tabular-nums;
+}
+
+.sla-targets__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.sla-targets__field input {
+  width: 88px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.sla-targets__field input[aria-invalid="true"] {
+  border-color: var(--status-red-fg);
+}
+
+.sla-targets__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.sla-targets__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.sla-targets__note,
+.sla-targets__status {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sla-targets__error {
+  margin: 4px 0 0;
+  color: var(--status-red-fg);
+  font-size: 13px;
+}
+
+.sla-targets__history {
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+.sla-targets__history summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.sla-targets__history ul {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 768px) {
+  .sla-targets__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .sla-targets__row .sla-targets__error {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (pointer: coarse), (max-width: 767px) {
+  .sla-targets__field input,
+  .sla-targets__actions .primary-button {
+    min-height: 44px;
+  }
+
+  .sla-targets__history summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+  }
+}

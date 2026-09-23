@@ -133,6 +133,11 @@ export type JobIntelInput = {
   closures: ReadonlyArray<{ requestedDay: string | null; completedDay: string | null }>;
   /** `normalisePriority` from job-metrics, passed in so this module stays pure. */
   normalisePriority: (value: string | null | undefined) => OiPriorityKey;
+  /**
+   * The workspace's SLA compliance targets in effect (`sla-compliance-targets.ts`).
+   * Absent, the shipped 95% applies everywhere — the behaviour before §9 item 25.
+   */
+  slaTargets?: { overall: number; byPriority: Record<OiPriorityKey, number> };
 };
 
 /* ── The builders ─────────────────────────────────────────────────────────── */
@@ -287,6 +292,7 @@ const PRIORITY_LABEL = PRIORITY_DISPLAY_LABEL as Record<OiPriorityKey, string>;
 export function buildSlaByPriority(
   rows: JobIntelInput["priorityRows"],
   normalise: JobIntelInput["normalisePriority"],
+  targets?: JobIntelInput["slaTargets"],
 ): OiSlaByPriority[] {
   const tally = new Map<OiPriorityKey, { jobs: number; overdue: number }>();
   for (const row of rows) {
@@ -299,7 +305,14 @@ export function buildSlaByPriority(
   return PRIORITY_ORDER.filter((key) => key !== "not_recorded" || (tally.get(key)?.jobs ?? 0) > 0).map((key) => {
     const entry = tally.get(key) ?? { jobs: 0, overdue: 0 };
     const withinSla = Math.max(0, entry.jobs - Math.min(entry.overdue, entry.jobs));
-    return { key, label: PRIORITY_LABEL[key], jobs: entry.jobs, withinSla, percent: percentOf(withinSla, entry.jobs) };
+    return {
+      key,
+      label: PRIORITY_LABEL[key],
+      jobs: entry.jobs,
+      withinSla,
+      percent: percentOf(withinSla, entry.jobs),
+      targetPercent: targets?.byPriority[key] ?? SLA_TARGET_PERCENT,
+    };
   });
 }
 
@@ -424,8 +437,8 @@ export function buildJobIntel(input: JobIntelInput): OiIntel {
       percent: percentOf(input.breach.count, input.breach.pool),
     },
     timeToClose: summariseTimeToClose(input.closures, input.range),
-    slaByPriority: buildSlaByPriority(input.priorityRows, input.normalisePriority),
-    slaTargetPercent: SLA_TARGET_PERCENT,
+    slaByPriority: buildSlaByPriority(input.priorityRows, input.normalisePriority, input.slaTargets),
+    slaTargetPercent: input.slaTargets?.overall ?? SLA_TARGET_PERCENT,
   };
 }
 

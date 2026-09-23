@@ -46,6 +46,12 @@ export type OiSlaByPriority = {
   withinSla: number;
   /** withinSla ÷ jobs, whole percent; null when there are no jobs. */
   percent: number | null;
+  /**
+   * The target this priority is held to — the workspace's own version in
+   * effect from Settings → SLA targets, or the shipped 95% when none is saved.
+   * Dashboard §9 item 25: the target is data, not a constant.
+   */
+  targetPercent: number;
 };
 
 export type OiWeek = {
@@ -152,5 +158,6 @@ export type OiIntel = {
 
   /** NOW — the SLA metric per priority, with the target the bars are drawn against. */
   slaByPriority: OiSlaByPriority[];
+  /** The OVERALL target — the Priority & SLA gauge's. Each bar carries its own. */
   slaTargetPercent: number;
 };

@@ -78,6 +78,7 @@ import {
   isCalendarDay,
 } from "./overview-intel";
 import type { OiIntel } from "./overview-intel-contract";
+import { readSlaComplianceTargets } from "./sla-compliance-targets";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -740,7 +741,7 @@ export async function loadOverviewMetrics(
   const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1"]} or ${maintenanceRequests.tier} = 1)`;
   const requestedDay = dayOnly(maintenanceRequests.requestedAt);
   const completedDay = dayOnly(maintenanceRequests.completedAt);
-  const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, cohortRows, closureRows] = await Promise.all([
+  const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, cohortRows, closureRows, slaTargets] = await Promise.all([
     db
       .select({ tier: maintenanceRequests.tier, total: count() })
       .from(maintenanceRequests)
@@ -806,6 +807,9 @@ export async function loadOverviewMetrics(
           sql`${completedDay} < ${endExclusive}`,
         ),
       ),
+    /* The SLA compliance targets in effect for this workspace — one small read
+       of `sla_targets`, beside the queries it is drawn with. */
+    readSlaComplianceTargets(db, orgId),
   ]);
 
   const openJobs = Number(openRows[0]?.total ?? 0);
@@ -1098,6 +1102,8 @@ export async function loadOverviewMetrics(
         completedDay: row.completedDay ? String(row.completedDay) : null,
       })),
       normalisePriority,
+      /* §9 item 25: the targets the SLA gauge and bars are held to, from Settings. */
+      slaTargets,
     }),
   };
 }

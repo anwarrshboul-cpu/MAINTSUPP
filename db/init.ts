@@ -6929,6 +6929,26 @@ async function ensureOverviewFoundation(d1: D1DatabaseLike) {
   await addColumn(d1, "job_status_map", "meter_key", "TEXT");
 
   /*
+   * THE OVERVIEW'S SLA COMPLIANCE TARGETS — dashboard §9 item 25, 2026-09-23.
+   *
+   * A `compliance` stage in the same versioned table, holding a percentage in a
+   * column of its own (see `slaTargets` in db/schema.ts). NO SEED, like the theme
+   * tokens: an absent row means "the shipped 95%", and the first save in Settings
+   * writes version 1. The unique partial index is what makes "one current row
+   * per workspace, stage and priority" a property of the schema: two admins
+   * saving at once cannot both leave a current row, because the second insert is
+   * refused and its whole batch rolls back. Every existing row already satisfies
+   * it — the ladder seed writes one deterministic id per (organisation, stage,
+   * priority) and nothing has ever superseded one.
+   */
+  await addColumn(d1, "sla_targets", "target_percent", "INTEGER");
+  await d1
+    .prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS sla_targets_current_idx ON sla_targets(organisation_id, stage, priority_key) WHERE superseded_at IS NULL",
+    )
+    .run();
+
+  /*
    * THE FOUR STAGE TIMESTAMPS §2.4 and §4.4 measure.
    *
    * `status_changed_at` is "when this job entered the status it is in now" —

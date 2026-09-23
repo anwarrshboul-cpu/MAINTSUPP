@@ -158,6 +158,9 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   "a7bcc17c",
   /* 2 — the generation guard itself; it changes `db/init.ts` and the driver. */
   "e043666b",
+  /* 3 — dashboard §9 item 25: `sla_targets.target_percent` and the
+     one-current-row index `sla_targets_current_idx`. Additive only. */
+  "7ae1ea67",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

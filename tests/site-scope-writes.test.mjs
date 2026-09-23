@@ -376,7 +376,15 @@ test("the recycle bin and the archive: another store's job is not in this member
  * write door that does neither fails this test rather than shipping.
  */
 const JOB_WRITES =
-  /update\(maintenanceRequests\)|insert\(maintenanceRequests\)|update\(maintenanceBoardCells\)|insert\(maintenanceBoardCells\)|delete\(maintenanceBoardCells\)|update\(maintenanceGroupItems\)|insert\(maintenanceGroupItems\)|insert\(itemUpdates\)|update\(calendarEvents\)|insert\(calendarEvents\)|createSubmission\(|createBoardItem\(|moveItemsToGroup\(|duplicateBoardItems\(|sendJobsToBin\(|setBoardCell\(|createJobToken\(|createReminder\(|updateReminder\(|deleteReminder\(|restoreFromBin\(|revokeJobToken\(/;
+  /update\(maintenanceRequests\)|insert\(maintenanceRequests\)|update\(maintenanceBoardCells\)|insert\(maintenanceBoardCells\)|delete\(maintenanceBoardCells\)|update\(maintenanceGroupItems\)|insert\(maintenanceGroupItems\)|insert\(itemUpdates\)|update\(calendarEvents\)|insert\(calendarEvents\)|createSubmission\(|createBoardItem\(|moveItemsToGroup\(|duplicateBoardItems\(|sendJobsToBin\(|setBoardCell\(|createJobToken\(|createReminder\(|updateReminder\(|deleteReminder\(|restoreFromBin\(|revokeJobToken\(|applyAliasLink\(|applyAliasUnlink\(/;
+/*
+ * `applyAliasLink(` / `applyAliasUnlink(` added 2026-09-23 (dashboard §9 item
+ * 20): the contractor-alias route's job writes moved into
+ * `app/lib/contractor-alias-writes.ts` so they commit in one batch, and a scan
+ * of route files would otherwise stop seeing that route as a job writer at all.
+ * Naming the calls keeps the door in the inventory — the same way this list
+ * already names `createSubmission(` and `sendJobsToBin(`.
+ */
 const ASKS_THE_RULE = /job-site-scope|member-site-scope|outsideSiteScope/;
 const NOT_A_MEMBERS_WRITE = new Map([
   ["app/api/forms/[token]/submit/route.ts", "a public form: the grant is the form's token, not a member"],

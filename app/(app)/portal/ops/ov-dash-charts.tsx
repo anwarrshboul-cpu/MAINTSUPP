@@ -809,6 +809,7 @@ export function Donut({
   ariaLabel,
   geometry = DONUT_DEFAULT,
   centreValue,
+  centreLabel,
   formatValue,
   tipLines,
   gapPx = 0,
@@ -822,10 +823,21 @@ export function Donut({
   geometry?: DonutGeometry;
   /**
    * What the centre PRINTS, when that is not the bare total — "21%" on the
-   * compliance score, "£133,460" on a spend donut. The total still reaches the
-   * accessible name, so nothing is lost to a screen reader.
+   * compliance score, "£133,460" on a spend donut. The accessible name repeats
+   * it; where it is an abbreviation, pass `centreLabel` so the name carries the
+   * full value instead (this comment used to promise that happened by itself;
+   * it did not).
    */
   centreValue?: string;
+  /**
+   * The centre as a screen reader should hear it, when `centreValue` is an
+   * ABBREVIATION — "£29,087" for a centre that prints "£29.1k". Dashboard §1.9
+   * and §9 item 40: "screen-reader labels state the full value, not the
+   * abbreviated one". Measured on Production 2026-09-23: both repeat-spend
+   * donuts announced "£29.1k repeat spend". Absent, the printed value is used,
+   * which is right wherever the centre is already exact ("21%", "65").
+   */
+  centreLabel?: string;
   /** How a slice's value is written in the tooltip and the accessible name. */
   formatValue?: (value: number) => string;
   /** The tooltip's lines for a slice, when "x of y" and a percentage is not enough. */
@@ -897,7 +909,7 @@ export function Donut({
       <div
         className="ov-chart__plot"
         role={onSelect ? "group" : "img"}
-        aria-label={`${ariaLabel}: ${readout || "no data"}. ${printed} ${caption}`}
+        aria-label={`${ariaLabel}: ${readout || "no data"}. ${centreLabel ?? printed} ${caption}`}
       >
         <svg
           className="ov-chart__svg"
@@ -1617,14 +1629,45 @@ export function AreaTrend({
    * which is what the reference shows — so twelve equal columns would each be
    * offset half a column from the dot they belong to and the last one would
    * point at nothing. Each column instead covers half the gap either side of
-   * its own point and is clipped at the plot's edges, so the first and last are
-   * half-width and every tap lands on the month under the finger.
+   * its own point and is clipped at the plot's edges, so every tap lands on the
+   * month under the finger.
+   *
+   * EXCEPT THAT NO COLUMN FALLS BELOW 44PX WHERE THE PLOT HAS ROOM FOR IT —
+   * dashboard §9 item 40, "tap targets ≥ 44px". Clipped at the edge, the first
+   * and last columns are HALF a gap wide: measured on Production 2026-09-23 at
+   * 375, six months across a phone gave them 28.5px. Pulling only the edge
+   * boundaries in (the first attempt) moved the shortfall next door — measured
+   * on the Preview, 44 / 41.5 / 57 / 57 / 41.5 / 44.
+   *
+   * So each boundary k is held between `44·k` px from the left and `44·(n−k)` px
+   * from the right, and otherwise stays at its midpoint. Left of centre it is
+   * `max(midpoint, min(44k, 100% − 44(n−k)))`, right of centre the mirror,
+   * `min(midpoint, max(100% − 44(n−k), 44k))`. Where the plot is at least 44px
+   * per column both bounds are possible and every column clears 44 — 285px and
+   * six months gives 44 / 44 / 54.5 / 54.5 / 44 / 44, each still containing its
+   * own point. Where it is not (twelve months on a phone) the inner bound is the
+   * impossible one, loses to the midpoint, and the columns are exactly as they
+   * were: nothing is squeezed to zero to make another wider. On a desktop the
+   * midpoints already clear 44 and nothing moves. CSS `max()`/`min()`, because
+   * the plot's width in pixels is the browser's to know.
    */
   const spacing = values.length > 1 ? 100 / (values.length - 1) : 100;
+  const COLUMN_MIN_PX = 44;
+  const boundaryAt = (k: number): string => {
+    const n = values.length;
+    if (k <= 0) return "0%";
+    if (k >= n) return "100%";
+    const midpoint = `${spacing * (k - 0.5)}%`;
+    const fromLeft = `${COLUMN_MIN_PX * k}px`;
+    const fromRight = `calc(100% - ${COLUMN_MIN_PX * (n - k)}px)`;
+    return k <= n / 2
+      ? `max(${midpoint}, min(${fromLeft}, ${fromRight}))`
+      : `min(${midpoint}, max(${fromRight}, ${fromLeft}))`;
+  };
   const bandAt = (index: number) => {
-    const from = Math.max(0, xAt(index) - spacing / 2);
-    const to = Math.min(100, xAt(index) + spacing / 2);
-    return { left: from, width: Math.max(0, to - from) };
+    const from = boundaryAt(index);
+    const to = boundaryAt(index + 1);
+    return { left: from, width: `calc(${to} - ${from})` };
   };
 
   const line = eased.map((fraction, index) => `${xAt(index)},${yAt(fraction)}`).join(" ");
@@ -1704,7 +1747,7 @@ export function AreaTrend({
             <li
               key={point.label}
               className="ov-trend__hit-slot"
-              style={{ left: `${bandAt(index).left}%`, width: `${bandAt(index).width}%` }}
+              style={{ left: bandAt(index).left, width: bandAt(index).width }}
             >
               <button
                 type="button"

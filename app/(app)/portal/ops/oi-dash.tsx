@@ -516,20 +516,47 @@ function SectionHead({
   );
 }
 
-/** The one render where a section has nothing yet: its shape, shimmering. */
-function SectionSkeleton({ kpis, cards }: { kpis: number; cards: number }) {
+/*
+ * THE SHAPE EACH SECTION WILL HAVE — dashboard §9 item 44.
+ *
+ * "Skeletons occupy final dimensions; no layout shift when data arrives." The
+ * skeleton used to be four tiles and THREE cards for every section, and Job
+ * Intelligence draws ten: when its payload landed the section grew by six rows
+ * and pushed Spend & Reporting down the screen. Measured on Production
+ * 2026-09-23 at 1440: cumulative layout shift 0.13, of which 0.106 was that one
+ * push. So each skeleton now lists its section's real cards, in order, with the
+ * same span classes the real cards carry — "" for a plain card, `oi-span-md`
+ * and `oi-card--wide` exactly where the section puts them. A card added to a
+ * section is added here too; `tests/dashboard-s9-active-fixes.test.mjs` counts.
+ */
+const JOB_INTEL_SKELETON = ["", "", "", "", "", "", "", "", "oi-span-md", "oi-card--wide"] as const;
+const SPEND_SKELETON = ["", "", "", "", "", "", "oi-card--wide"] as const;
+const COMPLIANCE_SKELETON = ["", "", "oi-span-md", "oi-card--wide", "oi-card--wide"] as const;
+
+/**
+ * The one render where a section has nothing yet: its shape, shimmering.
+ *
+ * A skeleton tile carries the real tile's three lines — label, value, caption —
+ * as blank text, so it is exactly as tall as the tile that replaces it rather
+ * than a guessed pixel height.
+ */
+function SectionSkeleton({ kpis, cards }: { kpis: number; cards: readonly string[] }) {
   return (
     <>
       {kpis > 0 ? (
         <div className="oi-kpis">
           {Array.from({ length: kpis }, (_, slot) => (
-            <div key={slot} className="oi-kpi ov-skeleton oi-skeleton--kpi" />
+            <div key={slot} className="oi-kpi ov-skeleton oi-skeleton--kpi" aria-hidden="true">
+              <span className="oi-kpi__label">&nbsp;</span>
+              <span className="oi-kpi__value">&nbsp;</span>
+              <span className="oi-kpi__caption">&nbsp;</span>
+            </div>
           ))}
         </div>
       ) : null}
       <div className="oi-grid">
-        {Array.from({ length: cards }, (_, slot) => (
-          <div key={slot} className="oi-card ov-skeleton oi-skeleton--card" />
+        {cards.map((span, slot) => (
+          <div key={slot} className={`oi-card ov-skeleton oi-skeleton--card${span ? ` ${span}` : ""}`} />
         ))}
       </div>
     </>
@@ -576,7 +603,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
             </p>
           </div>
         ) : (
-          <SectionSkeleton kpis={4} cards={3} />
+          <SectionSkeleton kpis={4} cards={JOB_INTEL_SKELETON} />
         )}
       </section>
     );
@@ -606,9 +633,11 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
   const { sla, aging, breachRisk, timeToClose } = intel;
   const agingPairs = oiAgingPairs(aging);
   const slaTone: OiTone =
-    /* The SLA target's thresholds — the same ones the per-priority bars use,
-       so one percentage is never teal on the gauge and amber on a bar. */
-    sla.percent === null ? "muted" : toneName(qualityTone(sla.percent, SLA_TARGET_ARC));
+    /* The SLA target's thresholds, built the same way the per-priority bars
+       build theirs, so one percentage is never teal on the gauge and amber on a
+       bar held to the same target. The gauge's target is the workspace's
+       OVERALL one (§9 item 25), 95% until Settings says otherwise. */
+    sla.percent === null ? "muted" : toneName(qualityTone(sla.percent, heldTo(intel.slaTargetPercent)));
   const completionTone: OiTone =
     intel.completionRate === null ? "muted" : toneName(qualityTone(intel.completionRate, QUALITY_ARC));
 
@@ -660,32 +689,40 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
 
   /* ── SLA by priority ───────────────────────────────────────────────────── */
 
+  /*
+   * EACH BAR IS HELD TO ITS OWN PRIORITY'S TARGET — dashboard §9 item 25. The
+   * targets are the workspace's versions in effect (Settings → SLA targets),
+   * carried on each row by the server; a row from a server that predates them
+   * falls back to the overall target, and that to the shipped 95%.
+   */
   const target = intel.slaTargetPercent;
   const slaRows = intel.slaByPriority.map((row) => {
     const labels = bySlice(intel.priority, row.key)?.labels ?? [row.key];
     const destination = priorityDrill(labels);
+    const rowTarget = row.targetPercent ?? target;
     const colour =
       row.percent === null
         ? OI_COLOUR.muted
-        : row.percent >= target
-          ? OI_COLOUR.primary
-          : row.percent >= SLA_TARGET_ARC.warn
-            ? OI_COLOUR.amber
-            : OI_COLOUR.critical;
+        : toneColourFor(qualityTone(row.percent, heldTo(rowTarget)));
     return {
       key: row.key,
       label: row.label,
       jobs: row.jobs,
       percent: row.percent,
+      target: rowTarget,
       colour,
       href: destination.href,
       onActivate: destination.go,
       ariaLabel:
         row.percent === null
           ? `${row.label} priority: no open jobs. Opens the jobs board filtered to this priority.`
-          : `${row.label} priority: ${row.percent}% of ${plural(row.jobs, "open job", "open jobs")} within SLA, against a ${target}% target. Opens these jobs.`,
+          : `${row.label} priority: ${row.percent}% of ${plural(row.jobs, "open job", "open jobs")} within SLA, against a ${rowTarget}% target. Opens these jobs.`,
     };
   });
+  /* One number in the pill when every bar shares it; otherwise the pill says
+     they differ and each bar's own marker and label carry its target. */
+  const rowTargets = [...new Set(slaRows.map((row) => row.target))];
+  const sharedTarget = rowTargets.length === 1 ? rowTargets[0] : null;
 
   return (
     <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
@@ -1010,13 +1047,17 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         {/* Wide — SLA compliance by priority */}
         <OiCard
           title="SLA Compliance by Priority Tier"
-          pill={`Priority × SLA target ${target}%`}
+          pill={sharedTarget === null ? "Priority × SLA targets" : `Priority × SLA target ${sharedTarget}%`}
           wide
         >
           <OiTargetBars
             rows={slaRows}
             target={target}
-            ariaLabel={`Open jobs within SLA by priority, against a ${target}% target`}
+            ariaLabel={
+              sharedTarget === null
+                ? "Open jobs within SLA by priority, each against its own target"
+                : `Open jobs within SLA by priority, against a ${sharedTarget}% target`
+            }
           />
         </OiCard>
       </div>
@@ -1029,6 +1070,21 @@ function toneName(tone: "good" | "warn" | "poor"): OiTone {
   // Good is the approved green (on target, healthy, SLA met); turquoise stays
   // the brand and the default series, not a verdict.
   return tone === "good" ? "green" : tone === "warn" ? "amber" : "critical";
+}
+
+/**
+ * An SLA target as the policy shape `qualityTone` reads: at or above the
+ * target is good, and amber runs down to the shipped warning floor (80%) — or
+ * no lower than the target itself, when a workspace sets one beneath 80. At the
+ * shipped 95% this IS `SLA_TARGET_ARC`, so nothing changes until Settings does.
+ */
+function heldTo(target: number) {
+  return { good: target, warn: Math.min(SLA_TARGET_ARC.warn, target) };
+}
+
+/** The per-priority bars' three colours, exactly as they were drawn before. */
+function toneColourFor(tone: "good" | "warn" | "poor"): string {
+  return tone === "good" ? OI_COLOUR.primary : tone === "warn" ? OI_COLOUR.amber : OI_COLOUR.critical;
 }
 
 /* ── Section 2 — Spend & Reporting ────────────────────────────────────────── */
@@ -1047,7 +1103,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
     return (
       <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
         <SectionHead id={titleId} title="Spend & Reporting" subtitle={subtitle} />
-        {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={4} cards={3} />}
+        {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={4} cards={SPEND_SKELETON} />}
       </section>
     );
   }
@@ -1294,6 +1350,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
                 slices={issueSlices}
                 total={repeat.spendPence}
                 centreValue={ovPoundsShort(repeat.spendPence)}
+                centreLabel={rpPounds(repeat.spendPence)}
                 caption="repeat spend"
                 geometry={DONUT}
                 gapPx={2}
@@ -1327,6 +1384,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
                   slices={siteSlices}
                   total={repeat.spendPence}
                   centreValue={ovPoundsShort(repeat.spendPence)}
+                centreLabel={rpPounds(repeat.spendPence)}
                   caption={oneSite ? repeat.bySite[0].label : "repeat spend"}
                   geometry={DONUT}
                   gapPx={2}
@@ -1425,7 +1483,7 @@ function ComplianceSection({
     return (
       <section className={sectionClass} aria-labelledby={titleId} aria-busy={query.stale}>
         <SectionHead id={titleId} title="Compliance" subtitle={subtitle} />
-        {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={0} cards={3} />}
+        {error ? <SectionError error={error} onRetry={reload} /> : <SectionSkeleton kpis={0} cards={COMPLIANCE_SKELETON} />}
       </section>
     );
   }

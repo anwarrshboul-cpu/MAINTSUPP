@@ -119,7 +119,20 @@ test("an unknown address gets a real 404 page", async () => {
   // vinext builds a boundary page's head from the layouts only: an export here would be dead.
   assert.doesNotMatch(page, /export const metadata/);
   assert.match(page, /<Link className="btn btn--primary" href="\/">/);
-  assert.match(page, /marketing\.css\?url/, "the root not-found has no group layout to bring the styles");
+  /*
+   * Re-pointed 2026-09-23 (dashboard §9 item 42): the root not-found still has
+   * no group layout to bring the styles, so it still brings them itself — but
+   * through the client component `NotFoundStyles`, because a `<link>` written in
+   * this server component rode every route's payload and preloaded the
+   * marketing stylesheet on the whole portal. The contract is the same; its home
+   * moved one file.
+   */
+  assert.match(page, /<NotFoundStyles \/>/, "the root not-found has no group layout to bring the styles");
+  assert.doesNotMatch(page, /<link rel="stylesheet"/, "a stylesheet link here becomes a preload on every route");
+  const styles = await read("app/not-found-styles.tsx");
+  assert.match(styles, /^"use client";/, "only a client reference keeps the link out of every page's payload");
+  assert.match(code(styles), /marketing\.css\?url/);
+  assert.match(code(styles), /<link rel="stylesheet" href=\{marketingCss\} \/>/);
   const title = code(await read("app/not-found-title.tsx"));
   assert.match(title, /document\.title = title;/);
 });
