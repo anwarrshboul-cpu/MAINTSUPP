@@ -34,6 +34,33 @@
  *
  * NOTHING HERE TOUCHES WHAT IS SENT TO THE API. This is display only; ISO
  * strings on the wire and in the database are unaffected.
+ *
+ * THE SHORT MONTH IS OURS, NOT THE RUNTIME'S — MEASURED 2026-09-23.
+ *
+ * Asking for en-GB is not enough, because the runtimes this product renders in
+ * do not agree about what en-GB says. Measured on the same instant:
+ *
+ *   · Chromium, and Node on a developer machine: `22 Sept 2026`
+ *   · **Vercel's Node runtime in Production: `22 Sep 2026`**
+ *
+ * CLDR renamed en-GB's abbreviated September from "Sep" to "Sept", and Vercel's
+ * bundled ICU predates that. So this function printed one word on the server
+ * and another in the browser, for any label rendered on both sides.
+ *
+ * WHAT THIS DID NOT CAUSE, and a first reading got wrong: the React #418 on the
+ * Contractors and Reports screens. With the browser's calendar day equal to the
+ * server's, neither build threw, with or without this table. Moving the
+ * browser's zone a day behind made both builds throw. The mismatched text
+ * was the period's END DAY, printed by `period-model.ts`'s own table, so that
+ * fix lives in `period-model.ts` ("TODAY IS THE PRODUCT'S DAY").
+ *
+ * This table still earns its place. A product that has decided how it writes a
+ * date should not leave one of the words to whichever ICU its host ships.
+ * `formatToParts` puts `SHORT_MONTHS` exactly where the locale put the month, so
+ * the order and the separators stay the locale's while the word stays ours.
+ *
+ * The word chosen is **"Sep"**. It is what Production's server has always
+ * printed, and what this codebase's four other month tables already say.
  */
 
 /** What every formatter prints when there is no date. */
@@ -42,6 +69,9 @@ export const NO_DATE = "—";
 const DAY_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 type Form =
+  /* Internal: the month as a number, so `assemble` can index the table in the
+     zone the label is rendered in. Never exported as a written form. */
+  | "monthNumber"
   | "numeric"
   | "short"
   | "long"
@@ -53,6 +83,7 @@ type Form =
   | "shortTime";
 
 const OPTIONS: Record<Form, Intl.DateTimeFormatOptions> = {
+  monthNumber: { month: "numeric" },
   numeric: { day: "2-digit", month: "2-digit", year: "numeric" },
   short: { day: "numeric", month: "short", year: "numeric" },
   long: { day: "numeric", month: "long", year: "numeric" },
@@ -77,6 +108,37 @@ const OPTIONS: Record<Form, Intl.DateTimeFormatOptions> = {
     hour12: false,
   },
 };
+
+/**
+ * The abbreviated months, as this product writes them — exported so nothing has
+ * to guess and nothing has to ask ICU.
+ *
+ * "Sep", not CLDR's current en-GB "Sept", and that is a decision rather than an
+ * oversight: four hand-written tables in this codebase already say "Sep"
+ * (`period-model.ts`, `dashboard-aggregates.ts`, `overview-aggregates.ts`,
+ * `finance-landing.tsx`) and Production has always displayed "Sep", because
+ * Vercel's ICU says so too. Taking CLDR's newer word here would have changed the
+ * wording on board cells, tables and certificates across the estate to fix a
+ * mismatch that is about determinism, not vocabulary. One word, everywhere, and
+ * `tests/date-month-determinism.test.mjs` holds the five tables level.
+ */
+export const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/** Which forms print a month NAME in its short form, and so take the table. */
+const SHORT_MONTH_FORMS = new Set<Form>(["short", "dayMonth", "monthShort", "shortTime"]);
 
 /*
  * `Intl.DateTimeFormat` is expensive to construct and these are hot — the board
@@ -120,13 +182,41 @@ function render(
     if (dayOnly) {
       const [, year, month, day] = dayOnly;
       const utc = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
-      return formatter(form, "UTC").format(utc);
+      /* A bare day is read in UTC (see the header), so its month is the one the
+         string names — no zone can move it. */
+      return assemble(form, "UTC", utc, Number(month) - 1);
     }
   }
 
   const when = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(when.getTime())) return fallback;
-  return formatter(form, options.timeZone).format(when);
+  return assemble(form, options.timeZone, when);
+}
+
+/**
+ * The locale's layout with our month word in it.
+ *
+ * `formatToParts` is what makes this safe: the order, the separators and the
+ * time are still exactly what `Intl` produced for en-GB, and only the token ICU
+ * labelled `month` is replaced — and only for the forms that print it as a NAME
+ * (a `2-digit` month is a number and is left alone). A form with no month part
+ * never enters the loop.
+ *
+ * `monthIndex` is passed for a date-only value, whose month is in the string
+ * itself. Otherwise it is read back through `Intl` in the SAME zone the label is
+ * being rendered in, so a moment near midnight cannot take the month from one
+ * zone and the day from another.
+ */
+function assemble(form: Form, timeZone: string | undefined, when: Date, monthIndex?: number): string {
+  const parts = formatter(form, timeZone).formatToParts(when);
+  if (!SHORT_MONTH_FORMS.has(form)) return parts.map((part) => part.value).join("");
+  const index =
+    monthIndex ??
+    Number(formatter("monthNumber", timeZone).format(when)) - 1;
+  const name = SHORT_MONTHS[index] ?? null;
+  return parts
+    .map((part) => (part.type === "month" && name ? name : part.value))
+    .join("");
 }
 
 /** `24/11/2026` — the default written form, and what a form field echoes. */

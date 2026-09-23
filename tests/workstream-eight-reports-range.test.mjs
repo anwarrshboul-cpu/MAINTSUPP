@@ -137,10 +137,19 @@ test("a named day is that whole day, on both sides of a clock change", () => {
    * local midnight on the 9th lands at 23:00 on the 7th, so the window was
    * 59 minutes long, over the wrong date, and the caption read "7 Mar 2026"
    * with complete confidence. Every job raised on the 8th was dropped.
+   *
+   * RE-POINTED 2026-09-23: "the 9th" is now the 9th IN THE PRODUCT'S CALENDAR.
+   * `resolvePeriod` takes "today" from Europe/London (see "TODAY IS THE PRODUCT'S
+   * DAY" in period-model.ts, the fix for React #418 when the server and the
+   * browser were on different dates). The clock used to be each zone's local
+   * noon. In Auckland that is 23:00 on the 8th in London, so its "yesterday" is
+   * the 7th, correctly under the new rule. The contract this test exists for is
+   * unchanged and still checked in every zone: yesterday is one whole calendar
+   * day, as long as the local clock made it, with both ends of it inside.
    */
   const out = runInZones(`
     import * as period from "./period-model.mjs";
-    const now = new Date(2026, 2, 9, 12, 0, 0).getTime();
+    const now = Date.UTC(2026, 2, 9, 12, 0, 0);
     const y = period.resolvePeriod("yesterday", now);
     const early = new Date(2026, 2, 8, 0, 30, 0).getTime();
     const late = new Date(2026, 2, 8, 23, 30, 0).getTime();
