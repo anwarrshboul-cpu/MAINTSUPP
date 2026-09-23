@@ -37,32 +37,30 @@
  *
  * THE SHORT MONTH IS OURS, NOT THE RUNTIME'S — MEASURED 2026-09-23.
  *
- * Asking for en-GB is not enough, because the two runtimes this product renders
- * in do not agree about what en-GB says. Measured on the same instant:
+ * Asking for en-GB is not enough, because the runtimes this product renders in
+ * do not agree about what en-GB says. Measured on the same instant:
  *
  *   · Chromium, and Node on a developer machine: `22 Sept 2026`
  *   · **Vercel's Node runtime in Production: `22 Sep 2026`**
  *
- * CLDR renamed en-GB's abbreviated September from "Sep" to "Sept"; Vercel's
- * bundled ICU predates that. So the SAME function printed two different words
- * depending on which side of the wire it ran on, and the portal renders these
- * labels on BOTH: the server sends the first paint, the browser hydrates it.
- * React refused the mismatch with error #418 ("the server rendered text didn't
- * match the client") on the Contractors and Reports screens of PRODUCTION —
- * found by a browser sweep on 2026-09-23, reproducible on builds going back at
- * least to #90, and invisible to every test in the suite because the suite's
- * Node agrees with the browser.
+ * CLDR renamed en-GB's abbreviated September from "Sep" to "Sept", and Vercel's
+ * bundled ICU predates that. So this function printed one word on the server
+ * and another in the browser, for any label rendered on both sides.
  *
- * The fix is not another locale argument. A product that has decided how it
- * writes a date cannot leave one of the words to whichever ICU its host happens
- * to ship: `SHORT_MONTHS` below is the answer, and `formatToParts` puts it in
- * the place ICU chose, so the order and the separators stay the locale's while
- * the word stays ours. Only September differed in the runtimes measured — the
- * table removes the whole class of difference rather than that one instance.
+ * WHAT THIS DID NOT CAUSE, and a first reading got wrong: the React #418 on the
+ * Contractors and Reports screens. With the browser's calendar day equal to the
+ * server's, neither build threw, with or without this table. Moving the
+ * browser's zone a day behind made both builds throw. The mismatched text
+ * was the period's END DAY, printed by `period-model.ts`'s own table, so that
+ * fix lives in `period-model.ts` ("TODAY IS THE PRODUCT'S DAY").
  *
- * The word chosen is **"Sep"**, which is what Production has always shown and
- * what this codebase's four other month tables already say, so nothing visible
- * changes: the defect was two answers, not the wrong answer.
+ * This table still earns its place. A product that has decided how it writes a
+ * date should not leave one of the words to whichever ICU its host ships.
+ * `formatToParts` puts `SHORT_MONTHS` exactly where the locale put the month, so
+ * the order and the separators stay the locale's while the word stays ours.
+ *
+ * The word chosen is **"Sep"**. It is what Production's server has always
+ * printed, and what this codebase's four other month tables already say.
  */
 
 /** What every formatter prints when there is no date. */

@@ -1,32 +1,33 @@
 /**
  * ONE WORD FOR A MONTH, WHATEVER RUNTIME RENDERS IT.
  *
- * A browser sweep of PRODUCTION on 2026-09-23 found React error #418 — "the
- * server rendered text didn't match the client" — on `/dashboard/contractors`
- * and `/dashboard/reports`, at 1440 and 390, on every build tested back to #90.
- * The cause, measured on one instant:
+ * Measured on one instant, both asked for en-GB:
  *
  *   · Chromium, and Node on a developer machine: `22 Sept 2026`
  *   · Vercel's Node runtime in Production:       `22 Sep 2026`
  *
- * Both were asked for en-GB. CLDR renamed en-GB's abbreviated September from
- * "Sep" to "Sept"; Vercel's bundled ICU predates that. Both screens render a
- * date range in their FIRST paint — the server sends it, the browser hydrates it
- * — so React found two different words in the same text node and threw the tree
- * away. No test in the suite could see it, because the suite's Node agrees with
- * the browser and disagrees with Production.
+ * CLDR renamed en-GB's abbreviated September from "Sep" to "Sept", and Vercel's
+ * bundled ICU predates that. So `format-date.ts` printed one word on the server
+ * and another in the browser, and no test could see it, because the suite's
+ * Node agrees with the browser.
+ *
+ * NOT THE CAUSE OF THE #418 IT WAS FIRST BLAMED FOR. React's #418 on
+ * `/dashboard/contractors` and `/dashboard/reports` was measured on a Preview:
+ * with the browser's calendar day equal to the server's, no build threw; a day
+ * apart, every build threw, this change included. The mismatch was the period's
+ * end DAY. `tests/period-product-day.test.mjs` holds that fix.
  *
  * So the month name is no longer ICU's to choose. `SHORT_MONTHS` in
  * `app/lib/format-date.ts` is the product's own table, `formatToParts` puts it
  * where the locale wanted the month, and this file holds the rule:
  *
  *   1. every short form reads the table, so no runtime can answer differently;
- *   2. the table says "Sep" — what Production has always displayed and what the
- *      four hand-written tables elsewhere in the codebase already say, so the
- *      fix changes nothing a user sees;
+ *   2. the table says "Sep", which is what Production's server has always printed
+ *      and what the four hand-written tables elsewhere in the codebase already
+ *      say. A browser whose ICU says "Sept" now prints "Sep" in these forms too;
  *   3. **all five tables agree**, which is the part a future change is most
- *      likely to break: adding "Sept" to one of them would reintroduce exactly
- *      this defect in a different place.
+ *      likely to break: adding "Sept" to one of them would bring back two answers
+ *      for one month.
  */
 
 import assert from "node:assert/strict";
@@ -68,7 +69,7 @@ test("every written form takes its month from the table, not from the host's ICU
   assert.equal(formatLongDate("2026-09-22"), "22 September 2026");
   assert.equal(formatMonthYear("2026-09-22"), "September 2026");
   assert.equal(formatDate("2026-09-22"), "22/09/2026");
-  /* Every month, in the form the hydration error was found in. */
+  /* Every month, in the short form the two runtimes disagreed about. */
   for (const [index, name] of EXPECTED.entries()) {
     const month = String(index + 1).padStart(2, "0");
     assert.equal(formatShortDate(`2026-${month}-05`), `5 ${name} 2026`);

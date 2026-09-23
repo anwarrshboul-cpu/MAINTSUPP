@@ -37,11 +37,78 @@
  * the rows on the edge of the window fall on the wrong side of it. `parseStamp`
  * reads both forms as the wall-clock they plainly are, which is also what makes
  * a SQL check against `substr(requested_at, 1, 10)` come out equal.
+ *
+ * "TODAY" IS THE PRODUCT'S DAY, NOT THE RENDERER'S — measured 2026-09-23.
+ *
+ * Local time is the right way to READ a stamp, but it was also how "today" was
+ * decided, and this model runs in two places with two different locals: Vercel
+ * renders the first paint in UTC, and the browser hydrates it in its own zone.
+ * Whenever the two dates differ, the period's label differs too, and React threw
+ * #418 on /dashboard/contractors and /dashboard/reports. That was measured on a
+ * Preview with the browser's zone moved a day behind the server:
+ * `1 Oct 2025 – 23 Sep 2026` from the server, `– 22 Sep 2026` in the browser.
+ * For a UK browser the window is the midnight hour of every BST night.
+ *
+ * So `resolvePeriod` takes "today" from Europe/London, the calendar the stored
+ * stamps are written in, re-expressed on the local clock by `calendarNow`. For a
+ * browser in the UK that is the identity, so nothing it shows changes. The server
+ * stops being an hour behind in summer, and a browser elsewhere reports the same
+ * UK day as everybody else. The ROLLING windows ("last 30 days") are still
+ * measured from the real instant: they have no calendar edge to disagree about.
  */
 
 import { analyticsWindow } from "./dashboard-meters";
 
 export const DAY_MS = 86_400_000;
+
+/** The calendar this product's stored wall-clock stamps are written in. */
+export const PRODUCT_TIME_ZONE = "Europe/London";
+
+let productWallClock: Intl.DateTimeFormat | null | undefined;
+
+/**
+ * `now`, re-expressed so that THIS runtime's local calendar reads the product's
+ * wall clock: the local `Date` fields of the result are London's date and time
+ * at `now`. On a runtime already in UK time it returns `now` unchanged.
+ *
+ * Only the calendar functions below read it. Anything that compares against a
+ * real instant keeps using `now`. If this runtime has no zone data it degrades to
+ * `now`, which is the behaviour before this existed rather than a failure.
+ */
+export function calendarNow(now: number): number {
+  if (!Number.isFinite(now)) return now;
+  if (productWallClock === undefined) {
+    try {
+      productWallClock = new Intl.DateTimeFormat("en-GB", {
+        timeZone: PRODUCT_TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23",
+      });
+    } catch {
+      productWallClock = null;
+    }
+  }
+  if (!productWallClock) return now;
+  const field: Record<string, number> = {};
+  for (const part of productWallClock.formatToParts(new Date(now))) {
+    if (part.type !== "literal") field[part.type] = Number(part.value);
+  }
+  const instant = new Date(now);
+  return new Date(
+    field.year,
+    field.month - 1,
+    field.day,
+    field.hour,
+    field.minute,
+    field.second,
+    instant.getMilliseconds(),
+  ).getTime();
+}
 
 /** How many buckets a sparkline draws. Matches `meterTrendBuckets`. */
 export const PERIOD_TREND_BUCKETS = 12;
@@ -269,11 +336,15 @@ function made(start: number, end: number): PeriodWindow {
  */
 export function resolvePeriod(period: string, now: number): PeriodWindow {
   const token = (period ?? "").trim();
-  const clock = new Date(now);
+  /* The product's day, not this runtime's: see "TODAY IS THE PRODUCT'S DAY" in
+     the header. The calendar edges below read `day`; the rolling windows and
+     "all" read `now`, because they are measured from the real instant. */
+  const day = calendarNow(now);
+  const clock = new Date(day);
   const year = clock.getFullYear();
   const month = clock.getMonth();
-  const today = startOfDay(now);
-  const toDate = endOfDay(now);
+  const today = startOfDay(day);
+  const toDate = endOfDay(day);
 
   if (!token || token === "all") {
     return {
@@ -309,9 +380,9 @@ export function resolvePeriod(period: string, now: number): PeriodWindow {
       return made(start, endOfDay(start));
     }
     case "week":
-      return made(startOfWeek(now), toDate);
+      return made(startOfWeek(day), toDate);
     case "week-1": {
-      const start = addDays(startOfWeek(now), -7);
+      const start = addDays(startOfWeek(day), -7);
       return made(start, endOfDay(addDays(start, 6)));
     }
     case "mtd":
