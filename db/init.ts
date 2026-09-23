@@ -403,6 +403,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      navigation). See `ensureSiteNavigation`. */
   await ensureSiteNavigation(d1);
 
+  /* Decision L — the built-in pages' copy, as overrides on the shipped words.
+     One guarded table, no seed: an empty table IS the site as it ships. See
+     `ensureSiteContent`. */
+  await ensureSiteContent(d1);
+
   /* Decision K — the website's media library, in its own private bucket. Two
      guarded tables, one guarded column on `upload_sessions`; no seed. See
      `ensureCmsMedia`. */
@@ -6683,6 +6688,41 @@ async function ensureSiteNavigation(d1: D1DatabaseLike) {
   await d1
     .prepare(
       `CREATE TABLE IF NOT EXISTS site_navigation (
+         id TEXT PRIMARY KEY,
+         document TEXT NOT NULL,
+         revision INTEGER NOT NULL DEFAULT 1,
+         updated_by_email TEXT,
+         updated_at TEXT NOT NULL
+       )`,
+    )
+    .run();
+}
+
+/**
+ * THE BUILT-IN PAGES' COPY — decision L.
+ *
+ * One row, `id = 'public'`, holding every OVERRIDE staff have saved for the
+ * homepage, `/contractors` and `/faqs`: a heading here, a paragraph there, the
+ * hero's photograph, the shared questions, each page's title and description, and
+ * which homepage sections are shown and in what order. Validated against
+ * `app/lib/site-content.ts` before it is stored and again when it is read.
+ *
+ * THE SAME SHAPE AS `site_navigation`, AND FOR THE SAME REASONS: installation-wide
+ * (there is one maintsupp.com), one document rather than a row per field (a save
+ * is one decision, and a visitor must never read half of it), `revision` so two
+ * editors cannot overwrite each other unseen, and NO SEED.
+ *
+ * NO SEED IS THE LOAD-BEARING PART. The pages' words live in
+ * `app/(marketing)/_sections/copy.ts`; this row holds only what DIFFERS from
+ * them, and a field edited back to the shipped wording is removed from it. So an
+ * empty table is the site exactly as it ships — which is why the public site
+ * cannot go empty when this table is, and why "reset" removes the row rather than
+ * writing a copy of the defaults that would then drift from the code.
+ */
+async function ensureSiteContent(d1: D1DatabaseLike) {
+  await d1
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS site_content (
          id TEXT PRIMARY KEY,
          document TEXT NOT NULL,
          revision INTEGER NOT NULL DEFAULT 1,

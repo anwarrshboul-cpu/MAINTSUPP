@@ -15,6 +15,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -471,7 +472,19 @@ async function call(pathName, init = {}) {
   return { status: response.status, body };
 }
 
-/** One whole upload through the real route: start, each part, complete. */
+/**
+ * One whole upload through the real route: start, each part, complete.
+ *
+ * BOTH TRANSPORTS, because the two environments this file is pointed at use
+ * different ones and the same assertions have to hold in each. Local Miniflare
+ * proxies every part through the server; a deployed Preview signs a part URL and
+ * the bytes go straight to the bucket, which is the path carrying #78's
+ * `x-amz-copy-source` defence — the completer declares each part's MD5 and the
+ * server compares it against the ETag the bucket stored. This helper used to
+ * THROW on the direct transport, which made the round trip below unrunnable
+ * against a real provider; the one path that most needed testing was the one it
+ * refused to test.
+ */
 async function uploadThrough(headers, name, type, bytes, extra = {}) {
   const start = await call("/api/cms-media/upload", {
     headers,
@@ -482,7 +495,26 @@ async function uploadThrough(headers, name, type, bytes, extra = {}) {
   const parts = [];
   for (let number = 1; number <= start.body.partCount; number += 1) {
     const slice = bytes.subarray((number - 1) * start.body.partSize, number * start.body.partSize);
-    if (start.body.transport === "direct") throw new Error("the live test runs against a proxied store");
+    if (start.body.transport === "direct") {
+      const signed = await call("/api/cms-media/upload", {
+        headers,
+        method: "POST",
+        body: JSON.stringify({ action: "sign-part", key: start.body.key, uploadId: start.body.uploadId, partNumber: number }),
+      });
+      assert.equal(signed.status, 200, `a part URL was refused: ${JSON.stringify(signed.body)}`);
+      const sent = await fetch(signed.body.url, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: slice,
+      });
+      assert.ok(sent.ok, `the bucket refused part ${number}: ${sent.status}`);
+      /* The MD5 the browser would declare for the bytes it sent. `complete`
+         compares it against what the bucket stored, so a substituted part is
+         refused — declaring it here is the test playing the browser's part, not
+         a shortcut around the check. */
+      parts.push({ partNumber: number, etag: createHash("md5").update(slice).digest("hex") });
+      continue;
+    }
     const response = await fetch(`${BASE_URL}/api/cms-media/upload`, {
       method: "PUT",
       headers: { ...headers, "content-type": "application/octet-stream", "X-Upload-Key": start.body.key, "X-Upload-Id": start.body.uploadId, "X-Upload-Part": String(number) },
@@ -495,21 +527,43 @@ async function uploadThrough(headers, name, type, bytes, extra = {}) {
     method: "POST",
     body: JSON.stringify({ action: "complete", key: start.body.key, uploadId: start.body.uploadId, parts, ...(extra.complete ?? {}) }),
   });
+  /* A REFUSED `complete` leaves the session pending and its multipart upload open
+     in the bucket, and this file's own cleanup used to walk away from it — one was
+     found sitting on Staging after a QA run. A refused upload aborts itself. */
+  if (complete.status !== 200 && complete.status !== 201) {
+    await call("/api/cms-media/upload", {
+      headers,
+      method: "POST",
+      body: JSON.stringify({ action: "abort", key: start.body.key, uploadId: start.body.uploadId }),
+    });
+  }
   return { start, complete };
 }
 
 test("live: nobody outside platform staff reads, uploads or deletes website media", { skip: !serverUp }, async () => {
   assert.ok([401, 403].includes((await call("/api/cms-media")).status));
+  /*
+   * `x-maintsupp-identity` is the LOCAL testing switcher, and `demoIdentityAllowed()`
+   * refuses it in production — so a deployed host reads these requests as anonymous
+   * and answers 401 where a dev server answers 403. Both are refusals, and which
+   * one arrives is a fact about the environment rather than about the rule, so the
+   * assertion accepts either and the test states why. (It demanded 403 and
+   * therefore failed against every deployed Preview, which looked like a defect in
+   * the product and was a defect in the test.) A REAL non-platform membership is
+   * refused with a real 403 — proven against the deployed Preview in this batch's
+   * QA with an invited workspace admin, which the switcher cannot stand in for.
+   */
   for (const identity of ["admin@sunnamusk-uk.test.maintsupp.com", "client@sunnamusk-uk.test.maintsupp.com"]) {
     const headers = { "x-maintsupp-identity": identity };
-    assert.equal((await call("/api/cms-media", { headers })).status, 403, identity);
+    const refused = [401, 403];
+    assert.ok(refused.includes((await call("/api/cms-media", { headers })).status), identity);
     const start = await call("/api/cms-media/upload", {
       headers,
       method: "POST",
       body: JSON.stringify({ action: "start", originalName: "x.png", contentType: "image/png", byteSize: 10 }),
     });
-    assert.equal(start.status, 403, `${identity} cannot start a website upload`);
-    assert.equal((await call(`/api/cms-media?id=${media.newMediaId()}`, { headers, method: "DELETE" })).status, 403);
+    assert.ok(refused.includes(start.status), `${identity} cannot start a website upload`);
+    assert.ok(refused.includes((await call(`/api/cms-media?id=${media.newMediaId()}`, { headers, method: "DELETE" })).status));
   }
 });
 
@@ -635,7 +689,20 @@ test("live: upload, serve, use on a page, refuse to delete, replace, archive, de
     assert.equal((await call(`/api/site-pages?slug=${pageSlug}`, { headers: as, method: "DELETE" })).status, 200);
     assert.equal((await call(`/api/cms-media?id=${item.id}`, { headers: as, method: "DELETE" })).status, 200);
     created.splice(created.indexOf(item.id), 1);
-    assert.equal((await fetch(`${BASE_URL}${item.current.url}`)).status, 404, "deleted means the file is gone");
+    /*
+     * THE ORIGIN, not the edge. This route sends `immutable` and a day of
+     * `CDN-Cache-Control` because the bytes under a key never change — a
+     * replacement is a new key — so after a delete a CDN keeps serving its copy
+     * until that day is up, which the library screen states. Asking the same URL
+     * deployed therefore answers 200 from cache, and the assertion that the file
+     * is gone has to ask the origin: a unique query string is a different cache
+     * key, and the route reads its path segments only, so the handler sees the
+     * same request. (This assertion passed locally, where there is no edge, and
+     * failed on the first deployed run — the cache was right and the test was
+     * incomplete.)
+     */
+    const fromOrigin = await fetch(`${BASE_URL}${item.current.url}?deleted-check=${Date.now().toString(36)}`);
+    assert.equal(fromOrigin.status, 404, "deleted means the origin no longer has the file");
   } finally {
     await call(`/api/site-pages?slug=${pageSlug}`, { headers: as, method: "DELETE" });
     for (const id of created) await call(`/api/cms-media?id=${id}`, { headers: as, method: "DELETE" });
