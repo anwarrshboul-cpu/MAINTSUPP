@@ -194,7 +194,14 @@ test("every number a reader is given is still the real one", () => {
     /const readout = slices\s*\.map\(\(slice, index\) => `\$\{slice\.label\} \$\{write\(values\[index\]\)\} \(\$\{readoutShares\[index\]\}%\)`\)/,
     "and the accessible readout prints those",
   );
-  assert.match(donut, /aria-label=\{`\$\{ariaLabel\}: \$\{readout \|\| "no data"\}\. \$\{printed\} \$\{caption\}`\}/);
+  /*
+   * RE-POINTED 2026-09-23 (dashboard §9 item 40). The name still ends with the
+   * centre, but where the printed centre is an ABBREVIATION ("£29.1k") a caller
+   * now passes `centreLabel` with the full figure, and the name speaks that —
+   * "screen-reader labels state the full value, not the abbreviated one". The
+   * contract is unchanged: every number in the name is a real one.
+   */
+  assert.match(donut, /aria-label=\{`\$\{ariaLabel\}: \$\{readout \|\| "no data"\}\. \$\{centreLabel \?\? printed\} \$\{caption\}`\}/);
   assert.match(donut, /tipLines\(slices\[activeIndex\], ovFraction\(values\[activeIndex\], sum\)\)/, "a caller's tooltip is handed the true share");
   assert.match(donut, /`\$\{write\(values\[activeIndex\]\)\} of \$\{write\(sum\)\}`/, "x of y is x of y");
   assert.match(donut, /`\$\{ovPercent\(values\[activeIndex\], sum\)\}%`/);

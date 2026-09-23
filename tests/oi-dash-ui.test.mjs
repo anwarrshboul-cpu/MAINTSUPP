@@ -231,12 +231,25 @@ test("colour comes from the shared policy and the payload's own thresholds", () 
   assert.match(page, /import \{ QUALITY_ARC, SLA_TARGET_ARC, qualityTone, rateTone \} from "\.\.\/\.\.\/\.\.\/lib\/dashboard-policy";/);
   /* The SLA headline uses the SLA target's thresholds, like its bars (review
      finding: 92% was teal on the gauge and amber on a bar). */
-  assert.match(page, /qualityTone\(sla\.percent, SLA_TARGET_ARC\)/, "the SLA gauge");
+  /*
+   * RE-POINTED 2026-09-23 (dashboard §9 item 25). The SLA target is data now —
+   * the workspace's versioned target in the payload — so the gauge and each
+   * bar are toned by `heldTo(target)`, which builds the policy shape from that
+   * target and the shared warning floor (`SLA_TARGET_ARC.warn`). At the shipped
+   * 95% it IS `SLA_TARGET_ARC`, and the gauge and the bars still share one rule,
+   * which is what the review finding asked for.
+   */
+  assert.match(page, /qualityTone\(sla\.percent, heldTo\(intel\.slaTargetPercent\)\)/, "the SLA gauge");
+  assert.match(page, /function heldTo\(target: number\) \{\s*return \{ good: target, warn: Math\.min\(SLA_TARGET_ARC\.warn, target\) \};/);
   assert.match(page, /rateTone\(repeat\.percent, policy\.repeatThresholds\)/, "the repeat rate — lower is better");
   assert.match(page, /qualityTone\(sites\.percent, policy\.thresholds\)/, "the sites gauge");
   assert.match(page, /qualityTone\(ring\.percent, policy\.thresholds\)/, "each requirement type");
   assert.doesNotMatch(codeOnly(page), />=\s*(90|75)\b|<\s*(90|75)\b/, "no quality threshold literal in the component");
-  assert.match(page, /row\.percent >= target/, "the SLA bars against the payload's own target");
+  assert.match(
+    page,
+    /toneColourFor\(qualityTone\(row\.percent, heldTo\(rowTarget\)\)\)/,
+    "the SLA bars against the payload's own target — each priority's, since §9 item 25",
+  );
 });
 
 test("the palette colours by meaning, and a rolled-up bucket is always muted", () => {
@@ -371,7 +384,13 @@ test("the glow is one filter, defined once, applied to coloured strokes and neve
 test("the target bars draw a marker at the payload's SLA target", () => {
   assert.match(page, /target=\{target\}/);
   assert.match(page, /const target = intel\.slaTargetPercent;/);
-  assert.match(charts, /<span className="oi-targets__marker" style=\{\{ left: `\$\{marker\}%` \}\} \/>/);
+  /*
+   * RE-POINTED 2026-09-23 (dashboard §9 item 25): each bar carries its own
+   * priority's target from the payload, and the marker stands there, falling
+   * back to the shared `target` for a row that carries none.
+   */
+  assert.match(charts, /<span className="oi-targets__marker" style=\{\{ left: `\$\{markerAt\(row\.target\)\}%` \}\} \/>/);
+  assert.match(charts, /const markerAt = \(value: number \| undefined\) => \{\s*const at = value \?\? target;/);
 });
 
 /**
