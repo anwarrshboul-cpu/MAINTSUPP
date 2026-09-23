@@ -639,3 +639,30 @@
     transition: none;
   }
 }
+
+/*
+ * THE 44px THIS FILE PROMISES, ON THE TWO CONTROLS IT DID NOT OWN — dashboard
+ * §9 item 40, measured on Production 2026-09-23 at 375.
+ *
+ * The header above says every control here clears 44px, and the ones this file
+ * styles do. But the two dialogs the Overview opens also draw the product-wide
+ * `.primary-button` / `.secondary-button` (42px, from `app/globals.css`) and the
+ * operations pages' shared close button, `.ops-menu__button` (32x32, from
+ * `ops.css`). Both were measured under the floor inside these dialogs:
+ * "Create new contractor" and "Ignore" at 42px, and Close at 32x32.
+ *
+ * Scoped to `.ovw-tool` — the dialog shell `overview-page.tsx` draws — so no
+ * other screen that uses those shared classes moves, and to a touch pointer or
+ * a phone width, so the desktop dialog keeps its exact look.
+ */
+@media (pointer: coarse), (max-width: 767px) {
+  .ovw-tool .ops-sheet__head .ops-menu__button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .ovw-tool .primary-button,
+  .ovw-tool .secondary-button {
+    min-height: 44px;
+  }
+}

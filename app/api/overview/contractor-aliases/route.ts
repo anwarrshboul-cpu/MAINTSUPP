@@ -50,7 +50,7 @@
  * is the wrong instrument for changing that.
  */
 
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import {
   activityLog,
@@ -65,7 +65,7 @@ import {
 } from "../../../lib/contractor-linking";
 import { liveWorkOrderCondition } from "../../../lib/dashboard-filters";
 import { can, resolvePermissions } from "../../../lib/permissions";
-import { chunkIds } from "../../../lib/sql-batching";
+import { applyAliasLink, applyAliasUnlink } from "../../../lib/contractor-alias-writes";
 import {
   anonymousRefusal,
   busyRefusal,
@@ -455,44 +455,6 @@ async function idsFromLastLink(
   }
 }
 
-/**
- * `contractor_id`, written in chunks.
- *
- * D1 binds one variable per element of an `IN` list and refuses a statement past
- * roughly a hundred of them (`app/lib/sql-batching.ts`). The two set values and
- * the organisation take three of the budget, so the ids get 80 and not 90 —
- * `chunkIds`'s default is sized for a bare `IN` list and this statement is not
- * one. Sequential, because D1 serialises on one connection anyway.
- */
-const BACKFILL_CHUNK = 80;
-
-async function writeContractorId(
-  scope: ScopedDatabase,
-  ids: string[],
-  contractorId: string | null,
-  guard: { onlyNull?: boolean; onlyContractorId?: string } = {},
-): Promise<number> {
-  let written = 0;
-  for (const chunk of chunkIds(ids, BACKFILL_CHUNK)) {
-    const clauses = [
-      eq(maintenanceRequests.organisationId, scope.orgId),
-      inArray(maintenanceRequests.id, chunk),
-    ];
-    if (guard.onlyNull) clauses.push(isNull(maintenanceRequests.contractorId));
-    if (guard.onlyContractorId) {
-      clauses.push(eq(maintenanceRequests.contractorId, guard.onlyContractorId));
-    }
-    /* `updated_at` is deliberately not set. See the module header. */
-    const rows = await scope.db
-      .update(maintenanceRequests)
-      .set({ contractorId })
-      .where(and(...clauses))
-      .returning({ id: maintenanceRequests.id });
-    written += rows.length;
-  }
-  return written;
-}
-
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
@@ -602,27 +564,20 @@ export async function POST(request: Request) {
         });
       }
 
-      let cleared = 0;
-      if (existingAlias && target.length) {
-        cleared = await writeContractorId(scope, target, null, {
-          onlyContractorId: existingAlias.contractorId,
-        });
-      }
-      if (existingAlias) {
-        await scope.db
-          .delete(contractorNameAliases)
-          .where(
-            and(
-              eq(contractorNameAliases.organisationId, scope.orgId),
-              eq(contractorNameAliases.id, existingAlias.id),
-            ),
-          );
-      }
-      await logActivity(scope, key, existingAlias ? UNLINKED : UNIGNORED, at, actor, {
+      /* The clear, the alias delete and the activity row commit together —
+         see `app/lib/contractor-alias-writes.ts`. */
+      const { cleared } = await applyAliasUnlink(scope, {
         name,
-        contractorId: existingAlias?.contractorId ?? null,
-        cleared,
+        alias: existingAlias ? { id: existingAlias.id, contractorId: existingAlias.contractorId } : null,
+        targetIds: target,
         exactReversal: exact,
+        activity: {
+          entityType: IGNORE_ENTITY,
+          entityId: `name:${key}`,
+          action: existingAlias ? UNLINKED : UNIGNORED,
+          actor,
+          at,
+        },
       });
       await recordAudit({
         db: scope.db,
@@ -711,17 +666,7 @@ export async function POST(request: Request) {
       });
     }
 
-    if (action === "create") {
-      contractorId = crypto.randomUUID();
-      await scope.db.insert(contractors).values({
-        id: contractorId,
-        organisationId: scope.orgId,
-        name,
-        active: true,
-        createdAt: at,
-        updatedAt: at,
-      });
-    }
+    if (action === "create") contractorId = crypto.randomUUID();
 
     /*
      * ONE JOB-SIDE NAME RESOLVES TO AT MOST ONE RECORD, EVER — the UNIQUE index
@@ -739,42 +684,24 @@ export async function POST(request: Request) {
           ),
         )
     )[0];
-    if (existingAlias) {
-      await scope.db
-        .update(contractorNameAliases)
-        .set({ contractorId, alias: name, createdBy: actor, createdAt: at })
-        .where(
-          and(
-            eq(contractorNameAliases.organisationId, scope.orgId),
-            eq(contractorNameAliases.id, existingAlias.id),
-          ),
-        );
-    } else {
-      await scope.db.insert(contractorNameAliases).values({
-        id: crypto.randomUUID(),
-        organisationId: scope.orgId,
-        contractorId,
-        alias: name,
-        normalised: key,
-        createdAt: at,
-        createdBy: actor,
-      });
-    }
 
-    const written = await writeContractorId(scope, target.ids, contractorId, { onlyNull: true });
-
-    /* The ids are the reversal record — see `idsFromLastLink`. Capped so a very
-       large link cannot write an unreadable log line; the cap is reported. */
-    const recorded = target.ids.slice(0, 500);
-    await logActivity(scope, key, LINKED, at, actor, {
+    /*
+     * THE CONTRACTOR (for `create`), THE ALIAS, THE BACKFILL AND THE ACTIVITY
+     * ROW — ONE TRANSACTION. Dashboard §9 item 20: these were five separate
+     * statements, so a failure part-way left a half-applied link that `unlink`
+     * could not reverse exactly. See `app/lib/contractor-alias-writes.ts`.
+     */
+    const { written } = await applyAliasLink(scope, {
+      key,
       name,
       contractorId,
       contractorName: contractorLabel,
-      created: action === "create",
-      jobsChanged: written,
-      jobIds: recorded,
-      truncated: target.ids.length > recorded.length,
+      createContractor: action === "create" ? { name } : null,
+      existingAliasId: existingAlias?.id ?? null,
+      targetIds: target.ids,
+      activity: { entityType: IGNORE_ENTITY, entityId: `name:${key}`, action: LINKED, actor, at },
     });
+
     await recordAudit({
       db: scope.db,
       organisationId: scope.orgId,

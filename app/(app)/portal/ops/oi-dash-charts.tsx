@@ -486,6 +486,11 @@ export type OiTargetRow = {
   jobs: number;
   /** Whole percent, or null when the row has nothing to measure. */
   percent: number | null;
+  /**
+   * This row's own target, when rows are held to different ones — the
+   * Overview's per-priority SLA targets (§9 item 25). Absent, `target` applies.
+   */
+  target?: number;
   colour: string;
   href?: string;
   onActivate?: () => void;
@@ -510,7 +515,10 @@ export function OiTargetBars({
   ariaLabel: string;
 }): JSX.Element {
   const eased = useOvSweep(rows.map((row) => (row.percent === null ? 0 : ovFraction(row.percent, 100))));
-  const marker = Math.max(0, Math.min(100, Number.isFinite(target) ? target : 0));
+  const markerAt = (value: number | undefined) => {
+    const at = value ?? target;
+    return Math.max(0, Math.min(100, Number.isFinite(at) ? at : 0));
+  };
   return (
     <div className="oi-targets" role="group" aria-label={ariaLabel}>
       {rows.map((row, index) => {
@@ -530,7 +538,7 @@ export function OiTargetBars({
                   style={{ "--oi-bar": row.colour, width: `${(eased[index] ?? 0) * 100}%` } as CSSProperties}
                 />
               ) : null}
-              <span className="oi-targets__marker" style={{ left: `${marker}%` }} />
+              <span className="oi-targets__marker" style={{ left: `${markerAt(row.target)}%` }} />
             </span>
           </>
         );

@@ -37,6 +37,7 @@ const read = async (file) => (await readFile(path.join(root, file), "utf8")).rep
 
 const METER_ROUTE = "app/api/overview/meter-settings/route.ts";
 const ALIAS_ROUTE = "app/api/overview/contractor-aliases/route.ts";
+const ALIAS_WRITES = "app/lib/contractor-alias-writes.ts";
 const SITE_ROUTE = "app/api/overview/site-assign/route.ts";
 const TOOLS_CSS = "app/(app)/portal/ops/overview-tools.css";
 
@@ -245,7 +246,13 @@ test("chunkRows divides the variable budget by the row width", () => {
 
 test("both write routes chunk below the bare-IN budget, because their statements are not bare", async () => {
   const site = await read(SITE_ROUTE);
-  const alias = await read(ALIAS_ROUTE);
+  /*
+   * Re-pointed 2026-09-23 (dashboard §9 item 20): the backfill moved, with its
+   * chunk size, from the route into `app/lib/contractor-alias-writes.ts`, which
+   * commits every chunk in ONE batch with the alias and the activity row. The
+   * contract — chunked below the bare-IN budget — is unchanged; only its home.
+   */
+  const alias = await read(ALIAS_WRITES);
 
   const assign = /const ASSIGN_CHUNK = (\d+);/.exec(site);
   assert.ok(assign, "site-assign declares its own chunk size");
@@ -265,6 +272,7 @@ test("both write routes chunk below the bare-IN budget, because their statements
   assert.match(site, /chunkIds\(/, "the UPDATE is chunked");
   assert.match(site, /SQL_VARIABLE_CHUNK/, "the verification SELECT uses the bare-IN size");
   assert.match(alias, /chunkIds\(ids, BACKFILL_CHUNK\)/, "the backfill is chunked");
+  assert.match(alias, /scope\.db\.batch\(/, "and every chunk commits in the one batch");
 });
 
 test("the batch cap is a refusal, never a silent truncation", async () => {
@@ -365,7 +373,7 @@ test("every action writes both logs", async () => {
 });
 
 test("the dialect rules hold — no julianday, strftime, json_extract, printf, GLOB or window functions", async () => {
-  for (const file of [METER_ROUTE, ALIAS_ROUTE, SITE_ROUTE]) {
+  for (const file of [METER_ROUTE, ALIAS_ROUTE, ALIAS_WRITES, SITE_ROUTE]) {
     /* Comments stripped first. `meter-settings` explains at length why it
        matches status keys in JavaScript rather than reaching for `GLOB`, and a
        prose ban on a construct is not a use of it. */

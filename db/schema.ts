@@ -3822,17 +3822,29 @@ export const dashboardMeters = sqliteTable(
  * the Overview's SLA tab is its only reader. Two different agreements measured
  * at two different granularities; merging them would force one to lie about the
  * other's units.
+ *
+ * AND, SINCE 2026-09-23, ONE MORE STAGE: `compliance` (dashboard §9 item 25).
+ * The share of open jobs within their due date that the live Overview's SLA
+ * gauge and "SLA Compliance by Priority Tier" bars are held to — until then a
+ * constant, 95%, in `dashboard-policy.ts`. A percentage, not a duration, so it
+ * has its own column, `target_percent`; a `compliance` row writes 0 into the
+ * NOT NULL `target_minutes`, which no reader of this stage consults, and every
+ * ladder reader keys on its own stage names so never sees these rows. The keys
+ * are `overall` (the gauge) and the four priorities. Versioned exactly as the
+ * ladder is — see `app/lib/sla-compliance-targets.ts`.
  */
 export const slaTargets = sqliteTable(
   "sla_targets",
   {
     id: text("id").primaryKey(),
     organisationId: text("organisation_id").notNull().references(() => organisations.id),
-    /** acknowledged | assigned | attended | resolved */
+    /** acknowledged | assigned | attended | resolved | compliance */
     stage: text("stage").notNull(),
-    /** urgent | medium | low | not_recorded — `normalisePriority`'s vocabulary. */
+    /** urgent | medium | low | not_recorded — `normalisePriority`'s vocabulary; `overall` for `compliance`. */
     priorityKey: text("priority_key").notNull(),
     targetMinutes: integer("target_minutes").notNull(),
+    /** The `compliance` stage's target, a whole percent. Null on every ladder row. */
+    targetPercent: integer("target_percent"),
     /** business | calendar — business honours `bank_holidays`. */
     basis: text("basis").notNull().default("business"),
     version: integer("version").notNull().default(1),

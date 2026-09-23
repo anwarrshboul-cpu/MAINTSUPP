@@ -224,6 +224,7 @@ import { WORKSPACE_LOGO_EVENT, WorkspaceMark } from "./workspace-mark";
 import { PortalModulesPanel } from "./views/portal-modules-panel";
 import { NavIconsPanel } from "./views/nav-icons-panel";
 import { WorkspaceEmailPanel } from "./views/workspace-email-panel";
+import { SlaTargetsPanel } from "./views/sla-targets-panel";
 import { GlobalSearch } from "./global-search";
 import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
@@ -1844,7 +1845,7 @@ export default function PortalApp({
   const [refreshToken, setRefreshToken] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   /*
-   * WHETHER ANY SURFACE HAS ASKED FOR THE JOB LIST YET.
+   * WHEN THE JOB LIST IS FETCHED — AND WHEN IT IS NOT.
    *
    * The paged `/api/maintenance` read below is the shell's single job snapshot:
    * the board, the calendar, the contractor screen, the reporting tabs and the
@@ -1856,14 +1857,18 @@ export default function PortalApp({
    *
    * §1.6 of the dashboard brief states the requirement as a network-tab
    * observation: "the network tab must show no bulk job fetch for the Overview
-   * page." So the fetch is deferred rather than removed. It starts the moment a
-   * surface that genuinely reads the list becomes active, and once started it
-   * stays loaded — moving between sections must not re-download the estate.
+   * page." So the fetch is deferred rather than removed. It runs when a surface
+   * that genuinely reads the list becomes active, and what it read stays loaded
+   * — moving to a section that does not read it must not re-download the estate.
    *
-   * Latched in state rather than derived per render because "has ever been
-   * wanted" is the question, not "is wanted now".
+   * THERE USED TO BE A LATCH HERE, AND IT DID THE OPPOSITE OF THIS COMMENT.
+   * `jobListWanted` was a ref set the first time a job-list surface opened, and
+   * the effect below fetched whenever it was set — on EVERY section change from
+   * then on, the Overview included. Measured on Production 2026-09-23: after one
+   * visit to Jobs, Jobs → Overview, Overview → Sites and Sites → Overview each
+   * walked `/api/maintenance?limit=1000` (≈94 KB, all 777 jobs). The latch is
+   * gone; the surface alone decides.
    */
-  const jobListWanted = useRef(false);
   /** When the figures on screen were last successfully read. Null until then. */
   const [dataUpdatedAt, setDataUpdatedAt] = useState<Date | null>(null);
 
@@ -2329,10 +2334,10 @@ export default function PortalApp({
    * Whether THIS surface reads the job list, and therefore whether the
    * freshness chip and the "Updated" stamp have anything to report.
    *
-   * Derived rather than read off `jobListWanted`, which is a ref: a ref does
-   * not re-render, so the chip would never appear, and reading `.current`
-   * during render is exactly the impurity the compiler rule above objects
-   * to. The surface is already reactive and is the honest question anyway —
+   * Derived from the surface, which is reactive — the retired `jobListWanted`
+   * ref could not have driven it, since a ref does not re-render and reading
+   * `.current` during render is exactly the impurity the compiler rule above
+   * objects to. The surface is also the honest question —
    * the age of figures nobody on this screen is reading is not a fact worth
    * a line of chrome.
    */
@@ -2499,16 +2504,15 @@ export default function PortalApp({
 
   useEffect(() => {
     /*
-     * The latch, inside the effect rather than in a second one beside it.
+     * ONLY A SURFACE THAT READS THE LIST FETCHES IT — dashboard §9 item 7.
      *
-     * A `setJobListWanted(true)` in its own effect is a synchronous setState
-     * in an effect, which the React Compiler rejects outright
-     * (`react-hooks/set-state-in-effect`) and which costs a second render
-     * pass on every section change for a value nothing paints. A ref carries
-     * "has ever been wanted" without one.
+     * Entering the board, the calendar, Contractors or Reports walks the list,
+     * so each shows current jobs when it opens. Every other section returns
+     * here: what was read stays in state, and nothing is downloaded for a page
+     * that never looks at it. "WHEN THE JOB LIST IS FETCHED", above, records
+     * the latch this replaced and the network capture that condemned it.
      */
-    if (!JOB_LIST_SURFACES.has(activeSurface) && !jobListWanted.current) return;
-    jobListWanted.current = true;
+    if (!JOB_LIST_SURFACES.has(activeSurface)) return;
     let active = true;
     async function loadRequests() {
       /*
@@ -6998,6 +7002,11 @@ function SettingsView({
           ))}
         </div>
       </section>
+
+      {/* The percentages the live Overview's SLA gauge and per-priority bars
+          are held to — versioned, owner/admin to change. Dashboard §9 item 25;
+          see views/sla-targets-panel.tsx and app/lib/sla-compliance-targets.ts. */}
+      <SlaTargetsPanel />
 
       {/*
         THE COMPLIANCE WARNING WINDOW — the approved Compliance specification's

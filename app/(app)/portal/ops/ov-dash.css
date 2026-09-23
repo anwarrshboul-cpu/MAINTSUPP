@@ -1487,6 +1487,30 @@ body[data-theme] .ov-dash .ov-card__link {
     min-height: 44px;
   }
 
+  /*
+   * B16 AGAIN, FOR THE PORTFOLIO SELECT — dashboard §9 item 40, 2026-09-23.
+   *
+   * The note above says this control "was never affected" because a label
+   * forwards its press. It does — but on a phone that press FOCUSES a select
+   * rather than opening its picker, so the thing a finger actually has to hit
+   * is the `<select>`, and it measured 95x14.4 inside the 44px pill on
+   * Production at 375. The select takes the floor itself, and the pill gives
+   * up its vertical padding exactly as the date pill did, so the two sit at
+   * the same 46px rather than stacking to 58.
+   *
+   * The pill rule is (0,3,1), the same weight as the 6px padding it replaces,
+   * and wins by coming later; the select rule repeats the (0,6,2) selector the
+   * chevron rules use, so it outranks their `min-height: 0` in both themes.
+   */
+  body[data-theme] .ov-dash .ov-dash__control--select {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  body[data-theme] .ov-dash .ov-dash__control--select > select:not([type="checkbox"]):not([type="radio"]):not([multiple]) {
+    min-height: 44px;
+  }
+
   .ov-dash .ov-legend__row {
     padding: 8px 6px;
   }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import marketingCss from "./(marketing)/marketing.css?url";
+import { NotFoundStyles } from "./not-found-styles";
 import { NotFoundTitle } from "./not-found-title";
 
 /*
@@ -13,6 +13,12 @@ import { NotFoundTitle } from "./not-found-title";
  * does, and borrows only the shared `.m-*` classes the CMS blocks use. The
  * response is still a 404.
  *
+ * THE STYLESHEET IS `NotFoundStyles`, A CLIENT COMPONENT, NOT A `<link>` HERE.
+ * This page rides in every route's payload as the root boundary's fallback, and
+ * a `<link rel="stylesheet">` written in this server component became a preload
+ * of the marketing stylesheet in the head of every page — a console warning on
+ * the whole portal. See `app/not-found-styles.tsx`.
+ *
  * NO `metadata` EXPORT. vinext builds a boundary page's head from the LAYOUTS'
  * metadata only, so one here would be silently ignored; it already adds
  * `<meta name="robots" content="noindex">` itself. The tab title is set by
@@ -22,7 +28,7 @@ export default function NotFound() {
   return (
     <div className="m-root">
       <NotFoundTitle title="Page not found | MAINTSUPP" />
-      <link rel="stylesheet" href={marketingCss} />
+      <NotFoundStyles />
       <main className="m-section">
         <div className="m-shell m-shell--narrow">
           <p className="m-eyebrow">Error 404</p>
