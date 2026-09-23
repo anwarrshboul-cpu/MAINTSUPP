@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ApprovedPhoto } from "./approved-photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * SECTION 3 — Who we help.
@@ -118,13 +119,13 @@ const AUDIENCES = [
   },
 ] as const;
 
-export function WhoWeHelp() {
+export function WhoWeHelp({ copy = HOME_COPY.whoWeHelp }: { copy?: HomeCopy["whoWeHelp"] }) {
   return (
     <section className="section section--tint" id="sectors">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Who we help</p>
-          <h2 className="h2">Built for multi-site operators without an in-house FM team.</h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
         </div>
 
         <ul className="whogrid reveal">
@@ -158,10 +159,7 @@ export function WhoWeHelp() {
           ))}
         </ul>
 
-        <p className="note whogrid__note reveal">
-          Typically 5–50 locations spread across regions — managed today through scattered
-          calls and spreadsheets.
-        </p>
+        <p className="note whogrid__note reveal">{copy.note}</p>
       </div>
     </section>
   );

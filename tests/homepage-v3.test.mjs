@@ -122,8 +122,15 @@ test("the portfolio is 21 stores, and the old +20 notation is gone from the tree
   }
   assert.deepEqual(claims, [], "the +20 notation was replaced by an exact count");
 
+  /* RE-POINTED (decision L): the hero's three trust chips are DATA now —
+     `HOME_COPY.hero.pills` in `_sections/copy.ts`, rendered by index — so the
+     claim is checked in the file that owns the words, and the hero is checked to
+     be reading them from there. The sweep above already walks copy.ts, since it
+     is inside `app/(marketing)`. */
   const hero = await read(`${SECTIONS_DIR}/hero.tsx`);
-  assert.match(rendered(hero), /21 stores currently coordinated/, "the hero states the count");
+  const shippedCopy = await read(`${SECTIONS_DIR}/copy.ts`);
+  assert.match(rendered(shippedCopy), /21 stores currently coordinated/, "the hero states the count");
+  assert.match(rendered(hero), /<span>\{copy\.pills\[2\]\}<\/span>/, "and the hero draws it");
 });
 
 /* ── 4. Your contractors or ours ─────────────────────────────────────────── */
@@ -279,10 +286,26 @@ test("the homepage FAQ and /faqs render the same array, and neither owns a copy"
   const section = await read(`${SECTIONS_DIR}/faq.tsx`);
   const page = await read("app/(marketing)/faqs/page.tsx");
 
+  /*
+   * RE-POINTED (decision L), AND THE PROPERTY IS UNCHANGED: ONE list, shared.
+   * `content.ts` is still where the questions live, and it is still the only
+   * place — but it is now the DEFAULT of one resolver (`resolveSiteContent` in
+   * `app/lib/site-content.ts`), so staff can edit the answers without either page
+   * gaining a copy. The homepage section takes the list as a prop whose default IS
+   * the shared array; `/faqs` resolves it and keeps the name `faq` because its
+   * FAQPage graph is built from the same variable. Both still import `content.ts`;
+   * neither may hold a question of its own, which the assertions below still say.
+   */
   for (const [name, source] of [["the homepage section", section], ["/faqs", page]]) {
     assert.match(source, /from "\.\.?\/(?:_sections\/)?content"/, `${name} must read content.ts`);
-    assert.match(source, /faq\.map\(/, `${name} must render the shared array`);
+    assert.match(source, /\b(?:faq|items)\.map\(/, `${name} must render the shared array`);
   }
+  assert.match(section, /items = faq,/, "the homepage section's default IS the shared array");
+  assert.match(
+    page,
+    /faqs\.questions\.length \? faqs\.questions : SHIPPED_QUESTIONS/,
+    "and /faqs falls back to it, so an empty CMS renders the page it shipped as",
+  );
   /* No second copy of a question, under any name. `faq-items.ts` was exactly
      that and `stage-eleven-marketing` keeps it deleted; this catches the same
      mistake made inline. */
@@ -319,10 +342,37 @@ test("the homepage FAQ and /faqs render the same array, and neither owns a copy"
 
 test("Report a Job is last, and moving it changed nothing about how it submits", async () => {
   const page = await read("app/(marketing)/page.tsx");
-  const order = [...page.slice(page.indexOf("HomePage")).matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map(
-    (m) => m[1],
+  /*
+   * RE-POINTED (decision L): THE ORDER IS DATA NOW, so this reads it where it
+   * lives instead of counting self-closing tags in `page.tsx`.
+   *
+   * `app/lib/site-content.ts` declares the fourteen sections and the sequence the
+   * site ships in (`HOME_SECTIONS`, in order); `page.tsx` maps each of those keys
+   * to the component that draws it and renders whatever order staff have saved.
+   * So the contract MOVED rather than went — and it is checked in both halves
+   * here: the registry's list and sequence, and that every key has a component.
+   * A section could otherwise be dropped from the page by deleting one line of a
+   * record, with nothing to say so.
+   */
+  const registry = await read("app/lib/site-content.ts");
+  const declared = registry.slice(
+    registry.indexOf("const HOME_SECTIONS"),
+    registry.indexOf("export const HOME_SECTION_ORDER"),
   );
-  assert.equal(order.at(-1), "ReportJob", "it is the last section above the footer");
+  const sections = [...declared.matchAll(/key: "([A-Za-z]+)"/g)].map((match) => match[1]);
+  assert.equal(sections.at(-1), "reportJob", "it is the last section above the footer");
+  /* And it cannot be moved out of that position or hidden, which is stronger than
+     "it is last in this file": the registry says so, with the reason. */
+  assert.match(
+    registry,
+    /key: "reportJob",[\s\S]{0,400}?fixed:/,
+    "and the registry fixes it there, rather than merely shipping it there",
+  );
+  const componentFor = page.slice(page.indexOf("const SECTIONS"), page.indexOf("export default"));
+  for (const key of sections) {
+    assert.match(componentFor, new RegExp(`\\n  ${key}: `), `${key} must name the component that draws it`);
+  }
+
 
   /*
    * THE CANONICAL INTAKE PIPELINE, PINNED HERE TOO — deliberately duplicating
@@ -384,8 +434,13 @@ test("the pricing calculator opens at five stores", async () => {
   assert.match(pricing, /useState\(SLIDER_MIN\)/, "opened from the floor, not from a second literal");
   assert.match(rates, /export const SLIDER_MAX = 60;/, "the range must reach past the 51+ band");
   /* Five is the number the page already claims to serve from. */
+  /* RE-POINTED (decision L): the section's note is data now — `HOME_COPY.whoWeHelp.note`
+     in `_sections/copy.ts` — so the number is checked there, and the section is
+     checked to be drawing it. */
   const who = await read(`${SECTIONS_DIR}/who-we-help.tsx`);
-  assert.match(who, /Typically 5–50 locations/, "the calculator opens on the bottom of that range");
+  const whoCopy = await read(`${SECTIONS_DIR}/copy.ts`);
+  assert.match(whoCopy, /Typically 5–50 locations/, "the calculator opens on the bottom of that range");
+  assert.match(who, /\{copy\.note\}/, "and the section renders that note");
 });
 
 /* ── 11. Anchors ─────────────────────────────────────────────────────────── */

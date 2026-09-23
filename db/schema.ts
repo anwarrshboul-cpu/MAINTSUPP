@@ -4516,6 +4516,22 @@ export const siteNavigation = sqliteTable("site_navigation", {
 });
 
 /**
+ * The built-in pages' copy — decision L. One row (`id = 'public'`): every
+ * OVERRIDE staff have saved for the homepage, `/contractors` and `/faqs`, as one
+ * JSON document validated by `app/lib/site-content.ts`. No row — and no field
+ * inside the document — is the shipped copy in
+ * `app/(marketing)/_sections/copy.ts`. See `ensureSiteContent` in `db/init.ts`.
+ */
+export const siteContent = sqliteTable("site_content", {
+  id: text("id").primaryKey(),
+  document: text("document").notNull(),
+  /** Bumped by every save; a save names the revision it was edited from. */
+  revision: integer("revision").notNull().default(1),
+  updatedByEmail: text("updated_by_email"),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
  * The website's media library — decision K. One asset (`cms_media`) and every
  * file it has had (`cms_media_versions`). Installation-wide; the bytes live in
  * the separate `cms-media` bucket. See `ensureCmsMedia` in `db/init.ts`.

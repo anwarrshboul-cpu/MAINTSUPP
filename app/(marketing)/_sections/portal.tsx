@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { PhotoSlot } from "./photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * Client portal — four dashboard views in a browser frame, with explainer pins
@@ -118,7 +119,7 @@ const TABS: readonly Tab[] = [
 ];
 
 
-export function Portal() {
+export function Portal({ copy = HOME_COPY.portal }: { copy?: HomeCopy["portal"] }) {
   const [view, setView] = useState<View>("overview");
 
   const current = TABS.find((tab) => tab.view === view) ?? TABS[0];
@@ -131,13 +132,9 @@ export function Portal() {
     <section className="section" id="portal">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Client portal</p>
-          <h2 className="h2">Total visibility. Total control.</h2>
-          <p className="lede">
-            Authorised users see live jobs, compliance dates, approvals, spend and
-            evidence across their permitted sites — and nothing from anyone else’s
-            portfolio.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
+          <p className="lede">{copy.lede}</p>
         </div>
         <div className="tabs reveal" role="tablist" aria-label="Dashboard views" id="dashTabs">
           {TABS.map((tab) => (
@@ -233,10 +230,7 @@ export function Portal() {
             </li>
           ))}
         </ul>
-        <p className="lede portal__promise reveal">
-          Every client gets portfolio visibility — no spreadsheets, no chasing for
-          updates.
-        </p>
+        <p className="lede portal__promise reveal">{copy.promise}</p>
         <p className="note reveal">
           Sample data shown. Client data is only visible to authorised users after
           secure login.

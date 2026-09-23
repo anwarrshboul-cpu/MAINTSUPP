@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { HOME_COPY, type HomeCopy } from "./copy";
 import {
   ADDITIONAL_JOB,
   BANDS,
@@ -220,7 +221,7 @@ function rateCell(value: number | null) {
   return value === null ? "Bespoke" : `£${value}`;
 }
 
-export function Pricing() {
+export function Pricing({ copy = HOME_COPY.pricing }: { copy?: HomeCopy["pricing"] }) {
   /*
    * The store count is the single input, and the band follows from it. The
    * band buttons stay as a keyboard-friendly way to jump between bands, and
@@ -264,12 +265,9 @@ export function Pricing() {
     <section className="section section--tint" id="pricing">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">Pricing</p>
-          <h2 className="h2">Simple per-store pricing. No hidden markups.</h2>
-          <p className="lede">
-            Contractors invoice you directly at their agreed rates — we never mark up
-            trades. You pay one clear coordination fee.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
+          <p className="lede">{copy.lede}</p>
         </div>
 
         {/* The calculator: one number in, every price on the section follows. */}

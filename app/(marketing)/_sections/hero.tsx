@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "./content";
 import { PhotoSlot } from "./photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /* ================================================== 1. HERO BANNER
  * A port of the standalone landing page's hero. Class names, icon geometry and
@@ -63,7 +64,57 @@ function HeroFeed() {
 
 /* ── hero ─────────────────────────────────────────────────────────────────── */
 
-export function Hero() {
+/** A photograph from the website media library, as the page resolved it. */
+export type HeroImage = { src: string; alt: string; width: number | null; height: number | null };
+
+/**
+ * THE HERO'S PHOTOGRAPH WHEN STAFF HAVE CHOSEN ONE (decision L).
+ *
+ * The same DOM as `PhotoSlot` draws — `.ph > picture > img.ph__img` — because the
+ * hero's whole treatment hangs off those three selectors: the band across the
+ * fold rather than a fill of it, its aspect ratio, the mask that dissolves its
+ * top fifth into the painted sky, and the object-position that keeps the subject.
+ * A bare `<img>` here would be positioned by nothing and would fill the fold.
+ *
+ * WHAT AN UPLOAD DOES NOT GET is the art direction. The shipped hero is two
+ * plates — a wide one and a portrait one the owner shot for phones — and a
+ * generated painting behind them for a browser that fetches neither. One uploaded
+ * photograph is one photograph, cropped into the band at every width. That trade
+ * is printed beside the field in the console; leaving the field empty keeps the
+ * pair.
+ */
+function HeroPhotograph({ image }: { image: HeroImage }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="ph">
+      <picture>
+        {/* A real <img> inside a <picture>, which is the one shape
+            `@next/next/no-img-element` does not object to — and it is a media
+            library file from this app's own immutable `/media/...` route, already
+            web-sized, on a Node build with no `next/image` optimiser. */}
+        <img
+          className={`ph__img${loaded ? " is-loaded" : ""}`}
+          src={image.src}
+          alt={image.alt}
+          loading="eager"
+          decoding="sync"
+          fetchPriority="high"
+          {...(image.width && image.height ? { width: image.width, height: image.height } : {})}
+          onLoad={() => setLoaded(true)}
+        />
+      </picture>
+    </div>
+  );
+}
+
+export function Hero({
+  copy = HOME_COPY.hero,
+  image = null,
+}: {
+  copy?: HomeCopy["hero"];
+  /** Null — the usual case — draws the art-directed pair below. */
+  image?: HeroImage | null;
+}) {
   return (
     <section className="hero" id="hero">
       {/* The source marked this whole block aria-hidden because the photograph
@@ -71,6 +122,10 @@ export function Hero() {
           so only the scrim stays hidden and the photograph is described. */}
       <div className="hero__media">
         {/*
+          THE PHOTOGRAPH STAFF CHOSE, OR — WHICH IS THE USUAL CASE — THE PAIR OF
+          PLATES BELOW. What an upload trades away is on `HeroPhotograph`;
+          everything from here down is about the shipped pair.
+
           THE APPROVED v4 PHOTOGRAPH, ON A URL NOBODY HAS EVER FETCHED.
 
           The slot stem carries the version — `hero-maintenance-v4` — because
@@ -104,17 +159,21 @@ export function Hero() {
           The `alt` describes what is common to both plates, because an `<img>`
           carries one alt whichever `<source>` wins.
         */}
-        <PhotoSlot
-          slot="hero-maintenance-v4"
-          narrow={{ slot: "hero-maintenance-mobile-v5", media: "(max-width: 620px)" }}
-          w={1916}
-          h={821}
-          art="city"
-          sizes="100vw"
-          alt="Two maintenance engineers in hi-vis jackets and hard hats working at an open plant panel on a London rooftop at dusk, the lit City skyline behind them and an access platform raised nearby"
-          desc="London rooftop at dusk: engineers at a plant panel on the left, the City skyline centre, an access platform right"
-          priority
-        />
+        {image ? (
+          <HeroPhotograph image={image} />
+        ) : (
+          <PhotoSlot
+            slot="hero-maintenance-v4"
+            narrow={{ slot: "hero-maintenance-mobile-v5", media: "(max-width: 620px)" }}
+            w={1916}
+            h={821}
+            art="city"
+            sizes="100vw"
+            alt="Two maintenance engineers in hi-vis jackets and hard hats working at an open plant panel on a London rooftop at dusk, the lit City skyline behind them and an access platform raised nearby"
+            desc="London rooftop at dusk: engineers at a plant panel on the left, the City skyline centre, an access platform right"
+            priority
+          />
+        )}
         <div className="hero__scrim" aria-hidden="true" />
       </div>
 
@@ -133,21 +192,17 @@ export function Hero() {
             >
               <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21H3l9.7-9.7a4 4 0 0 1 2-4.9Z" />
             </svg>
-            Commercial maintenance across the UK
+            {copy.kicker}
           </span>
           {/* The H1 carries the proposition in one sentence now. It was
               "Maintenance Coordination. / Done Right." — a claim about us. The
               accent span is kept because it is the hero's typographic identity;
               it just falls on the half that says what the reader gets. */}
           <h1 className="hero__title">
-            <span>Multi-site commercial maintenance,</span>
-            <span className="hero__accent">managed through one point of contact.</span>
+            <span>{copy.titleLead}</span>
+            <span className="hero__accent">{copy.titleAccent}</span>
           </h1>
-          <p className="hero__lede">
-            Maintsupp coordinates reactive repairs, planned maintenance and compliance
-            services for retailers and commercial operators across the UK — through one
-            managed contact and a vetted contractor network.
-          </p>
+          <p className="hero__lede">{copy.lede}</p>
           {/*
             THREE TRUST CHIPS, and each one is now a checkable fact.
 
@@ -175,7 +230,7 @@ export function Hero() {
                 <path d="M12 21s8-3.5 8-9V5l-8-3-8 3v7c0 5.5 8 9 8 9Z" />
                 <path d="m9 12 2 2 4-4" />
               </svg>
-              <span>Vetted UK contractor network</span>
+              <span>{copy.pills[0]}</span>
             </li>
             <li>
               <svg
@@ -191,7 +246,7 @@ export function Hero() {
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
                 <circle cx="12" cy="13" r="4" />
               </svg>
-              <span>Evidence-based close-out</span>
+              <span>{copy.pills[1]}</span>
             </li>
             <li>
               <svg
@@ -219,7 +274,7 @@ export function Hero() {
                   nothing to do with the portfolio, and a search-and-replace on
                   "21" would silently change it. Both are pinned in
                   tests/landing-positioning-v2.test.mjs, in both directions. */}
-              <span>21 stores currently coordinated</span>
+              <span>{copy.pills[2]}</span>
             </li>
           </ul>
           <div className="hero__actions">
@@ -243,7 +298,7 @@ export function Hero() {
               target={BOOKING_IS_EXTERNAL ? "_blank" : undefined}
               rel={BOOKING_IS_EXTERNAL ? "noopener noreferrer" : undefined}
             >
-              Book a Portfolio Review
+              {copy.bookLabel}
               <svg
                 className="ic ic--xs"
                 viewBox="0 0 24 24"
@@ -275,7 +330,7 @@ export function Hero() {
                 <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
                 <path d="M12 11v6M9 14h6" />
               </svg>
-              Report a Job
+              {copy.reportLabel}
             </a>
           </div>
           <div className="hero__live" aria-live="off">

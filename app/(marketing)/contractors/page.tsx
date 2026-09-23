@@ -1,16 +1,27 @@
 import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
 import { ContractorApply } from "./apply-form";
+import { readPublicSiteContent } from "../../lib/site-content-public.ts";
 
-export const metadata: Metadata = {
-  /* `absolute`, because the layout appends "| MAINTSUPP" to every title and the
-     brief specifies this one exactly — with the suffix it read "Join the
-     Contractor Network — Maintsupp | MAINTSUPP". */
-  title: { absolute: "Join the Contractor Network — Maintsupp" },
-  description:
-    "Maintsupp allocates multi-site commercial maintenance to vetted independent contractors across the UK. Apply to join the network.",
-  alternates: { canonical: "https://maintsupp.com/contractors" },
-};
+/**
+ * The title and the description staff have saved, or the shipped ones
+ * (`SEO_COPY.contractors`) — decision L. The canonical stays here, in code: this
+ * page is `https://maintsupp.com/contractors` and nothing in a console may say
+ * otherwise (`tests/marketing-canonicals.test.mjs`).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { contractors } = await readPublicSiteContent();
+  return {
+    /* `absolute`, because the layout appends "| MAINTSUPP" to every title and the
+       brief specifies this one exactly — with the suffix it read "Join the
+       Contractor Network — Maintsupp | MAINTSUPP". A saved title is used exactly
+       as saved for the same reason; the save route refuses one carrying the
+       suffix, so it cannot be doubled by hand either. */
+    title: { absolute: contractors.seo.title },
+    description: contractors.seo.description,
+    alternates: { canonical: "https://maintsupp.com/contractors" },
+  };
+}
 
 /**
  * The public contractor application page.
@@ -23,21 +34,17 @@ export const metadata: Metadata = {
  * Header and footer come from the marketing layout, so this file is the page's
  * own content and nothing else.
  */
-export default function ContractorsPage() {
+export default async function ContractorsPage() {
+  const { contractors } = await readPublicSiteContent();
+  const copy = contractors.copy;
   return (
     <main id="top">
       <section className="section">
         <div className="wrap wrap--narrow">
           <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Contractor network", path: "/contractors" }]} />
-          <p className="eyebrow">Contractor network</p>
-          <h1 className="h1">Join the Maintsupp contractor network</h1>
-          <p className="lede">
-            Maintsupp coordinates maintenance across multi-site commercial portfolios in
-            the UK and allocates work to vetted independent contractors. We look for
-            insured, competent trades who work to a documented evidence standard — before
-            and after photos, reports and certificates on every job. Apply below. Approval
-            requires document checks before any work is assigned.
-          </p>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h1 className="h1">{copy.heading}</h1>
+          <p className="lede">{copy.lede}</p>
           <ContractorApply />
         </div>
       </section>
