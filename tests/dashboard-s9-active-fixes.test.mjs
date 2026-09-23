@@ -128,6 +128,9 @@ test("item 40: an abbreviated donut centre is announced with its full value", as
   const abbreviated = page.match(/centreValue=\{ovPoundsShort\(repeat\.spendPence\)\}\s*centreLabel=\{rpPounds\(repeat\.spendPence\)\}/g) ?? [];
   assert.equal(abbreviated.length, 2, "both repeat-spend donuts carry the full figure to a screen reader");
   assert.equal((page.match(/centreValue=\{ovPoundsShort\(/g) ?? []).length, 2, "and no other centre abbreviates without one");
+  /* And under a finger: a tap pins a slice's tooltip, so the slice's share line
+     names the full total the abbreviated centre stands for. */
+  assert.match(page, /`\$\{Math\.round\(share \* 100\)\}% of \$\{rpPounds\(repeat\.spendPence\)\} repeat spend`/);
 });
 
 /* ── item 44 ─────────────────────────────────────────────────────────────── */
