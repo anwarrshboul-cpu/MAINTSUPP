@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ApprovedPhoto } from "./approved-photo";
+import { HOME_COPY, type HomeCopy } from "./copy";
 
 /**
  * How it works — the seven-stage stepper, ported from the standalone landing
@@ -155,7 +156,7 @@ const WORKFLOW_PHOTOS = [
   "/assets/workflow/how-it-works-07-reporting-v3.png",
 ] as const;
 
-export function Workflow() {
+export function Workflow({ copy = HOME_COPY.how }: { copy?: HomeCopy["how"] }) {
   const [active, setActive] = useState(0);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
@@ -228,10 +229,8 @@ export function Workflow() {
     <section className="section section--tint" id="how">
       <div className="wrap">
         <div className="reveal">
-          <p className="eyebrow">How it works</p>
-          <h2 className="h2">
-            When something breaks, one coordinator owns it until it&rsquo;s verified complete.
-          </h2>
+          <p className="eyebrow">{copy.eyebrow}</p>
+          <h2 className="h2">{copy.heading}</h2>
           {/*
             This heading and this section absorb four separate process blocks:
             the "We Report / We Coordinate / Work Completed / Sign-off" icon row,
@@ -240,11 +239,7 @@ export function Workflow() {
             shape, which is how a reader ends up scrolling past the fourth
             explanation of something they understood at the first.
           */}
-          <p className="lede">
-            Follow every job from report to result — reporting, assignment, tracking and
-            analysis in one place. Step through the seven stages to see who does what and
-            what the system records.
-          </p>
+          <p className="lede">{copy.lede}</p>
         </div>
         <div className="wf reveal">
           {/*

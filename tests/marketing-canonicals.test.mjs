@@ -175,11 +175,34 @@ test("the four pages this fixed are fixed, and named so a regression is obvious"
       new RegExp(`canonical: "${ORIGIN}${route}"`),
       `/${folder} must name its own address`,
     );
+    /*
+     * RE-POINTED FOR /faqs ONLY (decision L), and the rule got stronger rather
+     * than weaker.
+     *
+     * `/faqs` is editable copy now: its title and description come from
+     * `SEO_COPY.faqs` in `app/(marketing)/_sections/copy.ts` through
+     * `generateMetadata`, so the literal moved out of the page file. The two
+     * things this test exists to stop are both still stopped — the page still
+     * declares its own canonical (asserted above, in code, unchanged), and the
+     * suffix still cannot be doubled: the shipped title is checked in copy.ts, and
+     * `validateSiteContent` REFUSES a saved title containing "| MAINTSUPP", which
+     * is a guarantee the old literal never gave. The three legal notices are not
+     * editable at all and keep their literals here.
+     */
+    const named = folder === "faqs" ? await read("app/(marketing)/_sections/copy.ts") : source;
     assert.match(
-      source,
+      named,
       new RegExp(`title: "${title}",`),
       `/${folder} must say its name once and let the template add the suffix`,
     );
+    if (folder === "faqs") {
+      const rules = await read("app/lib/site-content.ts");
+      assert.match(
+        rules,
+        /\/\\\|\\s\*MAINTSUPP\/i\.test\(cleaned\)/,
+        "and a saved title carrying the suffix is refused",
+      );
+    }
     assert.doesNotMatch(
       source.replace(/\/\*[\s\S]*?\*\//g, ""),
       /\|\s*MAINTSUPP/,

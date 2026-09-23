@@ -79,6 +79,7 @@ import { BackupsView } from "./backups-view";
 import { ConsoleSearchView } from "./console-search-view";
 import { LeadsInboxView } from "./leads-view";
 import { PlatformOverview } from "./platform-overview";
+import { SiteCopyView } from "./site-copy-view";
 import { SiteMediaView } from "./site-media-view";
 import { SiteNavigationView } from "./site-navigation-view";
 import { SitePagesView } from "./site-pages-view";
@@ -143,6 +144,8 @@ export function PlatformShell({
         return <SitePagesView />;
       case "navigation":
         return <SiteNavigationView />;
+      case "copy":
+        return <SiteCopyView />;
       case "media":
         return <SiteMediaView />;
       case "leads":

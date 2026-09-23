@@ -80,7 +80,11 @@ const ENTRIES = [
   /* TEN: Website navigation (decision J, §77 item 11) arrived with
      `/api/site-navigation`, and sits beside Website pages — the same website. */
   ["navigation", "app/(app)/admin/navigation/page.tsx", "/admin/navigation"],
-  /* ELEVEN: Website media (decision K, §77 item 12) arrived with `/api/cms-media`. */
+  /* ELEVEN: Website copy (decision L, §77 item 9) arrived with `/api/site-content`
+     — the words on the pages that ship with the site, beside the pages written in
+     the CMS and the navigation, because all three are the same website. */
+  ["copy", "app/(app)/admin/copy/page.tsx", "/admin/copy"],
+  /* TWELVE: Website media (decision K, §77 item 12) arrived with `/api/cms-media`. */
   ["media", "app/(app)/admin/media/page.tsx", "/admin/media"],
   ["leads", "app/(app)/admin/leads/page.tsx", "/admin/leads"],
   ["applications", "app/(app)/admin/applications/page.tsx", "/admin/applications"],

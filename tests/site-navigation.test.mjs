@@ -536,7 +536,11 @@ test("the migration is one guarded table with no seed, in applyMigrations, mirro
   const init = await read("db/init.ts");
   const apply = init.slice(init.indexOf("async function applyMigrations"), init.indexOf("async function applyMigrations") + 12_000);
   assert.match(apply, /await ensureSiteNavigation\(d1\);/);
-  const stage = init.slice(init.indexOf("async function ensureSiteNavigation"), init.indexOf("async function ensureThemeTokens"));
+  /* RE-POINTED (decision L): `ensureSiteContent` was added directly beneath this
+     stage, so the slice now ends where this stage ends rather than at the next one
+     but two — otherwise the `doesNotMatch` below reads another stage's prose and
+     this test starts reporting a defect in a file it is not about. */
+  const stage = init.slice(init.indexOf("async function ensureSiteNavigation"), init.indexOf("async function ensureSiteContent"));
   assert.match(stage, /CREATE TABLE IF NOT EXISTS site_navigation/);
   assert.doesNotMatch(stage, /INSERT|DROP|ALTER|DELETE/i);
   const repairs = init.slice(init.indexOf("async function repairInvariants"), init.indexOf("async function applyMigrations"));

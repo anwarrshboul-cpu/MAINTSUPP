@@ -1,3 +1,4 @@
+import { HOME_COPY, type HomeCopy } from "./copy";
 /*
  * SECTION 9 — Who runs Maintsupp.
  *
@@ -33,7 +34,7 @@ const CHIPS = [
   "Mon–Fri, 8:30am–5:30pm",
 ];
 
-export function Founder() {
+export function Founder({ copy = HOME_COPY.founder }: { copy?: HomeCopy["founder"] }) {
   return (
     <section className="section" id="founder">
       <div className="wrap">
@@ -58,16 +59,9 @@ export function Founder() {
                 line, body, three chips — and an eyebrow reading "Who runs
                 Maintsupp" above a heading reading "Who runs Maintsupp" is the
                 same words twice, which is worse than the missing flourish. */}
-            <h2 className="h2">Who runs Maintsupp</h2>
+            <h2 className="h2">{copy.heading}</h2>
             <p className="founder__name">Anwar Shboul — Founder &amp; Director</p>
-            <p className="lede">
-              Maintsupp is founder-led. Anwar has over five years&rsquo; experience in
-              facilities management for commercial stores across the UK — intake, triage,
-              contractor management and verified close-out, day in, day out. Every client
-              portfolio gets one named coordinator who owns each job until it&rsquo;s
-              verified complete. You deal with a person accountable for the outcome, not a
-              ticket queue.
-            </p>
+            <p className="lede">{copy.lede}</p>
             <ul className="founder__chips">
               {CHIPS.map((chip) => (
                 <li className="chip" key={chip}>

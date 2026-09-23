@@ -108,15 +108,32 @@ const SECTIONS = [
 ];
 
 test("the fourteen sections render on the homepage, in order, each exactly once", async () => {
+  /*
+   * RE-POINTED (decision L): the page draws the order `app/lib/site-content.ts`
+   * declares — the shipped sequence unless MAINTSUPP staff have saved another — so
+   * the list of fourteen is read from the registry, and this file's own
+   * `SECTIONS` array of component names is checked against the record in
+   * `page.tsx` that maps one to the other. Both halves, so a section cannot be
+   * dropped from either side unnoticed.
+   */
   const page = await read("app/(marketing)/page.tsx");
-  const body = page.slice(page.indexOf("export default function HomePage"));
+  const registry = await read("app/lib/site-content.ts");
+  const declared = registry.slice(
+    registry.indexOf("const HOME_SECTIONS"),
+    registry.indexOf("export const HOME_SECTION_ORDER"),
+  );
+  const keys = [...declared.matchAll(/key: "([A-Za-z]+)"/g)].map((match) => match[1]);
+  assert.equal(keys.length, 14, "fourteen sections");
+  assert.equal(new Set(keys).size, keys.length, "each exactly once");
+  assert.equal(keys.at(-1), "reportJob", "Report a Job last");
 
-  const rendered = [...body.matchAll(/<([A-Z][A-Za-z]*)\s*\/>/g)].map((match) => match[1]);
-  assert.deepEqual(rendered, SECTIONS, "the page must render exactly these, in this order");
-
+  const componentFor = page.slice(page.indexOf("const SECTIONS"), page.indexOf("export default"));
+  for (const key of keys) {
+    assert.match(componentFor, new RegExp(`\\n  ${key}: `), `${key} must name the component that draws it`);
+  }
   for (const section of SECTIONS) {
-    const count = rendered.filter((name) => name === section).length;
-    assert.equal(count, 1, `${section} renders ${count} times`);
+    const count = [...componentFor.matchAll(new RegExp(`<${section}\\b`, "g"))].length;
+    assert.equal(count, 1, `${section} is drawn ${count} times`);
   }
 });
 
@@ -599,9 +616,16 @@ test("the FAQ structured data has exactly one home, and it is /faqs", async () =
   /* And the homepage really does render them, or the paragraph above is an
      excuse rather than a reason. */
   const faqSection = await read("app/(marketing)/_sections/faq.tsx");
+  /* RE-POINTED (decision L): the shared array is the DEFAULT of the section's
+     `items` prop, so `/faqs` and this section still render one list — now one
+     resolved list, which staff may edit without either page gaining a copy. */
   assert.match(faqSection, /import \{ faq \} from "\.\/content"/, "shared, not copied");
-  assert.match(faqSection, /faq\.map\(\(entry, index\) => \(/, "and actually rendered");
-  assert.match(page, /<Faq \/>/, "and the section is on the page");
+  assert.match(faqSection, /items = faq,/, "and the shared array is the default");
+  assert.match(faqSection, /items\.map\(\(entry, index\) => \(/, "and actually rendered");
+  /* RE-POINTED (decision L): the homepage names each section's component in the
+     `SECTIONS` record rather than as a self-closing tag, and hands the FAQ section
+     the resolved list. */
+  assert.match(page, /faq: \(\{ home, faqs \}\) => <Faq copy=\{home\.copy\.faq\} items=\{faqs\.questions\}/, "and the section is on the page");
 
   // It has to still exist somewhere, and it does: on the page that renders the
   // questions. Checked as a real pairing rather than a grep for the word.
