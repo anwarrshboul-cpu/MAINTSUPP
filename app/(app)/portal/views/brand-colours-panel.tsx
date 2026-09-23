@@ -55,7 +55,7 @@ type ThemeToken = {
   seedInput: string;
   /*
    * What a non-colour token may be set to: the typefaces for a font token, the
-   * corner, depth or row-height options for a choice token. The server owns the
+   * corner or depth options for a choice token. The server owns the
    * list because it is the same list `validateThemeToken` refuses anything outside
    * — a copy here would be a second source of truth for what is really a safety
    * boundary, and the first divergence would be a select offering something the API
@@ -236,25 +236,23 @@ export function BrandColoursPanel() {
             * paragraphs above: what a control reaches is a promise, so what it does
             * NOT reach is said here rather than left for somebody to hunt for.
             *
-            * Corners reach the 242 rules that read the product's radius scale.
+            * Corners reach the 249 border-radius rules that read the product's
+            * radius scale (measured 2026-09-23), the Overview's cards among them.
             * Corners written as their own measurement elsewhere, and everything
             * deliberately circular — avatars, pills — keep their own shape: a pill
             * that squared off with the panels would read as a bug, not a style.
             *
-            * Row height is offered for the BOARD only, and only taller. A denser
-            * row would take a target everybody has to hit further below the 44px
-            * touch minimum, which is an accessibility decision dressed as a
-            * styling one. General spacing is not offered at all, for the reason
+            * Spacing and row height are not offered, for the reasons
             * `theme-tokens.ts` measures: the product sets padding per surface in
-            * 1,833 places and twelve of them read a variable.
+            * 1,833 places and twelve of them read a variable, and the job board's
+            * row heights are literals a variable could not reach.
             */}
           <p className="brand-colours__scope">
             Corner style and panel depth apply to the panels, cards, buttons,
             inputs and dialogs that share the product’s own scales; anything drawn
-            deliberately round — avatars, status pills — stays round. Board row
-            height changes the job board only, and only <em>upwards</em>: a denser
-            row would fall further below the minimum comfortable touch size.
-            General spacing is not configurable.
+            deliberately round — avatars, status pills — stays round. Neither
+            changes the size of anything you tap or type into. General spacing is
+            not configurable.
           </p>
         </div>
       </div>
@@ -266,8 +264,8 @@ export function BrandColoursPanel() {
             <div className="brand-colour" key={token.key}>
               {/*
                  * RE-POINTED, not widened by accident: this used to read
-                 * `token.kind === "font"`. A `choice` token — corners, depth, the
-                 * board's row height — is chosen from a list for exactly the same
+                 * `token.kind === "font"`. A `choice` token — corners, depth — is
+                 * chosen from a list for exactly the same
                  * safety reason a face is, so the two share one control and the test
                  * that pinned the font branch now pins this one. A COLOUR is still
                  * the only kind that gets a swatch.
@@ -336,7 +334,7 @@ export function BrandColoursPanel() {
                 <strong>{token.label}</strong>
                 <small>{token.description}</small>
                 {/* What the CHOSEN option does, in the server's own words. A face
-                    has no note; corners, depth and row height do, and reading it
+                    has no note; corners and depth do, and reading it
                     under the control is how somebody knows what they picked
                     without saving to find out. */}
                 {token.kind === "choice"

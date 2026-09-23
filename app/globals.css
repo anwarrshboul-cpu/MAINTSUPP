@@ -354,6 +354,9 @@
   --shadow-lg: 0 28px 80px rgba(7, 24, 38, 0.16);
   --radius-sm: 8px;
   --radius: 13px;
+  /* The cards' own rung: the Overview's cards and KPI tiles and the job dialogs
+     are drawn at 15px. `shape.corners` moves it with the other three. */
+  --radius-card: 15px;
   --radius-lg: 20px;
   /*
    * THE LAYER SCALE. One ordered set of depths, by role, and nothing in a
@@ -8648,7 +8651,7 @@ th.sheet-column--name {
   max-height: calc(100vh - 44px);
   flex-direction: column;
   overflow: hidden;
-  border-radius: 15px;
+  border-radius: var(--radius-card);
   background: white;
   box-shadow: var(--shadow-lg);
   animation: modal-in 170ms ease-out;

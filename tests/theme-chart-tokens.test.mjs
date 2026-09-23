@@ -359,18 +359,19 @@ test("status.attention closes the gap the catalogue had", async () => {
   assert.ok(uses >= 1, "something must read --status-orange, or the token is decorative");
 });
 
-test("the catalogue is eleven tokens, and none names a ground", () => {
+test("the catalogue is ten tokens, and none names a ground", () => {
   /*
    * RE-POINTED TWICE, and the convention is the point rather than the number.
    *
    * Six to eight: the typeface phase added `type.body` and `type.display`.
-   * Eight to eleven: the surface phase added `shape.corners`, `surface.depth` and
-   * `layout.board_density`. The list is still pinned IN FULL rather than by length
+   * Eight to ten: the surface phase added `shape.corners` and `surface.depth`. (A
+   * third, `layout.board_density`, was withdrawn before release because it reached
+   * no rendered element.) The list is still pinned IN FULL rather than by length
    * alone, for the reason it was pinned in the first place — a token added without
    * a deliberate change here is a token nobody chose to offer — and the ground is
    * still not among them.
    */
-  assert.equal(THEME_TOKEN_CATALOGUE.length, 11);
+  assert.equal(THEME_TOKEN_CATALOGUE.length, 10);
   assert.deepStrictEqual(
     THEME_TOKEN_CATALOGUE.map((token) => token.key),
     [
@@ -384,7 +385,6 @@ test("the catalogue is eleven tokens, and none names a ground", () => {
       "type.display",
       "shape.corners",
       "surface.depth",
-      "layout.board_density",
     ],
   );
   /*

@@ -5,15 +5,16 @@
  *
  * A colour is a hex and a typeface is a key into a whitelist. A corner style is
  * neither: one name stands for a family of measurements. So `TokenKind` gained
- * `"choice"`, and three tokens arrived on it — `shape.corners`, `surface.depth`
- * and `layout.board_density`.
+ * `"choice"`, and two tokens arrived on it — `shape.corners` and `surface.depth`.
+ * A third, `layout.board_density`, was built and withdrawn before release: set to
+ * its tallest option on a Preview it changed the height of 0 rendered elements,
+ * because the job board's rows are literals (see `theme-tokens.ts`).
  *
  * The question each candidate axis had to answer was **does the property funnel**,
  * because a control that saves and changes almost nothing is the same fault as a
  * control that changes something and does not save, and this product has shipped
  * both. `theme-tokens.ts` records the measurement that decided it: border-radius
- * 242 of 1,129 declarations read a `var()`, box-shadow 122 of 229, and every board
- * dimension in `app/board-metrics.css` is a variable — while font-size is 2 of
+ * 242 of 1,129 declarations read a `var()` and box-shadow 122 of 229, while font-size is 2 of
  * 1,898 and padding 12 of 1,833. That arithmetic is why there is no text-scale and
  * no general spacing control here, and the tests below keep it that way.
  *
@@ -51,11 +52,10 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const read = (file) => readFile(path.join(root, file), "utf8");
 const decommented = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "");
 
-/** The three choice tokens, the property each is checked through, and its default. */
+/** The two choice tokens, the property each is checked through, and its default. */
 const CHOICES = [
   ["shape.corners", "--radius-sm", "soft"],
   ["surface.depth", "--shadow-md", "soft"],
-  ["layout.board_density", "--board-row-height", "standard"],
 ];
 
 const choiceTokens = () => THEME_TOKEN_CATALOGUE.filter((token) => token.kind === "choice");
@@ -155,7 +155,7 @@ test("a workspace that has chosen no surface style emits nothing", () => {
   /* And an unset choice token resolves to its seed rather than to a first option. */
   const family = resolveThemeFamily({}, "light");
   assert.equal(family["--radius-sm"], "8px");
-  assert.equal(family["--board-row-height"], "36px");
+  assert.equal(family["--radius-card"], "15px", "the card rung opens on what the Overview ships");
   assert.equal(family["--shadow-md"], "0 12px 36px rgba(7, 24, 38, 0.09)");
 });
 
@@ -208,9 +208,8 @@ test("the emitted block never contains a keyword a caller sent", () => {
   const css = resolveThemeCss({
     "shape.corners": "rounded",
     "surface.depth": "flat",
-    "layout.board_density": "spacious",
   });
-  for (const word of ["rounded", "flat", "spacious"]) {
+  for (const word of ["rounded", "flat"]) {
     assert.ok(!css.includes(word), `${word} is a key, not a value — it must not be emitted`);
   }
   /* What IS emitted is measurements, and nothing that could close a declaration. */
@@ -222,40 +221,27 @@ test("the emitted block never contains a keyword a caller sent", () => {
 /* The floors this phase may not cross                                 */
 /* ================================================================== */
 
-test("no option makes a row shorter than the product already ships", () => {
+test("no token offers the board's geometry while the board does not read it", async () => {
   /*
-   * WHY THE BOUND IS ONE-DIRECTIONAL, said here as well as in the module: the
-   * board's rows are 36px today, already under the 44px touch minimum this
-   * repository pins in ten places. A "denser" option would take a target everybody
-   * in the workspace has to hit further below that minimum — an accessibility
-   * decision dressed up as a styling one. Taller is the only direction on offer.
+   * RE-POINTED from "no option makes a row shorter", which guarded a
+   * `layout.board_density` token that was withdrawn before release. The token set
+   * `--board-row-height` and its three siblings, which `app/board-metrics.css`
+   * reads, but no rendered component carries a class that file styles. The live
+   * board is `.live-sheet`, sized by literals per breakpoint, so the control saved
+   * and changed nothing: measured on a Preview, 0 elements moved on four screens.
+   *
+   * So the rule now is the one that would have caught it. A `--board-*` property
+   * may be offered only once `.live-sheet` reads it. Until then, none is. If it is
+   * ever offered, it may only make rows TALLER: they are already under the 44px
+   * touch minimum.
    */
-  const density = themeTokenDefinition("layout.board_density");
-  const shipped = density.seed.light;
-  for (const option of density.options) {
-    for (const [property, value] of Object.entries(option.family.light)) {
-      const chosen = Number.parseInt(value, 10);
-      const ships = Number.parseInt(shipped[property], 10);
-      assert.ok(Number.isFinite(chosen), `${property} must be a px measurement`);
-      assert.ok(
-        chosen >= ships,
-        `${option.key} sets ${property} to ${value}, below the shipped ${shipped[property]}`,
-      );
-    }
-    /* The board's own header requires a grid that reads as a grid: a group header
-       taller than a row, and a subitem row no taller than its parent. */
-    const family = option.family.light;
-    assert.ok(
-      Number.parseInt(family["--board-group-header-height"], 10) >
-        Number.parseInt(family["--board-row-height"], 10),
-      `${option.key} must keep a group header taller than a row`,
-    );
-    assert.ok(
-      Number.parseInt(family["--board-subitem-row-height"], 10) <=
-        Number.parseInt(family["--board-row-height"], 10),
-      `${option.key} must keep a subitem row no taller than its parent`,
-    );
-  }
+  const offersBoard = choiceTokens().some((token) =>
+    token.options.some((option) => Object.keys(option.family.light).some((name) => name.startsWith("--board-"))),
+  );
+  const css = await read("app/globals.css");
+  const liveSheetReadsIt = /\.live-sheet td[^{]*\{[^}]*height: var\(--board-row-height\)/.test(css);
+  assert.ok(!offersBoard || liveSheetReadsIt, "a board-height token would change nothing the reader sees");
+  assert.equal(themeTokenDefinition("layout.board_density"), null, "withdrawn, not merely hidden");
 });
 
 test("no token — of any kind — configures a metric the product sets per surface", async () => {
@@ -329,7 +315,6 @@ test("a choice token is never measured for contrast", () => {
     themeContrastWarnings({
       "shape.corners": "sharp",
       "surface.depth": "flat",
-      "layout.board_density": "spacious",
     }),
     [],
   );
@@ -339,29 +324,23 @@ test("a choice token is never measured for contrast", () => {
 /* The wiring: one write path, one list, one control                   */
 /* ================================================================== */
 
-test("the choice tokens reach the grid and the surfaces they claim", async () => {
-  /* The board's geometry is applied from the file that declares it, which is what
-     makes this the one density the product can honestly offer. */
-  const metrics = await read("app/board-metrics.css");
-  for (const property of [
-    "--board-row-height",
-    "--board-header-height",
-    "--board-group-header-height",
-    "--board-subitem-row-height",
-  ]) {
-    assert.match(metrics, new RegExp(`${property}:`), `${property} must be declared`);
-    assert.ok(
-      metrics.split(`var(${property})`).length > 1,
-      `${property} must be READ by a rule, or the token is decorative`,
+test("the choice tokens reach the surfaces they claim", async () => {
+  /*
+   * THE OVERVIEW'S CARDS READ THE CARD RUNG. Measured before `--radius-card`
+   * existed: `sharp` corners changed 4 of the Overview's 816 visible elements,
+   * because its cards and KPI tiles are drawn at 15px, which is none of the
+   * scale's three rungs. They read the fourth rung now, and it ships at exactly
+   * 15px, so nothing moves until a workspace chooses otherwise.
+   */
+  const overview = await read("app/(app)/portal/ops/oi-dash.css");
+  for (const selector of [".oi-card", ".oi-kpi", ".ov-skeleton"]) {
+    assert.match(
+      overview,
+      new RegExp(`\\.ov-dash\\.oi-dash \\${selector} \\{[^}]*border-radius: var\\(--radius-card\\);`),
+      `${selector} must read the card rung`,
     );
   }
-  /* And the stamped block is loaded after board-metrics.css, or a `:root` override
-     of a board dimension would lose the tie on document order. */
-  const layout = await read("app/(app)/layout.tsx");
-  assert.ok(
-    layout.indexOf("boardMetricsCss") < layout.indexOf("data-maintsupp-theme"),
-    "the theme element must come after the board metrics stylesheet",
-  );
+  assert.match(await read("app/globals.css"), /--radius-card: 15px;/, "the rung ships at the Overview's 15px");
   /*
    * The radius and depth scales are read widely enough to be worth offering, and
    * this is the assertion that keeps that true. It counts across every portal
@@ -412,7 +391,7 @@ test("the panel offers one list control and says what the surface style does not
      breaks collapsed, so re-wrapping a paragraph cannot fail a test about words. */
   const copy = panel.replace(/\s+/g, " ");
   assert.match(copy, /anything drawn deliberately round . avatars, status pills . stays round/);
-  assert.match(copy, /Board row height changes the job board only, and only <em>upwards<\/em>/);
+  assert.match(copy, /Neither changes the size of anything you tap or type into\./);
   assert.match(copy, /General spacing is not configurable\./);
   assert.match(copy, /Brand colours, typeface and surface style/);
 });
@@ -477,7 +456,7 @@ test("live: a chosen corner style is stored, echoed, stamped and versioned", { s
 
     const saved = await call(cookie, "/api/theme", {
       method: "PUT",
-      body: JSON.stringify({ tokens: { "shape.corners": "sharp", "layout.board_density": "spacious" } }),
+      body: JSON.stringify({ tokens: { "shape.corners": "sharp" } }),
     });
     assert.equal(saved.status, 200, JSON.stringify(saved.body));
     const corners = saved.body.tokens.find((token) => token.key === "shape.corners");
@@ -491,7 +470,7 @@ test("live: a chosen corner style is stored, echoed, stamped and versioned", { s
     const html = await page.text();
     assert.match(html, /data-maintsupp-theme/, "the workspace's block must be stamped");
     assert.match(html, /--radius-sm:2px/, "and carry the chosen corner scale");
-    assert.match(html, /--board-row-height:48px/, "and the chosen row height");
+    assert.match(html, /--radius-card:4px/, "and the card rung moves with it");
     assert.ok(!html.includes(">sharp<"), "the key is never emitted as a value");
 
     const versions = await call(cookie, "/api/versions?subject=theme&key=tokens&limit=5");

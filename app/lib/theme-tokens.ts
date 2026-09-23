@@ -62,8 +62,7 @@
  * already hold a risk-scored order for that migration; it is its own phase, not a
  * control.
  *
- * SHAPE, DEPTH AND THE BOARD'S RHYTHM ARE NOW IN SCOPE, AND THEY ARE THE THIRD
- * KIND OF TOKEN.
+ * SHAPE AND DEPTH ARE NOW IN SCOPE, AND THEY ARE THE THIRD KIND OF TOKEN.
  *
  * A colour is a hex and a typeface is a key into a whitelist. A corner style is
  * neither: it is one name standing for a whole small family of measurements.
@@ -80,7 +79,7 @@
  *
  *   border-radius   1,129 declarations,   242 read a var()   -> OFFERED
  *   box-shadow        229 declarations,   122 read a var()   -> OFFERED
- *   the board grid   every dimension in `app/board-metrics.css` is a var()  -> OFFERED
+ *   the board grid   every dimension in `app/board-metrics.css` is a var()  -> WITHDRAWN
  *   font-size       1,898 declarations,     2 read a var()   -> refused
  *   padding         1,833 declarations,    12 read a var()   -> refused
  *   line-height       303 declarations,     1 read a var()   -> refused
@@ -91,20 +90,24 @@
  * reason is arithmetic rather than taste: either would move a handful of rules
  * and leave nineteen hundred behind. `docs/vibe-tokens.reference.css` and
  * `docs/vibe-token-mapping.md` hold a risk-scored order for that migration; it is
- * its own phase, not a switch in front of one. What CAN be offered for density is
- * the surface where every dimension already funnels — the board — and that is
- * `layout.board_density`.
+ * its own phase, not a switch in front of one.
  *
- * WHY NO OPTION MAKES ANYTHING SMALLER THAN THE PRODUCT ALREADY SHIPS.
+ * THE BOARD'S ROW HEIGHT WAS BUILT, MEASURED AND WITHDRAWN — 2026-09-23. A
+ * `layout.board_density` token set the four `--board-*` heights, and the variables
+ * really are read by every rule in `app/board-metrics.css`. But NO rendered
+ * component carries any class that file styles: the job board people use is
+ * `.live-sheet`, whose cells take literal heights per breakpoint in `globals.css`
+ * (36, 40 and 44px), and `board-visibility.ts` sizes skipped groups from the
+ * measured 40px. Set to its tallest option on a Preview, the token changed the
+ * computed height of **0** elements on the Overview, the jobs board, Reports and
+ * Settings. It was a control that saves and changes nothing, so it is not offered.
+ * Wiring it for real means moving `.live-sheet`'s heights and `board-visibility.ts`'s
+ * constants onto the variables together, which is its own unit.
  *
- * The board's rows are 36px today, already below the 44px touch minimum this
- * repository pins in ten places, and typed controls are pinned at a literal 16px
- * because a smaller field makes iPhones zoom in and never zoom back out. A
- * "denser" option would take a row further below the touch minimum for everybody
- * in the workspace, which is a decision about accessibility dressed up as a
- * decision about taste. So the density token only ever makes rows TALLER, and
- * `sharp` corners and `flat` shadows change shape and depth without touching a
- * single dimension anybody has to hit.
+ * NO OPTION CHANGES A DIMENSION ANYBODY HAS TO HIT. Typed controls are pinned at a
+ * literal 16px because a smaller field makes iPhones zoom in and never zoom back
+ * out, and the touch minimum is 44px. `sharp` corners and `flat` shadows change
+ * shape and depth, never a size.
  *
  * CHART PALETTES ARE NO LONGER OUT OF SCOPE, and this sentence used to say they
  * were. The always-dark dashboards' accents now come from `--chart-*`, which every
@@ -286,9 +289,18 @@ function bothModes(family: TokenFamily): Record<ThemeMode, TokenFamily> {
  * as a set, because a workspace choosing "squared" means the product, not one
  * control — and because a scale whose rungs can cross is not a scale.
  *
+ * `--radius-card` IS THE FOURTH RUNG, added when the first three were measured on
+ * the Overview: set to `sharp`, they changed **4** of its 816 visible elements,
+ * because its cards and KPI tiles (30 of them) and the job dialogs are drawn at
+ * 15px, which is none of the three. Moving those onto 13px or 20px would have
+ * changed the shipped look to make the control work. A rung at exactly 15px
+ * changes nothing until somebody chooses otherwise.
+ *
  * WHAT THIS DOES NOT REACH, which the panel says out loud rather than leaving to be
- * discovered: 473 rectangular corners in this product are written as their own
- * literal and keep their own shape, and every deliberately circular thing —
+ * discovered: 587 `border-radius` declarations in the portal's stylesheets are a
+ * px literal from 1 to 98px (measured 2026-09-23, marketing excluded, anything
+ * reading a `var()` excluded) and keep their own shape, and every deliberately
+ * circular thing —
  * avatars, the 999px pills — is left alone on purpose. A pill that squared off
  * with the panels would read as a bug rather than as a style.
  */
@@ -297,19 +309,19 @@ const CORNER_OPTIONS: readonly ThemeTokenOption[] = [
     key: "sharp",
     label: "Squared",
     note: "Almost flat corners, for a technical, spreadsheet-like feel.",
-    family: bothModes({ "--radius-sm": "2px", "--radius": "4px", "--radius-lg": "6px" }),
+    family: bothModes({ "--radius-sm": "2px", "--radius": "4px", "--radius-card": "4px", "--radius-lg": "6px" }),
   },
   {
     key: "soft",
     label: "Soft (MAINTSUPP default)",
     note: "The shipped scale.",
-    family: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-lg": "20px" }),
+    family: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-card": "15px", "--radius-lg": "20px" }),
   },
   {
     key: "rounded",
     label: "Rounded",
     note: "Noticeably rounder panels, cards and buttons.",
-    family: bothModes({ "--radius-sm": "12px", "--radius": "18px", "--radius-lg": "24px" }),
+    family: bothModes({ "--radius-sm": "12px", "--radius": "18px", "--radius-card": "20px", "--radius-lg": "24px" }),
   },
 ];
 
@@ -378,59 +390,6 @@ const DEPTH_OPTIONS: readonly ThemeTokenOption[] = [
         "--shadow-lg": "0 36px 96px rgba(0, 0, 0, 0.62)",
       },
     },
-  },
-];
-
-/**
- * THE BOARD'S VERTICAL RHYTHM — the one density this product can honestly offer.
- *
- * `app/board-metrics.css` declares every board dimension as a custom property and
- * applies them from one place, for a reason its own header gives: "The board
- * previously mixed 30px, 32px, 36px, 38px and 39px row heights… A grid only reads
- * as a grid when it is uniform." That uniformity is exactly what makes this
- * configurable when general padding is not — four properties own the whole grid.
- *
- * NOTHING GETS SHORTER. 36px is already under the 44px touch minimum, so a
- * "compact" option would push a row everybody in the workspace has to hit further
- * below it. Taller is the only direction a bounded engine may offer, and it is the
- * direction somebody using the board on a tablet on site actually wants.
- *
- * The four move together, keeping the relationships the board's own header set out:
- * a group header taller than a row, and a subitem row shorter than its parent.
- */
-const BOARD_DENSITY_OPTIONS: readonly ThemeTokenOption[] = [
-  {
-    key: "standard",
-    label: "Standard (MAINTSUPP default)",
-    note: "The shipped grid — 36px rows, matching the board this replaced.",
-    family: bothModes({
-      "--board-row-height": "36px",
-      "--board-header-height": "36px",
-      "--board-group-header-height": "40px",
-      "--board-subitem-row-height": "32px",
-    }),
-  },
-  {
-    key: "comfortable",
-    label: "Comfortable",
-    note: "A little more room in every row. Easier on a tablet.",
-    family: bothModes({
-      "--board-row-height": "42px",
-      "--board-header-height": "40px",
-      "--board-group-header-height": "46px",
-      "--board-subitem-row-height": "38px",
-    }),
-  },
-  {
-    key: "spacious",
-    label: "Spacious",
-    note: "Rows above the 44px touch minimum throughout.",
-    family: bothModes({
-      "--board-row-height": "48px",
-      "--board-header-height": "44px",
-      "--board-group-header-height": "52px",
-      "--board-subitem-row-height": "44px",
-    }),
   },
 ];
 
@@ -743,7 +702,7 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
       "How rounded panels, cards, buttons, inputs and chips are. Pills and avatars stay round.",
     seedInput: "soft",
     options: CORNER_OPTIONS,
-    seed: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-lg": "20px" }),
+    seed: bothModes({ "--radius-sm": "8px", "--radius": "13px", "--radius-card": "15px", "--radius-lg": "20px" }),
     derive: (key, mode) =>
       optionFamily(CORNER_OPTIONS, key, mode) ??
       (optionFamily(CORNER_OPTIONS, "soft", mode) as TokenFamily),
@@ -772,30 +731,6 @@ export const THEME_TOKEN_CATALOGUE: readonly ThemeTokenDefinition[] = [
     derive: (key, mode) =>
       optionFamily(DEPTH_OPTIONS, key, mode) ??
       (optionFamily(DEPTH_OPTIONS, "soft", mode) as TokenFamily),
-  },
-  {
-    /*
-     * THE BOARD'S ROW HEIGHT. The seeded values live in `app/board-metrics.css`
-     * rather than `globals.css`, because that is where the board's geometry is
-     * declared and applied; the foundation test reads both files for that reason.
-     */
-    key: "layout.board_density",
-    label: "Board row height",
-    group: "Layout",
-    kind: "choice",
-    description:
-      "How tall the job board's rows are. Only taller than the shipped grid — a denser row would fall further below the 44px touch minimum.",
-    seedInput: "standard",
-    options: BOARD_DENSITY_OPTIONS,
-    seed: bothModes({
-      "--board-row-height": "36px",
-      "--board-header-height": "36px",
-      "--board-group-header-height": "40px",
-      "--board-subitem-row-height": "32px",
-    }),
-    derive: (key, mode) =>
-      optionFamily(BOARD_DENSITY_OPTIONS, key, mode) ??
-      (optionFamily(BOARD_DENSITY_OPTIONS, "standard", mode) as TokenFamily),
   },
 ] as const;
 
