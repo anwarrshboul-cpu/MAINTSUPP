@@ -25,6 +25,7 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * monday column id → the column title the importer matches on.
@@ -180,8 +181,11 @@ for (const title of ordered) {
   lines.push("");
 }
 
+// Beside this script. `fileURLToPath`, because a URL's path is not a filesystem
+// path: on Windows it kept a separator before the drive (so `C:\C:\…`) and its
+// percent-encoding (so a space became `%20`) — ENOENT on the first write.
 const out = path.join(
-  path.dirname(new URL(import.meta.url).pathname),
+  path.dirname(fileURLToPath(import.meta.url)),
   "maintenance-full.csv",
 );
 writeFileSync(out, lines.join("\n"), "utf8");

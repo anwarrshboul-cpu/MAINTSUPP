@@ -222,48 +222,78 @@ ids — a filename-substring sweep has repeatedly eaten other fixtures.
 
 ## Known local-environment issue
 
-**The local D1 is a scratch development database with no Monday data.** It is
-full of test-fixture tenants (RBAC and browser-QA organisations, demo workspace).
-Measured on 2026-09-23 against `5e02159`, read-only, on a copy:
+**The local D1 is a development database, not the client estate.** It is full of
+test-fixture tenants (RBAC and browser-QA organisations, demo workspace) and holds
+only a small, deliberate slice of Monday data. Measured on 2026-09-24 against
+`6898920`, after the recovery below:
 
 | | local D1 | what the estate tests expect |
 | --- | --- | --- |
-| attachments | **235** | more than 2,000 (the old pin: 2,968) |
-| jobs (`maintenance_requests`) | **323** | exactly 776 |
-| Monday comments (`item_updates` `monday-%`) | **0** | at least 269 |
-| sites | **233** | exactly 10 |
+| attachments | **293** | more than 2,000 (the old pin: 2,968) |
+| jobs (`maintenance_requests`) | **339** | exactly 776 |
+| Monday comments (`item_updates` `monday-%`) | **45** | at least 269 |
+| sites | **232** | exactly 10 |
 
-This paragraph used to say the attachment estate held 5 rows with everything
-else intact, and that five tests fail. Both were wrong by then.
+**The lightweight recovery (2026-09-24, LOCAL ONLY).** With the owner's approval
+the active local D1 was rebuilt on a disposable copy, then promoted with its
+local R2 storage (the database and the objects move together, or attachment rows
+point at nothing):
+- the stale "W2 Scope Shared Name …" live-test fixtures that broke the register
+  invariants were removed: 9 aliases that were another site's name, and one
+  duplicate-name site with its group membership;
+- 16 Monday Maintenance jobs were recovered, exactly the parents of every comment
+  that carries a file, with their 35 comments and 10 replies;
+- the 58 comment files and their 54 image thumbnails were recovered into local R2.
 
-**10 tests in 4 files fail deterministically** when the suite runs with no dev
-server; with the database absent they skip or pass instead:
-- `stage-twentytwo-fix-tracker` ×3;
-- `stage-twentythree-viewer` ×2;
-- `stage-twentyfour-comment-assets` ×3;
-- `workstream-five-sites` ×2.
+It went through the app's own import and upload paths on a local dev server.
+Production, Staging, Supabase and Vercel were not involved, and Monday was only
+read. Byte backups of the previous local state are kept outside the repository.
+Before this, the section described 10 failures in 4 files against the unrecovered
+database (235 attachments, 323 jobs, 0 Monday comments, 233 sites).
+
+**4 tests in 3 files fail deterministically** when the suite runs with no dev
+server (measured one file at a time, `MAINTSUPP_BASE_URL` at a dead port); with
+the database absent they skip or pass instead:
+
+| file | pass | fail | skip |
+| --- | --- | --- | --- |
+| `stage-twentytwo-fix-tracker` | 14 | 2 | 0 |
+| `stage-twentythree-viewer` | 16 | 1 | 0 |
+| `stage-twentyfour-comment-assets` | 7 | 1 | 2 |
+| `workstream-five-sites` | 18 | 0 | 2 |
+
+`workstream-five-sites` is green. The four failures, and why each one stays:
+- **stage-22 "the tabs carry counts":** a stale expectation against current
+  application and seed behaviour. The boot path re-seeds the demo jobs
+  `demo-job-ac1`/`ac2` as `Booked` outside the "Jobs Booked" group
+  (`db/demo-workspace.ts`), and so is the local job `MN-1110`. The product itself
+  also gives a job moved to Booked the status "Job Scheduled"
+  (`app/lib/stage-status.ts`), which the test's status check rejects.
+- **stage-22 "[object Object]":** depends on junk rows the historical importer
+  produced, which no longer exist anywhere.
+- **stage-23 "files that are not pictures":** depends on the full historical
+  attachment estate (~3,116 files, ~3.75 GB on Monday), which was deliberately not
+  downloaded.
+- **stage-24 "nothing was removed":** pins historical exact counts (776 jobs,
+  2,968 attachments, 10 sites, 84 groups) that can no longer be reconstructed;
+  Monday itself has moved on (781 items).
+
+These are known historical and local-estate limitations, not failures of the
+original dashboard master prompt. Treat the four as the baseline, so anything else
+failing in these files is a regression, and do not weaken them to get green.
 
 Three more tests also need estate data but need a live dev server as well:
-`stage-twentyfour-update-thread` ×1 and `stage-twentytwo-share-link` ×2.
+`stage-twentyfour-update-thread` ×1 and `stage-twentytwo-share-link` ×2 (not
+re-measured after the recovery).
 
-**Seven of the ten are missing data.** The other three would not stay green after
-a restore:
-- **stage-22's "the tabs carry counts":** the demo jobs `demo-job-ac1`/`ac2`, which
-  the boot path re-seeds (`db/demo-workspace.ts`), are `Booked` outside the "Jobs
-  Booked" group, and so is the local QA job `MN-1110`.
-- **the two `workstream-five-sites` register tests:** they fail on leftover "W2
-  Scope Shared Name …" live-test fixtures.
-
-**No seeder can restore the estate.** `db/init.ts` seeds board structure and
+**No seeder can restore the full estate.** `db/init.ts` seeds board structure and
 inserts zero attachments; `pg:seed`/`pg:reset` target Phase 2's Postgres. The
-real estate came from a one-time Monday import whose 3.4 GB payload is gitignored
-and absent. Restore only from an exact backup of the sqlite file or a separately
-authorised Monday import.
-
-The owner reclassified restoring it on 2026-09-23 as **optional**
-developer-environment cleanup. It is not required by the original dashboard master
-prompt. Treat the ten as a known environment limitation, not a regression, and do
-not weaken them to get green.
+real estate came from a one-time Monday import whose payload is gitignored and
+absent. A full rebuild needs a separately authorised Monday import.
+`db/monday-export/build-maintenance-csv.mjs` could not write its output on Windows
+until 2026-09-24: it took its directory from a URL's path, which kept a separator
+before the drive (`C:\C:\…`) and the `%20` of a space. It now uses
+`fileURLToPath`, pinned by `tests/monday-export-output-path.test.mjs`.
 
 **These tests can pass without checking anything.** The stage-22 and stage-23 data
 tests `return` early, and so report "ok", when the database cannot be opened. That
