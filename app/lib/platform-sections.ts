@@ -78,15 +78,23 @@ export type PlatformSection = {
 };
 
 /**
- * In the order the console presents them: the overview, then the platform's
- * tenants, then its people, then what they may do, then what they did.
+ * In the order the screens arrived: the overview, then the platform's tenants,
+ * then its people, then what they may do, then what they did, then the website.
+ * Since 2026-09-24 the rail draws them by `PLATFORM_GROUPS` (below) rather than in
+ * this order; this list stays the catalogue, and its order is pinned by tests.
  */
 export const PLATFORM_SECTIONS: readonly PlatformSection[] = [
+  /*
+   * Labelled "Overview" rather than "Dashboard" since the 2026-09-24 visual pass:
+   * it is what the owner's reference console calls its landing screen, and the
+   * portal's own landing screen is "Overview" too, so the two surfaces now use one
+   * word for one idea. The browser title stays "Platform dashboard".
+   */
   {
     key: "",
-    label: "Dashboard",
+    label: "Overview",
     icon: "home",
-    blurb: "Every client workspace on this installation, and what each holds.",
+    blurb: "Every client workspace on this installation, what each holds, and the state of the website.",
     capability: "clients.view_all",
   },
   /*
@@ -279,4 +287,81 @@ export const PLATFORM_ELSEWHERE: ReadonlyArray<{
 }> = [
   { href: "/dashboard", label: "Back to the workspace", icon: "arrow" },
   { href: "/dashboard/account", label: "Your own account", icon: "user" },
+  /* The public site the Website screens edit. The top bar links to it as well;
+     on a phone the top bar has no room, and this is where it is found. */
+  { href: "/", label: "The public website", icon: "link" },
+];
+
+/*
+ * THE RAIL'S GROUPS — the 2026-09-24 visual pass (owner answers 1A and 3B).
+ *
+ * The owner's reference console groups its rail by what each screen is ABOUT:
+ * the website, the client portals, who may do what, the system. The catalogue
+ * above stays one flat list in one order — four test files hold that order and
+ * count — and these groups only decide how the rail DRAWS it. Every section is in
+ * exactly one group (`tests/platform-admin-shell.test.mjs` asserts it), so adding
+ * a screen means choosing its group, and no screen can fall out of the rail.
+ *
+ * The groups are drawn in the owner's order (Platform, Website, Clients &
+ * portal, Access & governance, System), which is NOT the catalogue's order: the
+ * website screens arrived last and sit last in the catalogue, but they are the
+ * surface the console is used for most.
+ */
+export type PlatformGroup = {
+  key: string;
+  /** The rail's group heading, and the eyebrow above each screen's title. */
+  label: string;
+  /** Section keys from `PLATFORM_SECTIONS`, in the order the rail draws them. */
+  sections: readonly string[];
+};
+
+export const PLATFORM_GROUPS: readonly PlatformGroup[] = [
+  { key: "platform", label: "Platform", sections: ["", "search"] },
+  {
+    key: "website",
+    label: "Website",
+    sections: ["pages", "navigation", "copy", "media", "leads", "applications"],
+  },
+  { key: "clients", label: "Clients & portal", sections: ["clients"] },
+  { key: "access", label: "Access & governance", sections: ["users", "roles", "audit"] },
+  { key: "system", label: "System", sections: ["backups"] },
+];
+
+/** The group a section is drawn in. Every catalogue key has exactly one. */
+export function platformGroupOf(key: string): PlatformGroup | null {
+  return PLATFORM_GROUPS.find((group) => group.sections.includes(key)) ?? null;
+}
+
+/*
+ * THE PORTAL SETTINGS THE CONSOLE LINKS TO — owner answer 1A, 2026-09-24.
+ *
+ * The reference console shows a Theme Engine and a Portal Builder as platform
+ * screens. In this product both are real, but they belong to each WORKSPACE:
+ * brand colours, logo, corner style and panel depth, portal modules and sidebar
+ * icons are all cards on that workspace's own Settings page, written through
+ * `/api/theme`, `/api/branding/logo`, `/api/portal-modules` and
+ * `/api/navigation`, each scoped to the organisation the request is for. There
+ * is no platform-wide theme to edit.
+ *
+ * So the console LINKS to them rather than mounting a second copy — the answer
+ * the owner chose over "copy the editors into Admin" — and says whose settings
+ * they are. This is deliberately NOT a `PLATFORM_SECTIONS` entry: it has no
+ * `/admin` route, it leaves the console, and the rule that "theme" and
+ * "settings" are absent from the catalogue (no platform API) still holds.
+ */
+export const PLATFORM_WORKSPACE_LINKS: ReadonlyArray<{
+  href: string;
+  label: string;
+  icon: IconName;
+  /** The group whose rail block draws it, after that group's own screens. */
+  group: string;
+  blurb: string;
+}> = [
+  {
+    href: "/dashboard/settings",
+    label: "Workspace settings",
+    icon: "settings",
+    group: "clients",
+    blurb: "Brand colours, logo, portal modules and sidebar icons — for the workspace this console is pointed at.",
+  },
 ];

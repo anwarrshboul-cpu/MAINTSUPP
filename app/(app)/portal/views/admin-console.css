@@ -111,12 +111,20 @@
   font-size: 0.98rem;
 }
 
+/* `.admin-notice__body` is the wrapper `AdminNotice` draws round its children
+   (a `<div>`, so a list can sit inside it); `p` still covers the notices that
+   write their own paragraphs. */
+.admin-notice__body,
 .admin-notice p {
   margin: 5px 0 0;
   max-width: 78ch;
   color: var(--muted);
   font-size: 0.9rem;
   line-height: 1.55;
+}
+
+.admin-notice__body > p:first-child {
+  margin-top: 0;
 }
 
 .admin-notice__icon {

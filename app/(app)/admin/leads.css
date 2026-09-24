@@ -134,4 +134,8 @@
  */
 .leads-admin__scroll {
   overflow-x: auto;
+  /* The containing block for the table's visually hidden header text, which is
+     absolutely positioned: without this it is placed against the page, not the
+     scroller, and pushed the page 17-32px sideways on a phone (2026-09-24). */
+  position: relative;
 }

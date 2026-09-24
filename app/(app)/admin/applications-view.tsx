@@ -160,61 +160,68 @@ export function ApplicationsInboxView() {
           {filter === "open" ? "Every application has been dealt with." : "No application matches that filter."}
         </AdminNotice>
       ) : (
-        <table className="admin-table leads-admin__list">
-          <thead>
-            <tr>
-              <th>Applicant</th>
-              <th>Trades</th>
-              <th>Arrived</th>
-              <th>Status</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((entry) => (
-              <tr className={entry.closed ? "admin-row--off" : undefined} key={entry.id}>
-                <td>
-                  <strong>{entry.company}</strong>
-                  <br />
-                  <small>
-                    {entry.contactName} · <a href={`mailto:${entry.email}`}>{entry.email}</a> · {entry.phone}
-                  </small>
-                </td>
-                <td>
-                  <small>
-                    {entry.trades.join(", ")}
-                    <br />
-                    {entry.regions}
-                  </small>
-                </td>
-                <td>
-                  <small>
-                    {when(entry.createdAt)}
-                    <br />
-                    {entry.notifiedAt ? "alert sent" : "alert NOT sent"}
-                  </small>
-                </td>
-                <td>
-                  <span className={`leads-admin__state leads-admin__state--${entry.closed ? "closed" : "open"}`}>
-                    {entry.status}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    className="secondary-button admin-mini"
-                    onClick={() => {
-                      setExpanded(expanded === entry.id ? null : entry.id);
-                      setReason("");
-                    }}
-                    type="button"
-                  >
-                    {expanded === entry.id ? "Close" : "Open"}
-                  </button>
-                </td>
+        /* In the same sideways scroller as the enquiries table: at 375px the table
+           ran 2px past the viewport and took the page with it (2026-09-24). */
+        <div className="leads-admin__scroll">
+          <table className="admin-table leads-admin__list">
+            <thead>
+              <tr>
+                <th>Applicant</th>
+                <th>Trades</th>
+                <th>Arrived</th>
+                <th>Status</th>
+                {/* Named for a screen reader, as on the enquiries table. */}
+                <th>
+                  <span className="visually-hidden">Actions</span>
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {shown.map((entry) => (
+                <tr className={entry.closed ? "admin-row--off" : undefined} key={entry.id}>
+                  <td>
+                    <strong>{entry.company}</strong>
+                    <br />
+                    <small>
+                      {entry.contactName} · <a href={`mailto:${entry.email}`}>{entry.email}</a> · {entry.phone}
+                    </small>
+                  </td>
+                  <td>
+                    <small>
+                      {entry.trades.join(", ")}
+                      <br />
+                      {entry.regions}
+                    </small>
+                  </td>
+                  <td>
+                    <small>
+                      {when(entry.createdAt)}
+                      <br />
+                      {entry.notifiedAt ? "alert sent" : "alert NOT sent"}
+                    </small>
+                  </td>
+                  <td>
+                    <span className={`leads-admin__state leads-admin__state--${entry.closed ? "closed" : "open"}`}>
+                      {entry.status}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      className="secondary-button admin-mini"
+                      onClick={() => {
+                        setExpanded(expanded === entry.id ? null : entry.id);
+                        setReason("");
+                      }}
+                      type="button"
+                    >
+                      {expanded === entry.id ? "Close" : "Open"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {expanded

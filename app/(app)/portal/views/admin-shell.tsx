@@ -167,7 +167,15 @@ export function AdminNotice({
       </span>
       <div>
         <strong>{title}</strong>
-        {children ? <p>{children}</p> : null}
+        {/*
+          A `<div>`, not a `<p>`. Callers pass lists (the CMS pages screen's "What
+          this editor does not do yet", the enquiries inbox's filing note), and a
+          `<ul>` inside a `<p>` is invalid HTML: the parser closes the paragraph
+          before the list, the server's markup and React's tree disagree, and the
+          console logged "<ul> cannot be a descendant of <p>" on /admin/pages and
+          /admin/leads (measured 2026-09-24) — a hydration mismatch in production.
+        */}
+        {children ? <div className="admin-notice__body">{children}</div> : null}
       </div>
     </div>
   );

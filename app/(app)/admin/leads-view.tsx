@@ -219,7 +219,11 @@ export function LeadsInboxView() {
               <th>Estate</th>
               <th>Arrived</th>
               <th>Status</th>
-              <th />
+              {/* Named for a screen reader: an empty header cell is announced as
+                  nothing, and axe reports it (empty-table-header, 2026-09-24). */}
+              <th>
+                <span className="visually-hidden">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>

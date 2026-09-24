@@ -244,10 +244,21 @@ export function SiteCopyView() {
         current.fields[key] = next;
       });
 
+    /*
+     * The visible label names the control for a screen reader too. It was a bare
+     * `<span>`, so axe counted 44 unnamed inputs on this screen ("label",
+     * critical; measured 2026-09-24): a reader tabbing through heard "edit text"
+     * and nothing else. The id is the field's own address with the slashes made
+     * safe.
+     */
+    const labelId = `site-copy-label-${key.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+
     return (
       <div className="site-copy__field" key={field.key}>
         <div className="site-copy__field-head">
-          <span className="site-copy__field-label">{field.label}</span>
+          <span className="site-copy__field-label" id={labelId}>
+            {field.label}
+          </span>
           {edited && (
             <button
               type="button"
@@ -262,6 +273,7 @@ export function SiteCopyView() {
         {field.kind === "paragraph" && (
           <textarea
             className="site-copy__area"
+            aria-labelledby={labelId}
             rows={4}
             maxLength={field.max}
             value={typeof value === "string" ? value : ""}
@@ -271,6 +283,7 @@ export function SiteCopyView() {
 
         {(field.kind === "line" || field.kind === "label") && (
           <input
+            aria-labelledby={labelId}
             maxLength={field.max}
             value={typeof value === "string" ? value : ""}
             onChange={(event) => set(event.target.value)}
@@ -290,6 +303,7 @@ export function SiteCopyView() {
             {(field.shipped as string[]).map((shippedLine, index) => (
               <li key={index}>
                 <input
+                  aria-label={`${field.label}, line ${index + 1}`}
                   maxLength={field.max}
                   value={typeof value[index] === "string" ? (value[index] as string) : ""}
                   placeholder={shippedLine}

@@ -23,7 +23,7 @@
  * restated here, so the screen and the route cannot drift about it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { Icon } from "../../components";
 import { AdminFlash, AdminNotice } from "../portal/views/admin-shell";
@@ -50,8 +50,21 @@ type Payload = {
   error?: string;
 };
 
+/*
+ * `?q=` — what the console's top-bar search sends (a plain GET form, 2026-09-24).
+ * Read through `useSyncExternalStore` with an empty server snapshot, so the
+ * server's first paint and the browser's agree and the field fills in after
+ * hydration, without a state write inside an effect.
+ */
+const noSubscription = () => () => {};
+const readArrivalQuery = () => new URLSearchParams(window.location.search).get("q")?.trim() ?? "";
+const noArrivalQuery = () => "";
+
 export function ConsoleSearchView() {
-  const [term, setTerm] = useState("");
+  const arrivedWith = useSyncExternalStore(noSubscription, readArrivalQuery, noArrivalQuery);
+  /* Null until the reader types; until then the field shows what they arrived with. */
+  const [typed, setTerm] = useState<string | null>(null);
+  const term = typed ?? arrivedWith;
   const [data, setData] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -86,6 +99,15 @@ export function ConsoleSearchView() {
       setBusy(false);
     }
   }, []);
+
+  /* Run the query the reader arrived with, once. The search writes its own
+     state after the request answers, as it does from the button. */
+  const ranArrival = useRef(false);
+  useEffect(() => {
+    if (!arrivedWith || ranArrival.current) return;
+    ranArrival.current = true;
+    void search(arrivedWith);
+  }, [arrivedWith, search]);
 
   /**
    * Switch workspace, then go where the row lives.
