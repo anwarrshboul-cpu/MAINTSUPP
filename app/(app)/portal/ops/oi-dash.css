@@ -119,7 +119,10 @@
 @media (min-width: 768px) {
   .ov-dash.oi-dash {
     gap: 40px;
-    padding-block: 24px 28px;
+    /* 12px above, not 24: the island's ground is the page's own, so its top
+       padding only added to the portal content's before the control bar —
+       70px of empty band under the top bar at 1440 (visual pass, 2026-09-24). */
+    padding-block: 12px 28px;
     padding-inline: 24px;
   }
 }
@@ -336,13 +339,17 @@ body[data-theme] .ov-dash.oi-dash .oi-section__subtitle {
   border-color: color-mix(in srgb, var(--oi-accent) 45%, var(--ov-card-border));
 }
 
+/*
+ * The label in sentence case at 12.5px, as the owner's reference tile prints it
+ * ("Open jobs", not "OPEN JOBS" at 10px) — visual pass, 2026-09-24. The skeleton
+ * tile carries the same class, so it grows by exactly as much and still matches.
+ */
 body[data-theme] .ov-dash.oi-dash .oi-kpi__label {
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 650;
   line-height: 1.3;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
+  letter-spacing: 0;
+  color: var(--text-secondary);
 }
 
 body[data-theme] .ov-dash.oi-dash .oi-kpi__value {
@@ -368,6 +375,51 @@ body[data-theme] .ov-dash.oi-dash .oi-kpi__caption {
   body[data-theme] .ov-dash.oi-dash .oi-kpi__value {
     font-size: 30px;
   }
+}
+
+/*
+ * THE TILE'S GLYPH (visual pass, 2026-09-24). A tinted square in the tile's own
+ * accent, spanning the label and value rows; the caption keeps the full width
+ * beneath. The square is 42px against the 55px the label and value stand in, so
+ * the tile is exactly its skeleton's height and nothing shifts on arrival.
+ */
+.ov-dash.oi-dash .oi-kpi--icon {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "caption caption";
+  column-gap: 14px;
+}
+
+.ov-dash.oi-dash .oi-kpi--icon .oi-kpi__icon {
+  grid-area: icon;
+  align-self: center;
+}
+
+.ov-dash.oi-dash .oi-kpi--icon .oi-kpi__label {
+  grid-area: label;
+  align-self: end;
+}
+
+.ov-dash.oi-dash .oi-kpi--icon .oi-kpi__value {
+  grid-area: value;
+}
+
+.ov-dash.oi-dash .oi-kpi--icon .oi-kpi__caption {
+  grid-area: caption;
+  margin-top: 2px;
+}
+
+.ov-dash.oi-dash .oi-kpi__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  background: var(--ov-nav-active);
+  background: color-mix(in srgb, var(--oi-accent) 16%, var(--ov-card));
+  color: var(--oi-accent);
 }
 
 /* ── The card ─────────────────────────────────────────────────────────────── */

@@ -32,6 +32,8 @@
  */
 
 import { useState, type CSSProperties, type JSX, type ReactNode } from "react";
+
+import { Icon, type IconName } from "../../../components";
 import { ovFraction, ovPercentOrNull, useOvHoverCapable, useOvSweep } from "./ov-dash-charts";
 
 /* ── The palette, by name ─────────────────────────────────────────────────── */
@@ -224,6 +226,7 @@ export function OiKpiTile({
   onActivate,
   ariaLabel,
   title,
+  icon,
 }: {
   label: string;
   value: string;
@@ -235,10 +238,24 @@ export function OiKpiTile({
   ariaLabel: string;
   /** A hover title, for a figure whose exact value is longer than its print. */
   title?: string;
+  /**
+   * A glyph in a tinted square beside the label and figure — the owner's
+   * reference tile (visual pass, 2026-09-24). Decorative: the label already
+   * names the tile, so it is hidden from assistive technology. It spans the
+   * label and value rows and is shorter than the two together, so the tile is
+   * exactly as tall as its skeleton and nothing shifts when it arrives.
+   */
+  icon?: IconName;
 }): JSX.Element {
   const style = { "--oi-accent": OI_COLOUR[tone] } as CSSProperties;
+  const iconClass = icon ? " oi-kpi--icon" : "";
   const body = (
     <>
+      {icon ? (
+        <span className="oi-kpi__icon" aria-hidden="true">
+          <Icon name={icon} size={19} />
+        </span>
+      ) : null}
       <span className="oi-kpi__label">{label}</span>
       <span className="oi-kpi__value" title={title}>
         {value}
@@ -248,13 +265,19 @@ export function OiKpiTile({
   );
   if (href && onActivate) {
     return (
-      <OiLink className="oi-kpi oi-kpi--link" href={href} label={ariaLabel} onActivate={onActivate} style={style}>
+      <OiLink
+        className={`oi-kpi oi-kpi--link${iconClass}`}
+        href={href}
+        label={ariaLabel}
+        onActivate={onActivate}
+        style={style}
+      >
         {body}
       </OiLink>
     );
   }
   return (
-    <div className="oi-kpi" style={style}>
+    <div className={`oi-kpi${iconClass}`} style={style}>
       {body}
     </div>
   );
