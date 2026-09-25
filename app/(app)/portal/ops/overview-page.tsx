@@ -64,13 +64,18 @@ export function OverviewPage({
           onNavigateToSites={onNavigateToSites}
           footer={
             <>
-              <span className="oi-footer__label">Data tools</span>
-              <button type="button" className="oi-footer__tool" onClick={() => setTool("contractors")}>
-                Resolve contractor names
-              </button>
-              <button type="button" className="oi-footer__tool" onClick={() => setTool("sites")}>
-                Assign jobs to a site
-              </button>
+              <span className="oi-footer__label" id="oi-footer-label">Data tools</span>
+              {/* What the two are for, said once (visual pass, round 2): they are
+                  the only controls on this page that change a job record. */}
+              <span className="oi-footer__hint">Tidy the job records these figures are read from.</span>
+              <span className="oi-footer__tools" role="group" aria-labelledby="oi-footer-label">
+                <button type="button" className="oi-footer__tool" onClick={() => setTool("contractors")}>
+                  Resolve contractor names
+                </button>
+                <button type="button" className="oi-footer__tool" onClick={() => setTool("sites")}>
+                  Assign jobs to a site
+                </button>
+              </span>
             </>
           }
         />

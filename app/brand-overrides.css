@@ -10030,3 +10030,316 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   outline: 3px solid var(--focus-ring);
   outline-offset: -3px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE TOP BAR'S TOOLS GROUP — Operations Centre visual pass, 2026-09-24
+   (owner answer 3B).
+
+   Search, New request, the bell and the avatar stay prominent; theme, Refresh,
+   Manage data, the public request form and the three account links sit in one
+   bordered group of icon buttons (`.topbar-tools` in portal-app.tsx). Measured
+   before, at 1280 and 1440: the page greeting wrapped to three and four lines,
+   the search field was squeezed to "Search this wor", and "Manage data",
+   "Public request form" and "New request" each broke onto two lines.
+
+   NOTHING HERE SETS `display` ON A TOOL. The widths that already hide some of
+   them — `.topbar-link` and `a.topbar-icon` below 1180px, `.topbar-data-button`
+   below 760px — keep doing so, because this block never competes with those
+   rules. It changes how the group looks, not what each width offers.
+
+   And nothing shrinks a tool below 44px where a thumb is likely: the compact
+   36px buttons the reference uses start at 1280. Below that the existing 44px
+   floors (`.topbar-data-button` to 1080, `.portal-topbar .theme-toggle` to 768)
+   still apply.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.topbar-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-card);
+}
+
+/* Words are carried by each tool's `aria-label` and `title` inside the group. */
+.topbar-tools .topbar-data-button > span,
+.topbar-tools .topbar-link > span {
+  display: none;
+}
+
+/*
+ * `.portal-shell .portal-topbar` in front, for one measured reason: the dark
+ * theme's `body[data-theme="dark"] .portal-topbar .secondary-button` (0,3,1)
+ * repaints the two data buttons #20343e, and a group whose members wear their
+ * own boxes is not a group. (0,4,0) outranks it in either theme without
+ * depending on which stylesheet loads last.
+ */
+.portal-shell .portal-topbar .topbar-tools .topbar-data-button,
+.portal-shell .portal-topbar .topbar-tools .topbar-link,
+.portal-shell .portal-topbar .topbar-tools .topbar-icon,
+.portal-shell .portal-topbar .topbar-tools .theme-toggle {
+  justify-content: center;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--control-fg);
+}
+
+.portal-shell .portal-topbar .topbar-tools .topbar-data-button:hover:not(:disabled),
+.portal-shell .portal-topbar .topbar-tools .topbar-link:hover,
+.portal-shell .portal-topbar .topbar-tools .topbar-icon:hover,
+.portal-shell .portal-topbar .topbar-tools .theme-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--control-fg-strong);
+}
+
+/* Refresh has no printed "Refreshing…" in the group, so its glyph turns instead. */
+.topbar-data-button.is-refreshing svg {
+  animation: topbar-refresh-turn 0.9s linear infinite;
+}
+
+@keyframes topbar-refresh-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-data-button.is-refreshing svg {
+    animation: none;
+  }
+}
+
+/* The page's name holds one line each for its eyebrow and its title, rather
+   than wrapping to four lines when the row is busy; when the row is tight it
+   gives way with an ellipsis, down to 110px, so the search keeps its floor. The
+   page states its own name in an <h1> below on every route, so nothing is lost. */
+.page-identity {
+  flex: 0 1 auto;
+  min-width: 110px;
+  /* The top bar is a flex row with no gap; the search used to sit flush
+     against the greeting. */
+  margin-right: 20px;
+}
+
+.page-identity span,
+.page-identity strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The eyebrow's letter-spacing trails its last letter by a fraction of a
+   pixel; 2px of slack keeps that from reading as an overflow. */
+.page-identity span {
+  padding-right: 2px;
+}
+
+/*
+ * The search keeps room to type in (it was 105px at 1280 on the job list), and
+ * takes only the room that is left. A basis of 0 means it grows into spare
+ * width rather than competing for it, so the page name keeps its full width
+ * whenever the row has room and gives way only when it does not. (Weighting the
+ * shrink instead left the name a pixel short at 1024 — "OPERATIONS CENT…" — and
+ * a factor below 1 on the name left the row 27px too wide at 1181.)
+ */
+.portal-topbar .global-search:not(.is-compact) {
+  flex: 1 1 0;
+  min-width: 190px;
+}
+
+/* The job list's "Live workspace" chip and "Updated" time, as one stacked block. */
+.topbar-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+.topbar-status .data-indicator {
+  white-space: nowrap;
+}
+
+.topbar-status .topbar-updated {
+  font-size: 11px;
+}
+
+.topbar-create {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/*
+ * Even boxes from 1024, 36px from 1280. Between the two the row is at its
+ * tightest: above 1180 all seven tools show beside the job list's status block,
+ * and at 44px each the row overran by 82px at 1181 (measured). So that band
+ * takes 40px buttons, a 6px action gap and slightly lower floors for the search
+ * and the page name — measured to fit at 1181, 1240 and 1279 on the job list.
+ *
+ * Up to 1180 only three tools show (theme, Refresh, Manage data), there is room,
+ * and those keep the 44px the 761–1080 band already gave the data buttons for an
+ * iPad held landscape. 1180 is not a new width: it is the one globals.css and
+ * account-menu.css already use to hide the request form and the account links,
+ * so the 40px buttons start exactly where the extra four appear.
+ */
+@media (min-width: 1024px) {
+  .portal-shell .portal-topbar .topbar-tools .topbar-data-button,
+  .portal-shell .portal-topbar .topbar-tools .topbar-link,
+  .portal-shell .portal-topbar .topbar-tools .topbar-icon,
+  .portal-shell .portal-topbar .topbar-tools .theme-toggle {
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .portal-shell .portal-topbar .topbar-actions {
+    gap: 6px;
+  }
+
+  .portal-topbar .global-search:not(.is-compact) {
+    min-width: 160px;
+  }
+
+  .page-identity {
+    min-width: 96px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .portal-shell .portal-topbar .topbar-tools .topbar-data-button,
+  .portal-shell .portal-topbar .topbar-tools .topbar-link,
+  .portal-shell .portal-topbar .topbar-tools .topbar-icon,
+  .portal-shell .portal-topbar .topbar-tools .theme-toggle {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .portal-shell .portal-topbar .topbar-tools .topbar-data-button,
+  .portal-shell .portal-topbar .topbar-tools .topbar-link,
+  .portal-shell .portal-topbar .topbar-tools .topbar-icon,
+  .portal-shell .portal-topbar .topbar-tools .theme-toggle {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .portal-shell .portal-topbar .topbar-actions {
+    gap: 10px;
+  }
+
+  .portal-topbar .global-search:not(.is-compact) {
+    min-width: 190px;
+  }
+
+  .page-identity {
+    min-width: 110px;
+  }
+}
+
+/* A phone shows each remaining tool as its own 44px box, as before: the group
+   frame only earns its place where it holds several. */
+@media (max-width: 767px) {
+  .topbar-tools {
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+}
+
+/* The compact search button, the one top-bar control that was 36px wide on a
+   touch screen (36x44 at 390 and 768, measured 2026-09-24); every neighbour is
+   already 44. The search is compact up to and including 768. */
+@media (max-width: 768px) {
+  .portal-topbar .global-search.is-compact > .icon-button {
+    min-width: 44px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE WORKSPACE CARD, ON A DESKTOP — Operations Centre visual pass, 2026-09-24
+   (owner answer 3B: "a stronger workspace card").
+
+   Measured at 1440 before: the card is 217px wide, and between the 31px mark,
+   the 32px add button and two 9px gaps the workspace picker was left 109px, of
+   which its own chevron padding took 22 — "Sunnamusk UK" printed as
+   "Sunnamus…" at 11px. The name is the one thing the card exists to say.
+
+   From 1024px the card is two rows: the mark spans both, "Workspace" and the add
+   button share the top one, and the name takes the whole second row beside the
+   mark at 13px. Nothing is added or removed; `.workspace-switcher__copy` becomes
+   `display: contents` so its two lines can be placed on the card's grid. Phones
+   keep the arrangement `stage-twentyfive-mobile-touch` measured.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (min-width: 1024px) {
+  .portal-sidebar .workspace-switcher {
+    grid-template-areas:
+      "mark label add"
+      "mark name name";
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    row-gap: 2px;
+    padding-block: 10px;
+  }
+
+  .portal-sidebar .workspace-switcher > .workspace-icon {
+    grid-area: mark;
+    width: 34px;
+    height: 34px;
+  }
+
+  .portal-sidebar .workspace-switcher > .workspace-switcher__copy {
+    display: contents;
+  }
+
+  /* 28px, the add button's height: the button arrives with the workspace
+     list, and without this floor the top row grew by 13px when it did. */
+  .portal-sidebar .workspace-switcher__copy small {
+    display: flex;
+    grid-area: label;
+    align-items: flex-end;
+    align-self: end;
+    min-height: 28px;
+  }
+
+  /* 12px while the rail is 220px wide (to 1180), 13px from 1280 where it is 248. */
+  .portal-sidebar .workspace-switcher__copy select,
+  .portal-sidebar .workspace-switcher__copy strong {
+    grid-area: name;
+    font-size: 12px;
+  }
+
+  /* The name before the workspace list arrives is a <strong>; after, the
+     picker. Given the picker's own 30px row, the card is one height throughout
+     — measured, it went 59px → 82px on arrival and pushed the rail down. */
+  .portal-sidebar .workspace-switcher__copy strong {
+    display: flex;
+    align-items: center;
+    min-height: 30px;
+  }
+
+  .portal-sidebar .workspace-switcher > .workspace-switcher__add {
+    grid-area: add;
+    width: 28px;
+    height: 28px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .portal-sidebar .workspace-switcher__copy select,
+  .portal-sidebar .workspace-switcher__copy strong {
+    font-size: 13px;
+  }
+}

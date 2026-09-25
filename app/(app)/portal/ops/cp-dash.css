@@ -152,9 +152,24 @@ body[data-theme] .ov-dash.cp-dash .cp-card__caption {
   color: var(--ov-text-muted);
 }
 
+/*
+ * An empty card says so, as the Overview's do (visual pass, round 2): the note
+ * fills the card inside a dashed inset rather than sitting as one faint line at
+ * the top of an empty panel — measured on a portfolio with no requirements.
+ */
 .ov-dash.cp-dash .cp-empty {
-  padding: 24px 0;
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  min-height: 120px;
+  padding: 16px;
+  border: 1px dashed var(--ov-divider);
+  border-radius: var(--radius-sm);
   text-align: center;
+}
+
+body[data-theme] .ov-dash.cp-dash .cp-empty {
+  color: var(--ov-text-2);
 }
 
 /* ── Compliance by type ───────────────────────────────────────────────────── */

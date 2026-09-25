@@ -3366,7 +3366,6 @@ export default function PortalApp({
           />
 
           <div className="topbar-actions">
-            <ThemeToggle />
             {/*
               THE CHIP REPORTS THE JOB LIST, so it says nothing on a surface
               that does not read one.
@@ -3380,100 +3379,174 @@ export default function PortalApp({
               is not a fact worth a line of chrome.
             */}
             {surfaceReadsJobList && (
-              <span
-                className={`data-indicator data-indicator--${dataMode}`}
-                title={
-                  dataMode === "unavailable"
-                    ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
-                    : undefined
-                }
-              >
-                <span />
-                {dataMode === "live"
-                  ? "Live workspace"
-                  : dataMode === "unavailable"
-                    ? "Workspace unavailable"
-                    : "Loading workspace"}
-              </span>
+              /* The chip and the time, stacked as one status block (visual
+                 pass, 2026-09-24): side by side they took 146px of a row
+                 that left the search field 105px at 1280 on the job list. */
+              <div className="topbar-status">
+                <span
+                  className={`data-indicator data-indicator--${dataMode}`}
+                  title={
+                    dataMode === "unavailable"
+                      ? "Your workspace could not be read. Nothing is shown rather than something invented — use Refresh once the connection is back."
+                      : undefined
+                  }
+                >
+                  <span />
+                  {dataMode === "live"
+                    ? "Live workspace"
+                    : dataMode === "unavailable"
+                      ? "Workspace unavailable"
+                      : "Loading workspace"}
+                </span>
+                {/*
+                  Refresh, and when the figures were last read.
+
+                  Every dashboard on this screen derives from one fetch that ran on
+                  mount, so a job closed on another screen stayed open here until
+                  the tab was reloaded — and nothing said how old the numbers were.
+                  The time is stamped on success only, so it reports when the data
+                  was actually read rather than when the button was last pressed.
+
+                  `aria-live="polite"` on the timestamp because it changes without
+                  the user moving focus, and a screen reader that never announces it
+                  would leave the same "how old is this" question the control exists
+                  to answer.
+                */}
+                <span className="topbar-updated" aria-live="polite">
+                  {dataUpdatedAt
+                    ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
+                    : "Not yet loaded"}
+                </span>
+              </div>
             )}
             {/*
-              Refresh, and when the figures were last read.
+              THE WORKSPACE TOOLS, AS ONE GROUP (owner answer 3B, 2026-09-24).
 
-              Every dashboard on this screen derives from one fetch that ran on
-              mount, so a job closed on another screen stayed open here until
-              the tab was reloaded — and nothing said how old the numbers were.
-              The time is stamped on success only, so it reports when the data
-              was actually read rather than when the button was last pressed.
-
-              `aria-live="polite"` on the timestamp because it changes without
-              the user moving focus, and a screen reader that never announces it
-              would leave the same "how old is this" question the control exists
-              to answer.
+              The top bar held twelve controls in a row, and at 1280-1440 the
+              greeting wrapped to four lines and "Manage data", "Public request
+              form" and "New request" to two. The owner's reference keeps search,
+              the primary action, the bell and the avatar prominent and the rest
+              compact, so these seven now sit in one bordered group of icon
+              buttons: each keeps its own accessible name and gains a tooltip,
+              every one is still a single click, and none is removed. The widths
+              that already hid some of them (the request form and the three
+              account links below 1180px, the data buttons below 760px) still
+              do — this changes how the group looks, not what each width offers.
             */}
-            <button
-              className="secondary-button topbar-data-button"
-              type="button"
-              onClick={() => {
-                setRefreshing(true);
-                setRefreshToken((token) => token + 1);
-                // The board keeps its own snapshot, so it is told to re-read
-                // rather than left a version behind the meters above it.
-                window.dispatchEvent(new Event("maintsupp:refresh-board"));
+            <div className="topbar-tools" role="group" aria-label="Workspace tools">
+              <ThemeToggle />
+              <button
+                className={`secondary-button topbar-data-button${refreshing ? " is-refreshing" : ""}`}
+                type="button"
+                title={refreshing ? "Refreshing…" : "Refresh the figures on screen"}
+                onClick={() => {
+                  setRefreshing(true);
+                  setRefreshToken((token) => token + 1);
+                  // The board keeps its own snapshot, so it is told to re-read
+                  // rather than left a version behind the meters above it.
+                  window.dispatchEvent(new Event("maintsupp:refresh-board"));
+                  /*
+                   * And so do the aggregate cards. The Overview and the Invoice
+                   * Tracker read `/api/dashboard/*` and `/api/finance/*` rather
+                   * than the job list, so a button labelled "Refresh the figures
+                   * on screen" was refreshing none of the figures on screen there.
+                   * `useOpsQuery` listens for this. */
+                  window.dispatchEvent(new Event(OPS_REFRESH));
+                  // Nothing is in flight when no surface has asked for the job
+                  // list, so the spinner would never be cleared by the effect.
+                  if (!surfaceReadsJobList) setRefreshing(false);
+                }}
+                disabled={refreshing}
+                aria-label="Refresh the figures on screen"
+              >
+                <Icon name="refresh" size={17} />
+                <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
+              </button>
+              <button
+                className="secondary-button topbar-data-button"
+                type="button"
+                onClick={() => openWorkspaceManager()}
+                disabled={!workspace}
                 /*
-                 * And so do the aggregate cards. The Overview and the Invoice
-                 * Tracker read `/api/dashboard/*` and `/api/finance/*` rather
-                 * than the job list, so a button labelled "Refresh the figures
-                 * on screen" was refreshing none of the figures on screen there.
-                 * `useOpsQuery` listens for this. */
-                window.dispatchEvent(new Event(OPS_REFRESH));
-                // Nothing is in flight when no surface has asked for the job
-                // list, so the spinner would never be cleared by the effect.
-                if (!surfaceReadsJobList) setRefreshing(false);
-              }}
-              disabled={refreshing}
-              aria-label="Refresh the figures on screen"
-            >
-              <Icon name="refresh" size={17} />
-              <span>{refreshing ? "Refreshing…" : "Refresh"}</span>
-            </button>
-            {surfaceReadsJobList && (
-              <span className="topbar-updated" aria-live="polite">
-                {dataUpdatedAt
-                  ? `Updated ${formatTimeOfDay(dataUpdatedAt)}`
-                  : "Not yet loaded"}
-              </span>
-            )}
-            <button
-              className="secondary-button topbar-data-button"
-              type="button"
-              onClick={() => openWorkspaceManager()}
-              disabled={!workspace}
-              /*
-               * Named here as well as in the span, because below 1080px the
-               * span is not there to name it.
-               *
-               * `.topbar-data-button > span { display: none }`
-               * (brand-overrides.css) drops the label and leaves an icon-only
-               * button — and `display: none` removes the text from the
-               * accessibility tree too, so this button had NO accessible name
-               * at all on a tablet or a phone. axe reports it `button-name`,
-               * impact CRITICAL, at 768. Its sibling above already carries an
-               * `aria-label` for exactly this reason; this one was missed.
-               *
-               * The visible label is unchanged at every width, and where the
-               * span IS shown the two agree word for word, so nothing is
-               * announced twice and nothing reads differently to what is
-               * printed.
-               */
-              aria-label="Manage data"
-            >
-              <Icon name="settings" size={17} />
-              <span>Manage data</span>
-            </button>
-            <a className="topbar-link" href="/request">
-              <Icon name="plus" size={17} />
-              Public request form
-            </a>
+                 * Named here as well as in the span, because below 1080px the
+                 * span is not there to name it.
+                 *
+                 * `.topbar-data-button > span { display: none }`
+                 * (brand-overrides.css) drops the label and leaves an icon-only
+                 * button — and `display: none` removes the text from the
+                 * accessibility tree too, so this button had NO accessible name
+                 * at all on a tablet or a phone. axe reports it `button-name`,
+                 * impact CRITICAL, at 768. Its sibling above already carries an
+                 * `aria-label` for exactly this reason; this one was missed.
+                 *
+                 * Since 2026-09-24 the button sits in the tools group, where
+                 * the span is not printed at any width; this name and the
+                 * matching `title` tooltip are what carry it.
+                 */
+                aria-label="Manage data"
+                title="Manage data"
+              >
+                <Icon name="settings" size={17} />
+                <span>Manage data</span>
+              </button>
+              {/*
+                Named and titled, because in the tools group its words are not
+                printed. Its glyph is no longer "plus": beside "New request" two
+                plus signs read as the same action, and this one opens the public
+                form a client shares, not a new job.
+              */}
+              <a
+                className="topbar-link"
+                href="/request"
+                aria-label="Public request form"
+                title="Public request form"
+              >
+                <Icon name="share" size={17} />
+                <span>Public request form</span>
+              </a>
+              {/*
+                monday's top-right icon row is notifications, inbox, invite
+                member, apps, help, the product grid, then the avatar. Three of
+                those have somewhere real to go here and are kept in monday's
+                relative order; the other two are deliberately absent rather than
+                present and dead:
+                  · inbox — there is no cross-item update feed to open. The
+                    board drawer holds updates per job. `item_updates` was empty
+                    when this was written; monday's 218 comments and 47 replies
+                    have since been imported, so a feed is now buildable — but
+                    building one is a decision, not a consequence, and an inbox
+                    that opens onto a list nobody curates is worse than none.
+                  · product grid — MAINTSUPP is one product; there is nothing to
+                    switch between.
+                Since 2026-09-24 the three sit at the end of the tools group, so
+                they come before the bell rather than after it; their order among
+                themselves is monday's still.
+              */}
+              <Link
+                className="icon-button topbar-icon"
+                href="/dashboard/account/invite"
+                aria-label="Invite members"
+                title="Invite members"
+              >
+                <Icon name="users" size={19} />
+              </Link>
+              <Link
+                className="icon-button topbar-icon"
+                href="/dashboard/account/integrations"
+                aria-label="Integrations"
+                title="Integrations"
+              >
+                <Icon name="grid" size={19} />
+              </Link>
+              <Link
+                className="icon-button topbar-icon"
+                href="/dashboard/account/help"
+                aria-label="Get help"
+                title="Get help"
+              >
+                <Icon name="message" size={19} />
+              </Link>
+            </div>
             <div className="notification-wrap">
               <button
                 ref={notificationsButtonRef}
@@ -3526,45 +3599,6 @@ export default function PortalApp({
                 />
               </AnchoredPopover>
             </div>
-            {/*
-              monday's top-right icon row is notifications, inbox, invite
-              member, apps, help, the product grid, then the avatar. Three of
-              those have somewhere real to go here and are kept in monday's
-              relative order; the other two are deliberately absent rather than
-              present and dead:
-                · inbox — there is no cross-item update feed to open. The
-                  board drawer holds updates per job. `item_updates` was empty
-                  when this was written; monday's 218 comments and 47 replies
-                  have since been imported, so a feed is now buildable — but
-                  building one is a decision, not a consequence, and an inbox
-                  that opens onto a list nobody curates is worse than none.
-                · product grid — MAINTSUPP is one product; there is nothing to
-                  switch between.
-            */}
-            <Link
-              className="icon-button topbar-icon"
-              href="/dashboard/account/invite"
-              aria-label="Invite members"
-              title="Invite members"
-            >
-              <Icon name="users" size={19} />
-            </Link>
-            <Link
-              className="icon-button topbar-icon"
-              href="/dashboard/account/integrations"
-              aria-label="Integrations"
-              title="Integrations"
-            >
-              <Icon name="grid" size={19} />
-            </Link>
-            <Link
-              className="icon-button topbar-icon"
-              href="/dashboard/account/help"
-              aria-label="Get help"
-              title="Get help"
-            >
-              <Icon name="message" size={19} />
-            </Link>
             <button
               className="primary-button topbar-create"
               type="button"

@@ -87,6 +87,7 @@ import {
 /* Imports nothing itself, so it cannot drag the query builder into this bundle. */
 import { QUALITY_ARC, SLA_TARGET_ARC, qualityTone, rateTone } from "../../../lib/dashboard-policy";
 /* Pure `Intl`, no imports. */
+import type { IconName } from "../../../components";
 import { formatDayMonth, formatShortDate } from "../../../lib/format-date";
 import type { OiIntel, OiPriorityKey, OiSlice } from "../../../lib/overview-intel-contract";
 import type { RpBand, RpDelta, RpKpi, RpMetrics, RpSpendSlice } from "../../../lib/reports-dash-contract";
@@ -154,6 +155,14 @@ const KPI_TONE: Record<RpKpi["key"], OiTone> = {
   reactive: "orange",
   planned: "blue",
   project: "secondary",
+};
+
+/** Each spend tile's glyph, beside its label (visual pass, 2026-09-24). */
+const KPI_ICON: Record<RpKpi["key"], IconName> = {
+  total: "chart",
+  reactive: "tool",
+  planned: "calendar",
+  project: "folder",
 };
 
 /** Recurrence by urgency: a weekly repeat needs attention, a rare one does not. */
@@ -731,6 +740,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
       <div className="oi-kpis">
         <OiKpiTile
           label="Open jobs"
+          icon="wrench"
           value={oiCount(intel.open)}
           caption="active work orders"
           tone="blue"
@@ -740,6 +750,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         />
         <OiKpiTile
           label="Completed jobs"
+          icon="check"
           value={oiCount(intel.completed)}
           caption={`closed in ${range.label}`}
           tone="primary"
@@ -749,6 +760,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         />
         <OiKpiTile
           label="Completion rate"
+          icon="activity"
           value={intel.completionRate === null ? "—" : `${intel.completionRate}%`}
           caption={
             intel.completionRate === null
@@ -764,6 +776,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
         />
         <OiKpiTile
           label="SLA met"
+          icon="clock"
           value={sla.percent === null ? "—" : `${sla.percent}%`}
           caption={sla.percent === null ? "no open jobs to measure" : `${oiCount(sla.withinSla)} of ${oiCount(sla.open)} within target`}
           tone={slaTone}
@@ -1256,6 +1269,7 @@ function SpendSection({ query, onJobs }: { query: Query<RpMetrics>; onJobs: (que
             <OiKpiTile
               key={kpi.key}
               label={kpi.label}
+              icon={KPI_ICON[kpi.key]}
               value={rpPounds(kpi.pence)}
               title={kpi.key === "total" ? `${ovPoundsExact(kpi.pence)} — ${typeBreakdown}` : ovPoundsExact(kpi.pence)}
               caption={caption}
