@@ -706,12 +706,34 @@ body[data-theme] .ov-dash.rp-dash .rp-bars__name:hover {
   bottom: auto;
 }
 
+/*
+ * AN EMPTY CHART SAYS SO, AS ON THE OVERVIEW AND COMPLIANCE BLOCKS (2026-09-25).
+ * The three `.ov-dash` blocks share one design system, and round 2 of the visual
+ * pass gave the Overview's and the Compliance page's empty cards a dashed inset
+ * with the sentence in the secondary ink — this block kept one faint line at the
+ * top of an empty card ("No site has completed spend in …"). The same treatment
+ * here, so an empty panel reads the same on all three.
+ */
 .ov-dash.rp-dash .rp-bars__empty,
 .ov-dash.rp-dash .rp-zone__empty {
   margin: 0;
   font-size: 12px;
   line-height: 1.4;
-  color: var(--ov-text-muted);
+  color: var(--ov-text-2);
+}
+
+.ov-dash.rp-dash .rp-bars--empty,
+.ov-dash.rp-dash .rp-zone__empty {
+  padding: 16px;
+  border: 1px dashed var(--ov-divider);
+  border-radius: var(--radius-sm);
+}
+
+.ov-dash.rp-dash .rp-zone__empty {
+  display: grid;
+  place-items: center;
+  min-height: 96px;
+  text-align: center;
 }
 
 .ov-dash.rp-dash .rp-bars--empty {

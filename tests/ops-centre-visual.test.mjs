@@ -197,6 +197,11 @@ test("an empty card says so in a framed inset, on the Overview and the Complianc
   assert.match(oi, /body\[data-theme\] \.ov-dash\.oi-dash \.oi-empty-note \{\s*font-size: 12px;\s*color: var\(--text-secondary\);/);
   const cp = await read("app/(app)/portal/ops/cp-dash.css");
   assert.match(cp, /\.ov-dash\.cp-dash \.cp-empty \{[^}]*place-items: center;[^}]*border: 1px dashed var\(--ov-divider\);/);
+  /* And on Reports, the third `.ov-dash` block (Phase 7 consistency pass): its
+     bar list and repeat zones had kept one faint line in an empty card. */
+  const rp = await read("app/(app)/portal/ops/rp-dash.css");
+  assert.match(rp, /\.ov-dash\.rp-dash \.rp-bars--empty,\s*\.ov-dash\.rp-dash \.rp-zone__empty \{[^}]*border: 1px dashed var\(--ov-divider\);/);
+  assert.match(rp, /\.ov-dash\.rp-dash \.rp-zone__empty \{[^}]*color: var\(--ov-text-2\);/);
 });
 
 test("the data tools are one labelled group that says what it is for", async () => {
