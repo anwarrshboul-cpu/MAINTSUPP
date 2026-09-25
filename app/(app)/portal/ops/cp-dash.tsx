@@ -60,6 +60,7 @@ import type {
   CpRegisterFilter,
   CpStateKey,
 } from "../../../lib/compliance-dash-contract";
+import { scopeFromPayloadSiteIds, type ExpiryTimelineScope } from "../../../lib/compliance-expiry-timeline";
 
 /* ── Configuration ────────────────────────────────────────────────────────── */
 
@@ -284,9 +285,17 @@ function scrollToRegister() {
 
 export function CpDash({
   onNavigateToSites,
+  onScope,
 }: {
   /** Open the Sites list with a query — `sites=a|b` for the sites-gauge drill. */
   onNavigateToSites: (query: string) => void;
+  /**
+   * The sites this block's figures were counted over, for the page's Expiry
+   * timeline — so the timeline answers inside the same portfolio without
+   * resolving it a second time or making a request of its own. See
+   * `app/lib/compliance-expiry-timeline.ts`.
+   */
+  onScope?: (scope: ExpiryTimelineScope) => void;
 }) {
   const { params, setParams } = useQueryState();
 
@@ -320,11 +329,34 @@ export function CpDash({
    * through a failed poll — the "no flicker to zero" half of §5.4. The skeleton
    * is reserved for the one render where there is genuinely nothing yet.
    */
-  const { data, loading, error, reload } = useOpsQuery<CpMetrics>(
+  const { data, loading, stale, error, reload } = useOpsQuery<CpMetrics>(
     "/api/compliance/metrics",
     search,
     { keepOnError: true },
   );
+
+  /*
+   * THE PAGE'S EXPIRY TIMELINE FOLLOWS THIS BLOCK'S PORTFOLIO.
+   *
+   * The payload's `portfolio.siteIds` is the resolved set (the portfolio's
+   * members ∩ the member's sites), in the drills' encoding. A payload that is
+   * still the previous portfolio's is reported as `pending`, the same B6 rule
+   * the block's own figures follow; a selection that failed to load is
+   * `failed`, never the whole workspace.
+   */
+  useEffect(() => {
+    if (!onScope) return;
+    if (data) {
+      onScope({
+        state: "ready",
+        siteIds: scopeFromPayloadSiteIds(data.portfolio.siteIds),
+        pending: stale,
+        portfolioChosen: data.portfolio.id !== "all",
+      });
+    } else {
+      onScope(error ? { state: "failed" } : { state: "loading" });
+    }
+  }, [data, stale, error, onScope]);
 
   /*
    * §5.4 — REFETCH ON FOCUS, AND POLL WHILE VISIBLE.

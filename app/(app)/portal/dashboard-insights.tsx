@@ -34,7 +34,11 @@ import { tradeBreakdown } from "./views/overview-series";
 import { chipStyle } from "./chip-ink";
 import type { MaintenanceRequest, StoreRecord } from "../../lib/types";
 import type { WorkspaceComplianceRecord } from "../../lib/workspace-data";
-import { complianceDay, expiryStatus } from "../../lib/expiry-status";
+import {
+  expiryTimeline,
+  recordsInScope,
+  type ExpiryTimelineScope,
+} from "../../lib/compliance-expiry-timeline";
 import {
   bucketFor,
   parseStamp,
@@ -869,7 +873,12 @@ export function ContractorCostPanel({
 /* ── Compliance expiry timeline ──────────────────────────────────────────── */
 
 /**
- * What expires when, twelve months forward.
+ * What expires when, twelve months forward — over the sites the page is about.
+ *
+ * `scope` is the Compliance block's own resolved portfolio (see
+ * `app/lib/compliance-expiry-timeline.ts` for why the timeline takes it rather
+ * than counting the whole workspace, which it did until 2026-09-25). The counting
+ * is the register's: Europe/London months, `expiryStatus`'s "expired".
  *
  * Colour here is status, not identity, so every bar carries its count as a
  * label and the month carries its own name — nothing rests on the colour alone.
@@ -877,59 +886,65 @@ export function ContractorCostPanel({
 export function ComplianceExpiryTimeline({
   compliance,
   now: clock,
+  scope,
 }: {
   compliance: WorkspaceComplianceRecord[];
   now: number;
+  scope: ExpiryTimelineScope;
 }) {
-  const months = useMemo(() => {
-    const now = new Date(clock);
-    /*
-     * THE REGISTER'S DAY AND THE REGISTER'S CLASSIFIER. This used to compare
-     * `new Date(record.expiry)` — UTC midnight — with the reader's local clock,
-     * its own rule for "expired", so a certificate due today counted as lapsed
-     * here from the first minute of the day while the register called it
-     * "Expires today". Months are now the Europe/London months and "expired" is
-     * `expiryStatus`'s verdict, the one every compliance surface prints.
-     */
-    const [thisYear, thisMonth] = complianceDay(now).split("-").map(Number);
-    const slots: Array<{ key: string; label: string; count: number; overdue: boolean }> = [];
-    for (let offset = 0; offset < 12; offset += 1) {
-      const date = new Date(Date.UTC(thisYear, thisMonth - 1 + offset, 1));
-      slots.push({
-        key: `${date.getUTCFullYear()}-${date.getUTCMonth()}`,
-        label: date.toLocaleDateString("en-GB", { month: "short", timeZone: "UTC" }),
-        count: 0,
-        overdue: false,
-      });
-    }
-    const index = new Map(slots.map((slot) => [slot.key, slot]));
+  const siteIds = scope.state === "ready" ? scope.siteIds : null;
+  const ready = scope.state === "ready";
+  const months = useMemo(
+    () => (ready ? expiryTimeline(recordsInScope(compliance, siteIds), new Date(clock)) : null),
+    [clock, compliance, ready, siteIds],
+  );
 
-    let expired = 0;
-    for (const record of compliance) {
-      const status = expiryStatus(record.expiry, now);
-      if (status.date === null || status.daysRemaining === null) continue;
-      if (status.daysRemaining < 0) {
-        expired += 1;
-        continue;
-      }
-      const [year, month] = status.date.split("-").map(Number);
-      const slot = index.get(`${year}-${month - 1}`);
-      if (slot) slot.count += 1;
-    }
-    return { slots, expired };
-  }, [clock, compliance]);
+  const title = "Expiry timeline";
+  const hint = "Certificates falling due over the next twelve months";
 
-  const total = months.slots.reduce((sum, slot) => sum + slot.count, 0);
-
-  if (!total && !months.expired) {
+  if (scope.state === "failed") {
     return (
       <InsightPanel
-        title="Expiry timeline"
-        hint="Certificates falling due over the next twelve months"
+        title={title}
+        hint={hint}
         empty={{
-          message: "No expiry dates recorded",
-          hint: "Add expiry dates to the certificate register and renewals can be planned rather than chased.",
+          message: "Not drawn: the selected portfolio could not be read",
+          hint: "The Compliance overview above could not load this selection. When it does, this timeline counts the same sites.",
         }}
+      >
+        <span />
+      </InsightPanel>
+    );
+  }
+  /* Which sites the page is about is not known yet: count nothing rather than
+     the whole workspace for a moment under a portfolio's name. */
+  if (!months) {
+    return (
+      <InsightPanel title={title} hint={hint} loading>
+        <span />
+      </InsightPanel>
+    );
+  }
+
+  const total = months.total;
+
+  if (!total && !months.expired) {
+    const noneHere = scope.state === "ready" && scope.portfolioChosen;
+    return (
+      <InsightPanel
+        title={title}
+        hint={hint}
+        empty={
+          noneHere
+            ? {
+                message: "Nothing due in this portfolio",
+                hint: "No certificate on this portfolio's sites has expired or falls due in the next twelve months. Choose All portfolios to see the whole workspace.",
+              }
+            : {
+                message: "No expiry dates recorded",
+                hint: "Add expiry dates to the certificate register and renewals can be planned rather than chased.",
+              }
+        }
       >
         <span />
       </InsightPanel>
@@ -940,7 +955,7 @@ export function ComplianceExpiryTimeline({
 
   return (
     <InsightPanel
-      title="Expiry timeline"
+      title={title}
       hint={`${plural(total, "certificate")} due in the next twelve months`}
       action={
         months.expired > 0 ? (
