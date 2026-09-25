@@ -14,13 +14,97 @@
  * 640 / 767 / 768 / 1024 / 1280, so a width spent here would be one of five.
  */
 
+/* The screen is a column with one gap between its parts — toolbar, notice, table,
+   detail, the list of what it does not do — which otherwise touched edge to edge.
+   Flex rather than grid: a grid track would widen to the table's min-content and
+   push the page sideways, where a flex column holds the scroll strip to its width
+   (visual pass, round 2). Both inbox screens, enquiries and applications, use it. */
+.leads-admin {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .leads-admin__total {
   font-weight: 400;
   color: var(--muted);
 }
 
+/*
+ * THE INBOX TABLE'S RHYTHM (visual pass, round 2, 2026-09-25). `.admin-table`
+ * sets only vertical alignment, and in the portal the rest comes from classes
+ * this console screen does not carry — so the enquiries and applications tables
+ * rendered with no cell padding, centred headers and every column pressed
+ * against the next. The rules below give `.leads-admin__list` a header band,
+ * row separators, padding and a hover, in the console's tokens. Nothing is hidden
+ * and no column is dropped; the table still scrolls inside its own box.
+ */
+.leads-admin__scroll {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.leads-admin__list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.leads-admin__list th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.leads-admin__list td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  line-height: 1.45;
+  vertical-align: top;
+}
+
+.leads-admin__list tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.leads-admin__list tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.leads-admin__list td strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.leads-admin__list td small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* The date column and the status stay on one line each; the actions sit right. */
+.leads-admin__list td:nth-last-child(2),
+.leads-admin__list td:nth-last-child(3) {
+  white-space: nowrap;
+}
+
+.leads-admin__list td:last-child {
+  text-align: right;
+  vertical-align: middle;
+}
+
+/* `--brand-fg`, the brand's text tone: `--brand-primary` is a fill, and as text on
+   the light theme's white it measured 2.58:1 — every email and phone link in the
+   table failed axe (round 2, 2026-09-25). */
 .leads-admin__list a {
-  color: var(--brand-primary);
+  color: var(--brand-fg);
 }
 
 /* Open against closed, as a word and not only a tint. Whether an enquiry is still
@@ -44,7 +128,7 @@
 }
 
 .leads-admin__detail {
-  margin-top: 14px;
+  margin-top: 0;
 }
 .leads-admin__detail h3 {
   margin: 0 0 12px;
@@ -115,7 +199,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 16px 0 0;
+  margin: 0;
   font-size: 13px;
   color: var(--muted);
 }
@@ -134,4 +218,8 @@
  */
 .leads-admin__scroll {
   overflow-x: auto;
+  /* The containing block for the table's visually hidden header text, which is
+     absolutely positioned: without this it is placed against the page, not the
+     scroller, and pushed the page 17-32px sideways on a phone (2026-09-24). */
+  position: relative;
 }

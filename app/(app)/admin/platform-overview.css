@@ -1,0 +1,1624 @@
+/*
+ * The platform console's Overview — the headline strip, the panels and the
+ * platform map.
+ *
+ * Round 2 of the visual pass (2026-09-25, owner answer 2A) makes this the
+ * reference's dense, composed dashboard: a twelve-column grid from 1280, rows of
+ * panels that share a height, 12px as the floor for any text, and phones that stay
+ * roomy. Tokens only, as in the frame — no colour literal — and `--radius-card`
+ * on every card so a workspace's corner style (#106) reaches the console too.
+ *
+ * Three steps: one column on a phone, two from 768, twelve from 1280.
+ */
+
+.platform-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Headline strip (answer 3A)                                          */
+/* ------------------------------------------------------------------ */
+
+.platform-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+/* Seven tiles two to a row on a phone: the seventh takes the full width rather
+   than sitting alone at half of it. */
+.platform-totals > .platform-total:last-child {
+  grid-column: 1 / -1;
+}
+
+/*
+ * A tile is a small grid — the icon beside its label, the figure below, the
+ * caption across the full width under it — so the caption has the whole tile to
+ * sit on one line rather than a column squeezed beside the icon.
+ */
+.platform-total {
+  display: grid;
+  grid-template-areas:
+    "icon label"
+    "value value"
+    "note note";
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.platform-total__icon {
+  display: inline-grid;
+  grid-area: icon;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--brand-wash);
+  color: var(--brand-fg);
+}
+
+/* The figures that ask for attention — open work, unopened enquiries — are amber. */
+.platform-total--attention .platform-total__icon {
+  background: var(--status-orange-wash);
+  color: var(--status-orange-fg);
+}
+
+.platform-total__copy {
+  display: contents;
+}
+
+.platform-total__copy small {
+  grid-area: label;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-total__copy strong,
+.platform-skeleton--figure {
+  grid-area: value;
+  margin-top: 8px;
+}
+
+.platform-total__copy strong {
+  color: var(--ink);
+  font-family: var(--type-display);
+  font-size: 25px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* The placeholder is the figure's own height, so nothing moves when it lands. */
+.platform-skeleton--figure {
+  width: 56px;
+  height: 27.5px;
+}
+
+.platform-total__copy em {
+  display: -webkit-box;
+  grid-area: note;
+  min-height: 2.7em;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* ------------------------------------------------------------------ */
+/* The grid and the card                                               */
+/* ------------------------------------------------------------------ */
+
+.platform-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.platform-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.platform-card__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.platform-card__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--brand-wash);
+  color: var(--brand-fg);
+}
+
+.platform-card__titles {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.platform-card__head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--type-display);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.platform-card__meta {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-card__action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--brand-fg);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.platform-card__action:hover {
+  border-color: var(--brand-fill);
+  background: var(--surface-hover);
+}
+
+.platform-card__action:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.platform-card__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.platform-card__footnote {
+  margin: auto 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.platform-card a:not([class]) {
+  color: var(--brand-fg);
+  font-weight: 600;
+}
+
+.platform-card__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: auto 0 0;
+  font-size: 12.5px;
+}
+
+.platform-card__links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  color: var(--brand-fg);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.platform-card__links a:hover {
+  text-decoration: underline;
+}
+
+.platform-card__links a:focus-visible,
+.platform-card a:not([class]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.platform-card__links--stack {
+  flex-direction: column;
+  gap: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.platform-retry {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.platform-retry:hover {
+  background: var(--surface-hover);
+}
+
+.platform-retry:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* A status word in a pill. Never a control: nothing here toggles anything. */
+.platform-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.platform-status--good {
+  background: var(--status-green-wash);
+  color: var(--status-green-fg);
+}
+
+.platform-status--warn {
+  background: var(--status-orange-wash);
+  color: var(--status-orange-fg);
+}
+
+.platform-status--info {
+  background: var(--status-blue-wash);
+  color: var(--status-blue-fg);
+}
+
+.platform-status--muted {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading placeholders — the same height as what replaces them        */
+/* ------------------------------------------------------------------ */
+
+.platform-skeleton {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-sunken), var(--surface-hover), var(--surface-sunken));
+  background-size: 200% 100%;
+  animation: platform-shimmer 1.4s ease-in-out infinite;
+}
+
+.platform-skeleton--block {
+  width: 100%;
+  height: 15px;
+}
+
+.platform-skeleton-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+@keyframes platform-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .platform-skeleton {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Compact tables (page management)                                    */
+/* ------------------------------------------------------------------ */
+
+.platform-mini-table {
+  /* The containing block for any visually hidden header text, which is
+     absolutely positioned: without it the text is placed against the page and
+     widened it by 4px at 1280 (measured, round 2). */
+  position: relative;
+  margin: 0 -16px;
+  overflow-x: auto;
+}
+
+.platform-mini-table:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.platform-mini-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.platform-mini-table th,
+.platform-mini-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.platform-mini-table th:first-child,
+.platform-mini-table td:first-child {
+  padding-left: 16px;
+}
+
+.platform-mini-table th:last-child,
+.platform-mini-table td:last-child {
+  padding-right: 16px;
+}
+
+.platform-mini-table thead th {
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.platform-mini-table tbody th {
+  font-weight: 700;
+}
+
+/* A page's title is the row's link, and on a phone or a tablet it is a finger's
+   target: 44px tall, the rows roomier for it (answer 2A — phones roomy). From 1024
+   the rows are the reference's compact ones again, for a pointer. */
+.platform-mini-table tbody th a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.platform-mini-table tbody th a:hover {
+  color: var(--brand-fg);
+  text-decoration: underline;
+}
+
+.platform-mini-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.platform-mini-table code,
+.platform-list code,
+.platform-facts code,
+.platform-map code,
+.platform-swatch__copy code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.platform-mini-table code {
+  color: var(--brand-fg);
+}
+
+.platform-mini-table__muted {
+  color: var(--muted);
+}
+
+.platform-mini-table tbody th small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.platform-mini-table .is-numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The quarter-width card's table: sentence-case headers and tighter cells, so
+   three columns fit a 230px card at 1280 without scrolling. */
+.platform-mini-table--flush thead th {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.platform-mini-table--flush th,
+.platform-mini-table--flush td {
+  padding: 7px 8px;
+}
+
+/* The page panel's counts under its table. */
+.platform-mini-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.platform-mini-stats > div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.platform-mini-stats dt {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-mini-stats dd {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--type-display);
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Homepage hero snapshot (answer 7A)                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Drawn on the rail's always-dark ground so it reads as the public site's hero
+ * in either theme — and captioned "Snapshot", with nothing in it that can be
+ * pressed. The calls to action are listed as words in the caption.
+ */
+.platform-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+  padding: 16px 16px 12px;
+  overflow: hidden;
+  border: 1px solid var(--rail-border);
+  border-radius: var(--radius-sm);
+  background: var(--rail-bg);
+  color: var(--rail-fg);
+}
+
+.platform-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.platform-hero__kicker {
+  color: var(--rail-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.platform-hero__title {
+  margin: 0;
+  color: var(--rail-fg);
+  font-family: var(--type-display);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.platform-hero__title span {
+  color: var(--rail-accent);
+}
+
+.platform-hero__lede {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--rail-fg-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.platform-hero__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-hero__pills li {
+  padding: 2px 9px;
+  border: 1px solid var(--rail-card-border);
+  border-radius: 999px;
+  background: var(--rail-card-bg);
+  color: var(--rail-fg);
+  font-size: 12px;
+}
+
+.platform-hero__image {
+  width: 100%;
+  height: 120px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.platform-hero__caption {
+  padding-top: 10px;
+  border-top: 1px solid var(--rail-border);
+  color: var(--rail-fg-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.platform-hero__badge {
+  display: inline-block;
+  margin-right: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--rail-active-bg);
+  color: var(--rail-active-fg);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------------ */
+/* Brand & design (answer 6B)                                          */
+/* ------------------------------------------------------------------ */
+
+.platform-swatches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-swatches li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.platform-swatch {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+}
+
+.platform-swatch__copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.platform-swatch__copy strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-swatch__copy code {
+  color: var(--muted);
+}
+
+.platform-pairs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.platform-pairs > div {
+  min-width: 0;
+}
+
+.platform-pairs--single {
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: auto;
+}
+
+.platform-pairs dt {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.platform-pairs dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.platform-logo {
+  max-width: 100%;
+  height: 26px;
+  object-fit: contain;
+}
+
+.platform-icon-row {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.platform-icon-row > span {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--brand-fg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Navigation structure                                                */
+/* ------------------------------------------------------------------ */
+
+/* The header menu as the site prints it — the shown links, in order. */
+.platform-menu-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--rail-bg);
+  color: var(--rail-fg-muted);
+  font-size: 12px;
+}
+
+.platform-menu-preview__brand {
+  margin-right: 4px;
+  color: var(--rail-fg);
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.platform-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.platform-list li:last-child {
+  border-bottom: 0;
+}
+
+.platform-list__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.platform-list__main strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+/* One line per link: the label, then where it goes. */
+.platform-list__main--inline {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.platform-list__main--inline strong {
+  flex: 0 0 auto;
+}
+
+.platform-list__main code {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Media library                                                       */
+/* ------------------------------------------------------------------ */
+
+.platform-thumbs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-thumbs a {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.platform-thumbs a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.platform-thumbs img,
+.platform-thumbs__glyph {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  object-fit: cover;
+}
+
+.platform-thumbs__glyph {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.platform-thumbs__name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+.platform-empty p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Portal modules — status chips, never switches                       */
+/* ------------------------------------------------------------------ */
+
+.platform-modules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-modules li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.platform-modules__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-green);
+}
+
+.platform-modules li.is-off {
+  color: var(--muted);
+}
+
+.platform-modules li.is-off .platform-modules__dot {
+  background: var(--muted-2);
+}
+
+/* "On" is said by the dot and the summary; "Off" is said in words as well. */
+.platform-modules li.is-on .platform-modules__state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.platform-modules li.is-off .platform-modules__state {
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------------ */
+/* Roles & access                                                      */
+/* ------------------------------------------------------------------ */
+
+.platform-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-bars li {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.platform-bars__label {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-bars__track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.platform-bars__track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-fill);
+}
+
+.platform-bars__value {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inbox and the enquiries chart (answer 5A)                           */
+/* ------------------------------------------------------------------ */
+
+.platform-inbox-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.platform-inbox-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.platform-inbox-stat:hover {
+  border-color: var(--brand-fill);
+}
+
+.platform-inbox-stat:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.platform-inbox-stat small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.platform-inbox-stat strong {
+  font-family: var(--type-display);
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.platform-inbox-stat em {
+  color: var(--status-orange-fg);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.platform-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.platform-chart figcaption {
+  display: flex;
+  flex-direction: column;
+}
+
+.platform-chart figcaption strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.platform-chart figcaption span,
+.platform-chart__summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.platform-chart__bars {
+  display: grid;
+  grid-template-columns: repeat(30, minmax(0, 1fr));
+  align-items: end;
+  gap: 2px;
+  height: 64px;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.platform-chart__bars span {
+  display: block;
+  border-radius: 2px 2px 0 0;
+  background: var(--surface-sunken);
+}
+
+.platform-chart__bars span.has-value {
+  background: var(--brand-fill);
+}
+
+.platform-chart__axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.platform-latest {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.platform-latest h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.platform-latest ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-latest li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.platform-latest__who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.platform-latest__who strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-latest__who small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Recent activity, website changes, integrations                      */
+/* ------------------------------------------------------------------ */
+
+.platform-activity,
+.platform-timeline,
+.platform-integrations {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-activity {
+  gap: 10px;
+}
+
+.platform-activity li {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.platform-activity__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--brand-fill);
+}
+
+.platform-activity__copy,
+.platform-timeline__main,
+.platform-integrations__main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.platform-activity__copy strong,
+.platform-timeline__main strong,
+.platform-integrations__main strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.platform-activity__copy small,
+.platform-timeline__main small,
+.platform-integrations__main small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.platform-timeline li,
+.platform-integrations li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.platform-timeline li:last-child,
+.platform-integrations li:last-child {
+  border-bottom: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* The client workspaces table                                         */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The table scrolls sideways rather than wrapping. Eight numeric columns in a
+ * wrapping layout stop being a table — a figure has to stay on the row it belongs
+ * to, and on a phone the honest answer is a scrollbar. It bleeds to the card's
+ * edges so its rows line up with the card rather than floating inside it.
+ */
+.platform-table-wrap {
+  margin: 0 -16px -14px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 var(--radius-card) var(--radius-card);
+}
+
+.platform-table-wrap:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.platform-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.platform-table th,
+.platform-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.platform-table th:first-child,
+.platform-table td:first-child {
+  padding-left: 16px;
+}
+
+.platform-table thead th {
+  background: var(--surface-sunken);
+  /* `--muted`, not `--muted-2`: on the sunken header the fainter one measured
+     under 4.5:1 in the light theme (axe, 2026-09-24). */
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.platform-table tbody tr:last-child th,
+.platform-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.platform-table tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.platform-table .is-numeric {
+  /* Tabular figures so a column of counts lines up on the digit rather than on
+     the glyph, which is what makes a column of numbers scannable at all. */
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.platform-table tbody th {
+  font-weight: 500;
+}
+
+.platform-table__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.platform-table tbody th small {
+  display: block;
+  /* `--muted`: the current workspace's row is tinted, and `--muted-2` on that
+     tint fell under 4.5:1 in the dark theme (axe, 2026-09-24). */
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.platform-table__muted {
+  color: var(--muted);
+}
+
+/* Which workspace the per-workspace screens are pointed at. Users and Roles
+   answer for ONE workspace, so this is load-bearing rather than decorative. */
+.platform-table__current {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--brand-fill);
+  color: var(--on-brand-primary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.platform-table tbody tr.is-current {
+  background: var(--surface-active);
+}
+
+.platform-pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.platform-open {
+  color: var(--status-orange-fg);
+  font-weight: 800;
+}
+
+.platform-open.is-zero {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* ------------------------------------------------------------------ */
+/* System facts                                                        */
+/* ------------------------------------------------------------------ */
+
+.platform-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.platform-facts > div {
+  min-width: 0;
+}
+
+.platform-facts dt {
+  color: var(--muted-2);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.platform-facts dd {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.platform-facts dd.is-good {
+  color: var(--status-green-fg);
+}
+
+.platform-facts dd.is-warn {
+  color: var(--status-orange-fg);
+}
+
+.platform-facts dd small {
+  display: block;
+  margin-top: 1px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+/* ------------------------------------------------------------------ */
+/* How the platform connects                                           */
+/* ------------------------------------------------------------------ */
+
+.platform-map {
+  padding: 14px 16px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+}
+
+.platform-map h2 {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.platform-map ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-map li {
+  position: relative;
+  min-width: 0;
+}
+
+.platform-map a,
+.platform-map__node {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.platform-map a:hover {
+  border-color: var(--brand-fill);
+  background: var(--surface-hover);
+}
+
+.platform-map a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.platform-map__node.is-here {
+  border-color: var(--brand-fill);
+  background: var(--brand-wash);
+}
+
+.platform-map__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--surface-sunken);
+  color: var(--brand-fg);
+}
+
+.platform-map strong {
+  display: block;
+  font-size: 13.5px;
+}
+
+.platform-map small {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.platform-map code {
+  color: var(--brand-fg);
+}
+
+/* ------------------------------------------------------------------ */
+/* Tablet: two columns                                                 */
+/* ------------------------------------------------------------------ */
+
+.platform-mini-stats {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 72px), 1fr));
+}
+
+@media (min-width: 768px) {
+  .platform-totals {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .platform-totals > .platform-total:last-child {
+    grid-column: auto;
+  }
+
+  .platform-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .platform-card--pages,
+  .platform-card--clients,
+  .platform-card--integrations,
+  .platform-card--system,
+  .platform-grid > .platform-map {
+    grid-column: 1 / -1;
+  }
+
+  .platform-integrations {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 20px;
+  }
+
+  .platform-integrations li:nth-last-child(2):nth-child(odd) {
+    border-bottom: 0;
+  }
+
+  /* A pointer is the likely input from here up, so the header links can be the
+     compact size the reference uses; the phone keeps its 44px. */
+  .platform-card__action {
+    min-height: 32px;
+  }
+
+  .platform-card__links a {
+    min-height: 28px;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Desktop: the reference's twelve-column composition                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Row by row: page management, the hero and the brand; navigation, media,
+ * modules and access; the workspaces beside the inbox; activity, website changes
+ * and the system; integrations across the width; the platform map.
+ */
+@media (min-width: 1024px) {
+  .platform-mini-table tbody th a {
+    display: inline;
+    min-height: 0;
+  }
+}
+
+@media (min-width: 1280px) {
+  .platform-totals {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+
+  .platform-grid {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+
+  .platform-card--pages {
+    grid-column: span 5;
+  }
+
+  .platform-card--hero {
+    grid-column: span 4;
+  }
+
+  .platform-card--brand {
+    grid-column: span 3;
+  }
+
+  .platform-card--quarter {
+    grid-column: span 3;
+  }
+
+  .platform-card--clients {
+    grid-column: span 8;
+  }
+
+  .platform-card--inbox {
+    grid-column: span 4;
+  }
+
+  .platform-card--third,
+  .platform-card--system {
+    grid-column: span 4;
+  }
+
+  .platform-card--system .platform-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .platform-card--integrations,
+  .platform-grid > .platform-map {
+    grid-column: 1 / -1;
+  }
+
+  .platform-integrations {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    column-gap: 24px;
+  }
+
+  .platform-integrations li:nth-last-child(2):nth-child(odd) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .platform-integrations li:nth-last-child(-n + 3) {
+    border-bottom: 0;
+  }
+
+  .platform-map ol {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 28px;
+  }
+
+  /* The four places read as one journey: arrows in the gaps between them. */
+  .platform-map li + li::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: -19px;
+    width: 9px;
+    height: 9px;
+    border-top: 2px solid var(--muted-2);
+    border-right: 2px solid var(--muted-2);
+    transform: translateY(-50%) rotate(45deg);
+  }
+}

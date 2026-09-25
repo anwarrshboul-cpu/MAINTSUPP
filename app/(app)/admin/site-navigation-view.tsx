@@ -360,6 +360,19 @@ export function SiteNavigationView() {
         page.
       </p>
 
+      {/* JUMP TO A PANEL (visual pass, round 2): links to the panels' own headings;
+          it moves the page and changes nothing. */}
+      <nav className="platform-jump" aria-label="Jump to a menu">
+        <span className="platform-jump__label">Jump to</span>
+        <a href="#site-nav-header">Header menu</a>
+        {working.footer.map((group) => (
+          <a key={group.id} href={`#site-nav-${group.id}`}>
+            Footer — {group.heading || group.id}
+          </a>
+        ))}
+        <a href="#site-nav-fixed">Fixed links</a>
+      </nav>
+
       <section className="admin-panel site-nav__panel" aria-labelledby="site-nav-header">
         <h2 id="site-nav-header" className="site-nav__heading">
           Header menu

@@ -23,9 +23,9 @@
  * restated here, so the screen and the route cannot drift about it.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-import { Icon } from "../../components";
+import { Icon, type IconName } from "../../components";
 import { AdminFlash, AdminNotice } from "../portal/views/admin-shell";
 import "./console-search.css";
 
@@ -50,8 +50,36 @@ type Payload = {
   error?: string;
 };
 
+/*
+ * `?q=` — what the console's top-bar search sends (a plain GET form, 2026-09-24).
+ * Read through `useSyncExternalStore` with an empty server snapshot, so the
+ * server's first paint and the browser's agree and the field fills in after
+ * hydration, without a state write inside an effect.
+ */
+const noSubscription = () => () => {};
+const readArrivalQuery = () => new URLSearchParams(window.location.search).get("q")?.trim() ?? "";
+const noArrivalQuery = () => "";
+
+/**
+ * The groups `/api/admin/search` answers with, in its order and under its own
+ * labels (`tests/platform-console-visual.test.mjs` holds the two level). What
+ * each one matches is said in words, so the reader knows what to type.
+ */
+const SEARCH_GROUPS: ReadonlyArray<{ label: string; icon: IconName; matches: string }> = [
+  { label: "Workspaces", icon: "building", matches: "A client workspace by name" },
+  { label: "Jobs", icon: "wrench", matches: "A job's reference or title" },
+  { label: "Sites", icon: "store", matches: "A store or site by name" },
+  { label: "Contractors", icon: "tool", matches: "A contractor by name" },
+  { label: "People", icon: "users", matches: "A name or an email address" },
+  { label: "Website pages", icon: "document", matches: "A CMS page's title or address" },
+  { label: "Website enquiries", icon: "inbox", matches: "The company or person who enquired" },
+];
+
 export function ConsoleSearchView() {
-  const [term, setTerm] = useState("");
+  const arrivedWith = useSyncExternalStore(noSubscription, readArrivalQuery, noArrivalQuery);
+  /* Null until the reader types; until then the field shows what they arrived with. */
+  const [typed, setTerm] = useState<string | null>(null);
+  const term = typed ?? arrivedWith;
   const [data, setData] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -86,6 +114,15 @@ export function ConsoleSearchView() {
       setBusy(false);
     }
   }, []);
+
+  /* Run the query the reader arrived with, once. The search writes its own
+     state after the request answers, as it does from the button. */
+  const ranArrival = useRef(false);
+  useEffect(() => {
+    if (!arrivedWith || ranArrival.current) return;
+    ranArrival.current = true;
+    void search(arrivedWith);
+  }, [arrivedWith, search]);
 
   /**
    * Switch workspace, then go where the row lives.
@@ -151,6 +188,34 @@ export function ConsoleSearchView() {
         <AdminNotice tone="error" icon="alert" title="That did not work">
           {failure}
         </AdminNotice>
+      ) : null}
+
+      {/*
+        BEFORE THE FIRST SEARCH (visual pass, round 2). The screen used to be one
+        field over an empty page. This says what a search here covers — the groups
+        `/api/admin/search` answers with, named as it names them — and how to run
+        one. It shows no sample results: nothing appears until the server answers.
+      */}
+      {!data && !failure && !busy ? (
+        <section className="console-search__guide" aria-labelledby="console-search-guide">
+          <h2 id="console-search-guide">What a search here covers</h2>
+          <ul className="console-search__groups">
+            {SEARCH_GROUPS.map((group) => (
+              <li key={group.label}>
+                <Icon name={group.icon} size={16} />
+                <span>
+                  <strong>{group.label}</strong>
+                  <small>{group.matches}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="console-search__hint">
+            Type at least two characters and press <kbd>Enter</kbd>. From any console screen, <kbd>Ctrl</kbd> +{" "}
+            <kbd>K</kbd> puts you in the search at the top. Results name the workspace each one belongs to, and{" "}
+            <em>Open</em> switches to it first.
+          </p>
+        </section>
       ) : null}
 
       {data ? (
