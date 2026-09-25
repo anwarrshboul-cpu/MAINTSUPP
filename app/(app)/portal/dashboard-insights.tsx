@@ -956,12 +956,12 @@ export function ComplianceExpiryTimeline({
   return (
     <InsightPanel
       title={title}
-      hint={`${plural(total, "certificate")} due in the next twelve months`}
+      hint={`${plural(total, "dated certificate")} due in the next twelve months`}
       action={
         months.expired > 0 ? (
           <span className="insight-flag">
             <Icon name="alert" size={14} />
-            {plural(months.expired, "already expired", "already expired")}
+            {plural(months.expired, "expired dated certificate")}
           </span>
         ) : undefined
       }
@@ -992,6 +992,17 @@ export function ComplianceExpiryTimeline({
         Next three months
         <i style={{ background: BRAND.teal }} aria-hidden="true" />
         Later in the year
+      </p>
+      {/*
+        WHICH POPULATION THIS IS (owner, 2026-09-25). The Compliance block above
+        counts scored requirements only; this counts every dated certificate in
+        the portfolio, including records outside the score — so its expired figure
+        can be the larger one, on purpose. Said here, beside the figure.
+      */}
+      <p className="insight-note insight-note--scope">
+        Includes every dated certificate in the selected portfolio, including records outside the
+        compliance score (such as those marked not required), so it can show more expired than the
+        scored figures above.
       </p>
     </InsightPanel>
   );

@@ -530,8 +530,16 @@ export function CpDash({
     colour: STATUS_COLOUR[key],
     labels: [],
   }));
+  /*
+   * "SCORED" IS SAID, BECAUSE THIS PAGE COUNTS TWO POPULATIONS (owner, 2026-09-25).
+   * This block — the score, its legend and the renewals countdown — counts SCORED
+   * requirements only (`isScoredRow`: required, and confirmed as the client's).
+   * The Expiry timeline further down counts every dated certificate, including
+   * records outside the score, so on the same page it can say "71 expired" where
+   * this says 5. Both are right; the words say which is which.
+   */
   const scoreCaption = score.scored
-    ? `${countText(score.satisfied)} of ${countText(score.applicable)} requirements on track`
+    ? `${countText(score.satisfied)} of ${countText(score.applicable)} scored requirements on track`
     : "No requirement on this portfolio is scored yet";
   /*
    * WHAT IS OUTSIDE THE SCORE, SAID ONCE AND SHORTLY.
@@ -598,7 +606,7 @@ export function CpDash({
 
   /* ── Renewals outlook ──────────────────────────────────────────────────── */
 
-  const countdownLabel = `Renewals countdown, ${countText(countdown.total)} in all: ${countdown.rings
+  const countdownLabel = `Renewals countdown of scored requirements, ${countText(countdown.total)} in all: ${countdown.rings
     .map((ring) => `${ring.label} ${countText(ring.value)}`)
     .join(", ")}`;
   const renewalByKey = new Map(renewals.slices.map((slice) => [slice.key, slice]));
@@ -717,7 +725,7 @@ export function CpDash({
             <div className="cp-renewals__heading">
               <h3 className="ov-card__title">Renewals outlook</h3>
               <p className="cp-card__caption">
-                Expired now and due in the next {policy.warningWindowDays} days
+                Scored requirements expired now or due in the next {policy.warningWindowDays} days
               </p>
             </div>
             <OvLink
