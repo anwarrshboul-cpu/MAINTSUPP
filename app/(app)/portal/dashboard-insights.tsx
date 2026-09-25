@@ -206,7 +206,12 @@ export function InsightPanel({
     <section className="panel insight-panel">
       <header className="insight-panel__head">
         <div>
-          <h3>{named}</h3>
+          {/* h2: a panel is a top-level section of its page. On Reports the
+              widget grid sits directly under the page's h1, where an h3 skipped
+              a level (axe `heading-order`); on Compliance the Expiry timeline is
+              a peer of the register's "Portfolio" h2, not part of it. The look is
+              set by `.insight-panel__head h2` and did not change. */}
+          <h2>{named}</h2>
           {hint && <p>{hint}</p>}
         </div>
         {action}

@@ -45,10 +45,19 @@
   cursor: default;
 }
 
+/*
+ * The label is `--on-brand-primary`, the ink paired with the brand fill, as on
+ * every `.primary-button`. It was a literal `#fff`, which on the default teal
+ * measured 2.58:1 (axe `color-contrast`, both themes); the paired token is
+ * derived per brand colour (`app/lib/theme-colour.ts`), so a workspace's own
+ * primary keeps a readable label too. `--control-own-fg` for the same reason
+ * `.primary-button` sets it: the dark `.portal-main button` rule reads it.
+ */
 .report-schedules__primary {
+  --control-own-fg: var(--on-brand-primary);
   border-color: var(--brand-primary) !important;
   background: var(--brand-primary) !important;
-  color: #fff !important;
+  color: var(--on-brand-primary) !important;
   font-weight: 600;
 }
 

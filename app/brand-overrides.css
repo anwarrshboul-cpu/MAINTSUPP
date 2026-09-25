@@ -4729,7 +4729,10 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
   gap: 12px;
 }
 
-.insight-panel__head h3 {
+/* h2 since the Reports heading-order fix (2026-09-25): a panel is a top-level
+   section of its page (the Reports grid, the Compliance Expiry timeline). Same
+   size and margin as the h3 it replaced. */
+.insight-panel__head h2 {
   margin: 0;
   font-size: 16px;
 }
