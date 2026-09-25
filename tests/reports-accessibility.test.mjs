@@ -6,10 +6,12 @@
  *    takes `--on-brand-primary`, the ink paired with the brand fill, as every
  *    `.primary-button` does — derived per brand, so a workspace's own primary
  *    keeps a readable label.
- * 2. `heading-order` on the first insight panel: the panels sit directly under the
- *    page's `<h1>Reports</h1>`, and their `<h3>` skipped a level. They are `<h2>`,
- *    styled exactly as the `<h3>` was (measured: same computed font, size, weight,
- *    line height, colour and margins in both themes).
+ * 2. `heading-order` on the first insight panel: the Reports widget grid sits
+ *    directly under the page's `<h1>Reports</h1>`, and each panel's `<h3>` skipped
+ *    a level. Panels are `<h2>`, styled exactly as the `<h3>` was (measured: same
+ *    computed font, size, weight, line height, colour and margins in both themes).
+ *    The panel's one other use, the Compliance page's Expiry timeline, is a peer of
+ *    that page's "Portfolio" h2, so h2 is the right level there too.
  */
 
 import assert from "node:assert/strict";

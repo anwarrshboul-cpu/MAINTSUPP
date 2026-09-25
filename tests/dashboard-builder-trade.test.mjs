@@ -101,8 +101,10 @@ test("the editor adds, removes, reorders and configures — and the grid obeys t
   const insights = await read("app/(app)/portal/dashboard-insights.tsx");
   assert.match(insights, /const named = useWidgetTitle\(\) \?\? title;/);
   /* h2 since 2026-09-25 (axe heading-order on Reports): the widget grid's one host
-     is the Reports page, directly under its h1. The contract — the heading shows
-     `named` — is unchanged; tests/reports-accessibility.test.mjs holds the level. */
+     is the Reports page, directly under its h1, and the panel's other use (the
+     Compliance Expiry timeline) is a top-level section too. The contract — the
+     heading shows `named` — is unchanged; tests/reports-accessibility.test.mjs
+     holds the level. */
   assert.match(insights, /<h2>\{named\}<\/h2>/);
   const css = await read("app/brand-overrides.css");
   const block = css.slice(css.indexOf(".widget-editor__config"), css.indexOf(".widget-editor__moves {"));
