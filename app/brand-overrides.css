@@ -5144,6 +5144,24 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
   gap: 16px;
 }
 
+/*
+ * The Compliance page's Expiry timeline follows the Compliance block's portfolio.
+ * While the block reads a newly chosen one, the timeline's months are still the
+ * previous portfolio's: faded and inert, as the block's own figures are (B6),
+ * with `aria-busy` saying the same to a screen reader. Nothing moves.
+ */
+.insight-grid[aria-busy="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .insight-grid[aria-busy="true"] {
+    transition: none;
+  }
+}
+
 /* A panel that needs the whole row — a six-month matrix does not fit a third. */
 .insight-grid__wide {
   display: grid;

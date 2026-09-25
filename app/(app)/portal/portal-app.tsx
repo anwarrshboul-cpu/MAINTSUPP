@@ -187,6 +187,7 @@ import { priorityOptions } from "./board-model";
    it and both had the old answer. See `boardItemName`. */
 import { boardItemName } from "./board-ordering";
 import { attributeContractorWork } from "../../lib/contractor-attribution";
+import type { ExpiryTimelineScope } from "../../lib/compliance-expiry-timeline";
 import {
   ComplianceExpiryTimeline,
   ContractorCostPanel,
@@ -5012,6 +5013,9 @@ function ComplianceView({
   onNavigate: (section: Section) => void;
 }) {
   const now = useCurrentTime();
+  /* The sites the Compliance block counted over, reported by the block itself —
+     the Expiry timeline below answers inside the same portfolio. */
+  const [timelineScope, setTimelineScope] = useState<ExpiryTimelineScope>({ state: "loading" });
   return (
     <>
     {/*
@@ -5022,6 +5026,7 @@ function ComplianceView({
     */}
     <CpDash
       onNavigateToSites={(query) => openSectionWithQuery(onNavigate, "stores", query)}
+      onScope={setTimelineScope}
     />
     <CompliancePage
       /*
@@ -5055,9 +5060,20 @@ function ComplianceView({
       costs this page no fetch of its own — the register above it is still drawn
       from the two aggregate endpoints and still downloads no records it is not
       showing.
+
+      IT COUNTS THE PAGE'S PORTFOLIO (2026-09-25). It was handed the snapshot
+      whole, so a portfolio with no sites still showed the workspace's "199 due"
+      and "71 already expired". It now counts only the records on the sites the
+      Compliance block above resolved for the chosen portfolio — the block's own
+      payload, so still no fetch of its own. While the block reads a newly
+      chosen portfolio, the timeline is the previous one's, faded and marked
+      busy, as the block is.
     */}
-    <section className="insight-grid">
-      <ComplianceExpiryTimeline compliance={complianceRecords} now={now} />
+    <section
+      className="insight-grid"
+      aria-busy={timelineScope.state === "ready" && timelineScope.pending ? true : undefined}
+    >
+      <ComplianceExpiryTimeline compliance={complianceRecords} now={now} scope={timelineScope} />
     </section>
     </>
   );

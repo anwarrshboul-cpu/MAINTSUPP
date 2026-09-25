@@ -50,8 +50,13 @@ const page = await read(PAGE);
 /* ── The mount the shell composes ─────────────────────────────────────────── */
 
 test("the block keeps the entry point the shell mounts", async () => {
-  assert.match(block, /export function CpDash\(\{\s*onNavigateToSites,\s*\}: \{/);
+  /* Since 2026-09-25 the block also takes an OPTIONAL `onScope`, which reports the
+     sites its figures were counted over to the page's Expiry timeline
+     (tests/compliance-expiry-portfolio-scope.test.mjs). The entry point the shell
+     mounts is unchanged: `onNavigateToSites` first and still required. */
+  assert.match(block, /export function CpDash\(\{\s*onNavigateToSites,\s*onScope,\s*\}: \{/);
   assert.match(block, /onNavigateToSites: \(query: string\) => void;/);
+  assert.match(block, /onScope\?: \(scope: ExpiryTimelineScope\) => void;/, "optional: the block still mounts without it");
   const portal = await read("app/(app)/portal/portal-app.tsx");
   assert.match(
     portal,
