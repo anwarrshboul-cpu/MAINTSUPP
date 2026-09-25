@@ -170,3 +170,44 @@ test("the glyph is shorter than the label and value it spans, so the skeleton st
   assert.ok(Number(icon[1]) < rows, `a ${icon[1]}px glyph beside ${rows.toFixed(1)}px of label and value`);
   assert.match(css, /grid-template-areas:\s*"icon label"\s*"icon value"\s*"caption caption";/);
 });
+
+/* ------------------------------------------------------------------ */
+/* Round 2 (2026-09-25) — restrained polish, the 11 Sept IA unchanged   */
+/* ------------------------------------------------------------------ */
+
+test("the text that says what a figure is OF is no longer the smallest on the page", async () => {
+  const css = await read("app/(app)/portal/ops/oi-dash.css");
+  for (const [cls, floor] of [
+    ["oi-note", 11.5],
+    ["oi-gauge__caption", 11.5],
+    ["oi-gauge__sub", 11.5],
+    ["ov-ring__label", 11.5],
+    ["oi-type__count", 11],
+    ["ov-chart__centre-caption", 11],
+  ]) {
+    const rule = new RegExp(`body\\[data-theme\\] \\.ov-dash\\.oi-dash \\.${cls} \\{[^}]*font-size: ([\\d.]+)px;`).exec(css);
+    assert.ok(rule, `${cls} has a size`);
+    assert.ok(Number(rule[1]) >= floor, `${cls} is ${rule[1]}px, under ${floor}px`);
+  }
+});
+
+test("an empty card says so in a framed inset, on the Overview and the Compliance page alike", async () => {
+  const oi = await read("app/(app)/portal/ops/oi-dash.css");
+  assert.match(oi, /\.ov-dash\.oi-dash \.oi-empty-note \{[^}]*border: 1px dashed var\(--ov-divider\);/);
+  assert.match(oi, /body\[data-theme\] \.ov-dash\.oi-dash \.oi-empty-note \{\s*font-size: 12px;\s*color: var\(--text-secondary\);/);
+  const cp = await read("app/(app)/portal/ops/cp-dash.css");
+  assert.match(cp, /\.ov-dash\.cp-dash \.cp-empty \{[^}]*place-items: center;[^}]*border: 1px dashed var\(--ov-divider\);/);
+});
+
+test("the data tools are one labelled group that says what it is for", async () => {
+  const page = await read("app/(app)/portal/ops/overview-page.tsx");
+  assert.match(page, /<span className="oi-footer__label" id="oi-footer-label">Data tools<\/span>/);
+  assert.match(page, /<span className="oi-footer__hint">Tidy the job records these figures are read from\.<\/span>/);
+  assert.match(page, /<span className="oi-footer__tools" role="group" aria-labelledby="oi-footer-label">/);
+  const tools = page.slice(page.indexOf('className="oi-footer__tools"'), page.indexOf("</span>", page.indexOf('className="oi-footer__tools"')));
+  assert.match(tools, /Resolve contractor names/);
+  assert.match(tools, /Assign jobs to a site/);
+  const css = await read("app/(app)/portal/ops/oi-dash.css");
+  assert.match(css, /\.ov-dash\.oi-dash \.oi-footer \{[^}]*border: 1px solid var\(--ov-card-border\);[^}]*background: var\(--ov-card\);/);
+  assert.doesNotMatch(css, /\.oi-footer__label \{[^}]*margin-right: auto;/, "the label no longer pushes the tools to the far edge");
+});
