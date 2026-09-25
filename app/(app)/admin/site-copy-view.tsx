@@ -475,6 +475,23 @@ export function SiteCopyView() {
         A save shows on the site straight away for you, and for every visitor within {data.cacheSeconds} seconds.
       </p>
 
+      {/*
+        JUMP TO A SECTION (visual pass, round 2). The editor is one long page — the
+        home page alone is fifteen panels — so the panels it draws are listed here as
+        links to their own headings. It moves the page and nothing else: no field,
+        no order and no save is touched by it.
+      */}
+      <nav className="platform-jump" aria-label="Jump to a section of this page">
+        <span className="platform-jump__label">Jump to</span>
+        <a href="#site-copy-seo">Search &amp; sharing</a>
+        {sectionsInOrder().map((section) => (
+          <a key={section.key} href={`#site-copy-${spec.key}-${section.key}`}>
+            {section.label}
+            {working.hidden[sectionAt(spec.key, section.key)] === true ? " (hidden)" : ""}
+          </a>
+        ))}
+      </nav>
+
       <section className="admin-panel site-copy__panel" aria-labelledby="site-copy-seo">
         <h2 id="site-copy-seo" className="site-copy__heading">
           What search engines and shared links show

@@ -46,7 +46,9 @@ export function BackupsView() {
 
   const { backups, database, storage, migrations } = data;
   return (
-    <div className="admin-console">
+    /* `section-stack`, as the Users, Roles and Clients screens have: its five
+       notices otherwise sat edge to edge (visual pass, round 2). */
+    <div className="section-stack admin-console">
       <AdminNotice tone="info" icon="shield" title={`Backups — taken by ${backups.provider}, not visible from here`}>
         {backups.detail}
       </AdminNotice>

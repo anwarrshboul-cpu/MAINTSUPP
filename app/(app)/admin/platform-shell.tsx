@@ -334,7 +334,9 @@ export function PlatformShell({
           <div className="platform-rail__group platform-rail__group--elsewhere">
             <h2>Elsewhere</h2>
             {PLATFORM_ELSEWHERE.map((entry) => (
-              <a key={entry.href} href={entry.href}>
+              /* Titled, because on a desktop the rail shows these three as icons
+                 in one row; the label stays in the markup for a screen reader. */
+              <a key={entry.href} href={entry.href} title={entry.label}>
                 <Icon name={entry.icon} size={17} />
                 <span>{entry.label}</span>
               </a>

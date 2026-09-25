@@ -17,6 +17,20 @@
   margin: 0 0 16px;
 }
 
+/*
+ * Each panel is a card (visual pass, round 2). They carry `.admin-panel`, whose
+ * padding is 0 because the portal's `.panel` supplies the rest — a class these
+ * console editors never had, so every section sat on the page with no edge and
+ * the long page read as one wall of fields. Scoped under `.site-nav` so it wins
+ * over the kit's rule whichever stylesheet loads last.
+ */
+.site-nav .site-nav__panel {
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
 .site-nav__heading {
   margin: 0 0 6px;
   font-size: 16px;

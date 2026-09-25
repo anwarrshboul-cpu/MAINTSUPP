@@ -114,3 +114,73 @@
 .console-search__omissions li + li {
   margin-top: 4px;
 }
+
+/* Before the first search: what it covers and how to run one (round 2). */
+.console-search__guide {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+
+.console-search__guide h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.console-search__groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.console-search__groups li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  color: var(--brand-fg);
+}
+
+.console-search__groups span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.console-search__groups strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.console-search__groups small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.console-search__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.console-search__hint kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 12px;
+}

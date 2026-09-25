@@ -127,6 +127,14 @@
   margin-top: 0;
 }
 
+/* `.admin-notice strong` is the notice's title, a block of its own. A word made
+   bold inside the body — the enquiries screen names a workspace that way — is
+   inline, or the sentence breaks round it (seen on /admin/leads, 2026-09-25). */
+.admin-notice__body strong {
+  display: inline;
+  font-size: inherit;
+}
+
 .admin-notice__icon {
   display: grid;
   place-items: center;

@@ -88,6 +88,8 @@ test("the portal's theme and modules are linked to, and are not platform screens
   /* And nothing was copied: the console mounts none of the Settings editors. */
   const shell = decommented(await read("app/(app)/admin/platform-shell.tsx"));
   const overview = decommented(await read("app/(app)/admin/platform-overview.tsx"));
+  /* Round 2 moved the panels into their own file; it is held to the same rule. */
+  const panels = decommented(await read("app/(app)/admin/platform-overview-panels.tsx"));
   for (const editor of [
     "BrandColoursPanel",
     "PortalModulesPanel",
@@ -97,6 +99,7 @@ test("the portal's theme and modules are linked to, and are not platform screens
   ]) {
     assert.ok(!shell.includes(editor), `the shell must not mount ${editor}`);
     assert.ok(!overview.includes(editor), `the overview must not mount ${editor}`);
+    assert.ok(!panels.includes(editor), `the overview's panels must not mount ${editor}`);
   }
 });
 
@@ -172,7 +175,8 @@ async function routeExists(apiPath) {
 test("the Overview reads only APIs that already exist", async () => {
   const overview = await read("app/(app)/admin/platform-overview.tsx");
   const block = overview.slice(overview.indexOf("const READS = ["), overview.indexOf("] as const;"));
-  const urls = [...block.matchAll(/\["[a-z]+", "([^"]+)"\]/g)].map((m) => m[1]);
+  /* Keys may be camelCase since round 2 added `portalNav`. */
+  const urls = [...block.matchAll(/\["[A-Za-z]+", "([^"]+)"\]/g)].map((m) => m[1]);
   assert.ok(urls.length >= 10, `the read list should have been found; got ${urls.length}`);
   for (const url of urls) {
     assert.ok(await routeExists(url), `${url} must be an existing route — the overview adds no API`);
@@ -199,7 +203,8 @@ test("the Overview still trusts the server's totals and names every state", asyn
 });
 
 test("the latest enquiries never show contact details", async () => {
-  const code = decommented(await read("app/(app)/admin/platform-overview.tsx"));
+  /* Re-pointed in round 2: the inbox panel moved to platform-overview-panels.tsx. */
+  const code = decommented(await read("app/(app)/admin/platform-overview-panels.tsx"));
   const block = code.slice(code.indexOf('className="platform-latest"'), code.indexOf("</Card>", code.indexOf('className="platform-latest"')));
   assert.ok(block.length > 0);
   for (const field of ["email", "phone"]) {
@@ -279,4 +284,147 @@ test("the Users counts are lifted to ink inside the console", async () => {
   /* `.site-stat-grid strong` is --navy-950 and only `.portal-content` lifts it. */
   const css = await read("app/(app)/admin/platform-shell.css");
   assert.match(css, /\.platform-main \.site-stat-grid strong \{\s*color: var\(--ink\);/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Round 2 (2026-09-25, owner answers 1C 2A 3A 4A 5A 6B 7A)            */
+/* ------------------------------------------------------------------ */
+
+const model = await import("../app/lib/platform-overview-model.ts");
+
+test("the enquiries chart counts every one of the last 30 days, ending today", () => {
+  const now = Date.parse("2026-09-25T10:00:00Z");
+  const series = model.enquiriesByDay(
+    ["2026-09-25 08:00:00", "2026-09-25T09:00:00Z", "2026-08-27 00:00:01", "2026-08-26 23:59:59", "not a date"],
+    now,
+  );
+  assert.equal(series.length, 30, "every day in the window, zero where nothing arrived");
+  assert.equal(series[0].day, "2026-08-27");
+  assert.equal(series.at(-1).day, "2026-09-25");
+  assert.equal(series.at(-1).count, 2, "two today, in both stamp formats");
+  assert.equal(series[0].count, 1, "the first day of the window counts");
+  const summary = model.summariseDays(series);
+  assert.equal(summary.total, 3, "outside the window and unreadable stamps are not counted");
+  assert.deepEqual(summary.busiest, { day: "2026-09-25", count: 2 });
+});
+
+test("the page list puts the built-in pages first, then CMS pages newest first", () => {
+  const rows = model.websitePageRows(
+    [{ key: "home", label: "Home page", path: "/" }],
+    null,
+    [
+      { id: "a", slug: "old", title: "Old", state: "draft", updatedAt: "2026-09-01 10:00:00" },
+      { id: "b", slug: "new", title: "New", state: "live", updatedAt: "2026-09-20T10:00:00Z" },
+    ],
+  );
+  assert.deepEqual(rows.map((row) => row.title), ["Home page", "New", "Old"]);
+  assert.equal(rows[0].state, "live", "a built-in page is always live");
+  assert.equal(rows[0].changedAt, null, "and 'as shipped' until the copy is saved");
+  assert.equal(rows[1].address, "/p/new");
+  assert.equal(model.choiceLabel("soft", [{ key: "soft", label: "Soft (MAINTSUPP default)" }]), "Soft (MAINTSUPP default)");
+  assert.equal(model.choiceLabel("odd", null), "odd");
+});
+
+test("the chart says it counts enquiries, not traffic (answer 5A)", async () => {
+  const panels = await read("app/(app)/admin/platform-overview-panels.tsx");
+  assert.match(panels, /Enquiries received, last 30 days/);
+  assert.match(panels, /not website traffic/);
+  for (const banned of ["Page Views", "page views", "Unique Visitors", "Conversion", "Sessions"]) {
+    assert.ok(!panels.includes(banned), `"${banned}" is web analytics this product does not have`);
+  }
+});
+
+test("the integrations panel uses Account → Integrations' own words (answer 4A)", async () => {
+  const panels = decommented(await read("app/(app)/admin/platform-overview-panels.tsx"));
+  const account = await read("app/(app)/portal/views/account-ui.tsx");
+  assert.match(account, /okLabel = "Configured"/);
+  assert.match(account, /offLabel = "Not configured"/);
+  assert.match(panels, /\{entry\.configured \? "Configured" : "Not configured"\}/, "the same two labels, nothing warmer");
+  assert.match(panels, /ready<PlatformPayload>\(platform\)\?\.platform\.integrations/, "read from the same API the Account screen reads");
+  const overview = await read("app/(app)/admin/platform-overview.tsx");
+  assert.match(overview, /\["platform", "\/api\/account\/platform"\]/);
+});
+
+test("the Overview draws status, never controls that change anything", async () => {
+  const panels = decommented(await read("app/(app)/admin/platform-overview-panels.tsx"));
+  for (const control of ['role="switch"', 'type="checkbox"', "<input", "<select", "<textarea", "<iframe"]) {
+    assert.ok(!panels.includes(control), `${control} has no place on a read-only overview`);
+  }
+  for (const fake of ["Publish all", "Publish All", "Save changes", "Platform Online", "Live Preview"]) {
+    assert.ok(!panels.includes(fake), `"${fake}" has nothing real behind it`);
+  }
+  /* The hero snapshot lists its calls to action as words, not buttons (7A). */
+  const hero = panels.slice(panels.indexOf("export function HeroPanel"), panels.indexOf("export function BrandPanel"));
+  assert.ok(!/<button/.test(hero), "the snapshot has no button");
+  assert.match(hero, /Calls to action:/);
+  assert.match(hero, /platform-hero__badge">Snapshot</);
+});
+
+test("the brand snapshot draws chips and chosen icons, no sample charts (answer 6B)", async () => {
+  const panels = decommented(await read("app/(app)/admin/platform-overview-panels.tsx"));
+  const brand = panels.slice(panels.indexOf("export function BrandPanel"), panels.indexOf("export function NavigationPanel"));
+  assert.match(brand, /className="platform-swatch" style=\{\{ background: token\.value \}\}/);
+  assert.match(brand, /customIcons/, "only the icons a workspace actually chose");
+  assert.ok(!/<svg|<circle|<path|donut|gauge/i.test(brand), "no sample chart shapes");
+});
+
+test("the headline strip mixes platform and website figures (answer 3A)", async () => {
+  const overview = await read("app/(app)/admin/platform-overview.tsx");
+  for (const label of ["Workspaces", "People", "Sites", "Open jobs", "Web pages", "Media", "Enquiries"]) {
+    assert.match(overview, new RegExp(`label(: |=)"${label}"`), `the strip has ${label}`);
+  }
+});
+
+test("the search guide names the groups the search route answers with", async () => {
+  const view = await read("app/(app)/admin/console-search-view.tsx");
+  const route = await read("app/api/admin/search/route.ts");
+  const guide = [...view.slice(view.indexOf("const SEARCH_GROUPS"), view.indexOf("];", view.indexOf("const SEARCH_GROUPS"))).matchAll(/label: "([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(guide.length, 7);
+  for (const label of guide) {
+    assert.match(route, new RegExp(`label: "${label}"`), `${label} is a group the route really returns`);
+  }
+  assert.match(view, /!data && !failure && !busy \?/, "shown only before the first answer — never beside results");
+});
+
+test("the jump menus link only to headings the editors draw", async () => {
+  const copy = await read("app/(app)/admin/site-copy-view.tsx");
+  assert.match(copy, /<nav className="platform-jump" aria-label="Jump to a section of this page">/);
+  assert.match(copy, /href="#site-copy-seo"/);
+  assert.match(copy, /id="site-copy-seo"/);
+  assert.match(copy, /href=\{`#site-copy-\$\{spec\.key\}-\$\{section\.key\}`\}/);
+  assert.match(copy, /id=\{`site-copy-\$\{spec\.key\}-\$\{section\.key\}`\}/);
+  const nav = await read("app/(app)/admin/site-navigation-view.tsx");
+  for (const target of ["site-nav-header", "site-nav-fixed"]) {
+    assert.match(nav, new RegExp(`href="#${target}"`));
+    assert.match(nav, new RegExp(`id="${target}"`));
+  }
+  assert.match(nav, /href=\{`#site-nav-\$\{group\.id\}`\}/);
+  assert.match(nav, /id=\{`site-nav-\$\{group\.id\}`\}/);
+  const css = await read("app/(app)/admin/platform-shell.css");
+  assert.match(css, /scroll-margin-top: 140px/, "and the heading lands below the sticky top bar");
+});
+
+test("wide tables scroll on purpose: shadows at the edges, the first column pinned", async () => {
+  const css = await read("app/(app)/admin/platform-shell.css");
+  assert.match(css, /\.platform-page \.platform-main \.admin-panel \.table-scroll \{\s*background:[\s\S]*?no-repeat local/);
+  const media = css.slice(css.indexOf("@media (min-width: 1024px)"));
+  assert.match(media, /\.data-table td:first-child \{\s*position: sticky;\s*left: 0;/, "pinned from 1024 only");
+  const overview = await read("app/(app)/admin/platform-overview.css");
+  assert.match(overview, /\.platform-mini-table \{\s*\/\*[\s\S]*?\*\/\s*position: relative;/, "hidden header text stays inside its scroller");
+});
+
+test("the inbox tables and notices read as designed", async () => {
+  const leads = await read("app/(app)/admin/leads.css");
+  assert.match(leads, /\.leads-admin__list th \{[^}]*text-transform: uppercase;/);
+  assert.match(leads, /\.leads-admin \{\s*display: flex;\s*flex-direction: column;\s*gap: 14px;/, "the inbox screens' parts no longer touch");
+  assert.match(leads, /\.leads-admin__list a \{\s*color: var\(--brand-fg\);/, "links in the brand's text tone, which passes contrast on white");
+  const backups = await read("app/(app)/admin/backups-view.tsx");
+  assert.match(backups, /<div className="section-stack admin-console">/, "the five backup notices keep the portal's stack gap");
+  assert.match(leads, /\.leads-admin__list td \{[^}]*padding: 12px 14px;/);
+  const kit = await read("app/(app)/portal/views/admin-console.css");
+  assert.match(kit, /\.admin-notice__body strong \{\s*display: inline;/);
+  for (const file of ["app/(app)/admin/site-copy.css", "app/(app)/admin/site-navigation.css"]) {
+    const css = await read(file);
+    assert.match(css, /__panel \{\s*padding: 18px 20px;\s*border: 1px solid var\(--line\);/, `${file}: each panel is a card`);
+  }
 });

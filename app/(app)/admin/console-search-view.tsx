@@ -25,7 +25,7 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
-import { Icon } from "../../components";
+import { Icon, type IconName } from "../../components";
 import { AdminFlash, AdminNotice } from "../portal/views/admin-shell";
 import "./console-search.css";
 
@@ -59,6 +59,21 @@ type Payload = {
 const noSubscription = () => () => {};
 const readArrivalQuery = () => new URLSearchParams(window.location.search).get("q")?.trim() ?? "";
 const noArrivalQuery = () => "";
+
+/**
+ * The groups `/api/admin/search` answers with, in its order and under its own
+ * labels (`tests/platform-console-visual.test.mjs` holds the two level). What
+ * each one matches is said in words, so the reader knows what to type.
+ */
+const SEARCH_GROUPS: ReadonlyArray<{ label: string; icon: IconName; matches: string }> = [
+  { label: "Workspaces", icon: "building", matches: "A client workspace by name" },
+  { label: "Jobs", icon: "wrench", matches: "A job's reference or title" },
+  { label: "Sites", icon: "store", matches: "A store or site by name" },
+  { label: "Contractors", icon: "tool", matches: "A contractor by name" },
+  { label: "People", icon: "users", matches: "A name or an email address" },
+  { label: "Website pages", icon: "document", matches: "A CMS page's title or address" },
+  { label: "Website enquiries", icon: "inbox", matches: "The company or person who enquired" },
+];
 
 export function ConsoleSearchView() {
   const arrivedWith = useSyncExternalStore(noSubscription, readArrivalQuery, noArrivalQuery);
@@ -173,6 +188,34 @@ export function ConsoleSearchView() {
         <AdminNotice tone="error" icon="alert" title="That did not work">
           {failure}
         </AdminNotice>
+      ) : null}
+
+      {/*
+        BEFORE THE FIRST SEARCH (visual pass, round 2). The screen used to be one
+        field over an empty page. This says what a search here covers — the groups
+        `/api/admin/search` answers with, named as it names them — and how to run
+        one. It shows no sample results: nothing appears until the server answers.
+      */}
+      {!data && !failure && !busy ? (
+        <section className="console-search__guide" aria-labelledby="console-search-guide">
+          <h2 id="console-search-guide">What a search here covers</h2>
+          <ul className="console-search__groups">
+            {SEARCH_GROUPS.map((group) => (
+              <li key={group.label}>
+                <Icon name={group.icon} size={16} />
+                <span>
+                  <strong>{group.label}</strong>
+                  <small>{group.matches}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="console-search__hint">
+            Type at least two characters and press <kbd>Enter</kbd>. From any console screen, <kbd>Ctrl</kbd> +{" "}
+            <kbd>K</kbd> puts you in the search at the top. Results name the workspace each one belongs to, and{" "}
+            <em>Open</em> switches to it first.
+          </p>
+        </section>
       ) : null}
 
       {data ? (
