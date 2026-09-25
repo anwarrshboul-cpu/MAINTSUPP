@@ -206,7 +206,10 @@ export function InsightPanel({
     <section className="panel insight-panel">
       <header className="insight-panel__head">
         <div>
-          <h3>{named}</h3>
+          {/* h2: every panel sits directly under the Reports page's h1, and an
+              h3 there skipped a level (axe `heading-order`). The look is set by
+              `.insight-panel__head h2` and did not change. */}
+          <h2>{named}</h2>
           {hint && <p>{hint}</p>}
         </div>
         {action}

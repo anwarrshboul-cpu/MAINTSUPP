@@ -100,7 +100,10 @@ test("the editor adds, removes, reorders and configures — and the grid obeys t
   /* The name is read in one place, so a panel added later inherits it. */
   const insights = await read("app/(app)/portal/dashboard-insights.tsx");
   assert.match(insights, /const named = useWidgetTitle\(\) \?\? title;/);
-  assert.match(insights, /<h3>\{named\}<\/h3>/);
+  /* h2 since 2026-09-25 (axe heading-order on Reports): the widget grid's one host
+     is the Reports page, directly under its h1. The contract — the heading shows
+     `named` — is unchanged; tests/reports-accessibility.test.mjs holds the level. */
+  assert.match(insights, /<h2>\{named\}<\/h2>/);
   const css = await read("app/brand-overrides.css");
   const block = css.slice(css.indexOf(".widget-editor__config"), css.indexOf(".widget-editor__moves {"));
   assert.match(block, /min-height: 44px;/, "the new controls keep the touch minimum");

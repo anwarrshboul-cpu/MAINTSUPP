@@ -4729,7 +4729,9 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
   gap: 12px;
 }
 
-.insight-panel__head h3 {
+/* h2 since the Reports heading-order fix (2026-09-25): the panels sit directly
+   under the page's h1. Same size and margin as the h3 it replaced. */
+.insight-panel__head h2 {
   margin: 0;
   font-size: 16px;
 }
