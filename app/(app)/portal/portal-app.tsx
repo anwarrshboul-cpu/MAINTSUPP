@@ -54,6 +54,7 @@ import {
  * used to stand here counted something else entirely.
  */
 import { isActiveSiteStatus } from "../../lib/site-state";
+import { csvCell } from "../../lib/finance/exports";
 /*
  * One definition of the compliance score, and one answer to "may this row be
  * edited here". Both screens below read them, so the Overview tile and the
@@ -1058,8 +1059,9 @@ function downloadCsv(requests: MaintenanceRequest[]) {
     "dueAt",
     "cost",
   ];
-  const escapeCell = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  /* `csvCell`, not a bare quote: job titles arrive from the public request
+     form, and a title beginning "=HYPERLINK(" ran as a formula in Excel. */
+  const escapeCell = csvCell;
   const csv = [
     columns.join(","),
     ...requests.map((request) =>
@@ -1142,8 +1144,9 @@ function downloadFileRegister(files: FileRecord[], now = new Date()) {
    * is passed in and used for every row, so a long export cannot straddle
    * midnight and classify its first rows against a different day from its last.
    */
-  const escapeCell = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  /* `csvCell`, not a bare quote: job titles arrive from the public request
+     form, and a title beginning "=HYPERLINK(" ran as a formula in Excel. */
+  const escapeCell = csvCell;
   const csv = [
     [...columns, "status"].join(","),
     ...files.map((file) =>
