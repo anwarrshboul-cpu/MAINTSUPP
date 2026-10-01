@@ -1275,6 +1275,10 @@ export default function PortalApp({
   const [notificationStates, setNotificationStates] = useState<
     Record<string, NotificationState>
   >({});
+  /* What `/api/notifications` counted itself, for the screens that do not load
+     the job list (the Overview above all). See that route. */
+  const [serverNotificationCandidates, setServerNotificationCandidates] = useState<MaintenanceRequest[]>([]);
+  const [serverOpenJobs, setServerOpenJobs] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /*
    * "loading" is the honest starting state, and it used to be "sample" — which
@@ -1888,8 +1892,12 @@ export default function PortalApp({
         if (!response.ok) return;
         const payload = (await response.json()) as {
           states?: NotificationStateEntry[];
+          candidates?: MaintenanceRequest[];
+          openJobs?: number;
         };
         if (!active) return;
+        setServerNotificationCandidates(payload.candidates ?? []);
+        setServerOpenJobs(typeof payload.openJobs === "number" ? payload.openJobs : null);
         setNotificationStates(
           Object.fromEntries(
             (payload.states ?? []).map((entry) => [
@@ -3033,13 +3041,18 @@ export default function PortalApp({
    * the window the reader chose; the two agree whenever that window is All
    * time, and the tile carries the period in its own subtitle.
    */
-  const openCount = openJobCount(requests.filter(countsAsWorkOrder));
+  /* The job list when this screen has loaded it; the server's own count and
+     candidates when it has not (the Overview), so neither goes blank there. */
+  const jobListLoaded = requests.length > 0;
+  const openCount = jobListLoaded
+    ? openJobCount(requests.filter(countsAsWorkOrder))
+    : (serverOpenJobs ?? 0);
   const notificationItems = useMemo(
     () =>
-      notificationCandidates(requests).filter(
+      (jobListLoaded ? notificationCandidates(requests) : serverNotificationCandidates).filter(
         (request) => notificationStates[request.id] !== "dismissed",
       ),
-    [notificationStates, requests],
+    [jobListLoaded, notificationStates, requests, serverNotificationCandidates],
   );
   const unreadNotificationCount = notificationItems.filter(
     (request) => notificationStates[request.id] !== "read",

@@ -249,9 +249,13 @@ test("the sidebar badge and the Overview read one definition of open", async () 
     /import \{[^}]*\bopenJobCount\b[^}]*\} from "\.\.\/\.\.\/lib\/job-metrics"/,
     "the badge takes its count from the shared module",
   );
+  /* Re-pointed 2026-10-01: on a screen that has not loaded the job list (the
+     Overview) the badge reads `/api/notifications`' `openJobs`, counted under
+     `liveWorkOrderCondition` — the SQL twin of this lifecycle scope. Where the
+     list IS loaded, the count is still exactly this expression. */
   assert.match(
     codeOnly(portal),
-    /const openCount = openJobCount\(requests\.filter\(countsAsWorkOrder\)\)/,
+    /const openCount = jobListLoaded\s*\?\s*openJobCount\(requests\.filter\(countsAsWorkOrder\)\)/,
     "and applies the same lifecycle scope the aggregates apply in SQL",
   );
   assert.match(codeOnly(portal), /badges=\{\{ maintenance: openCount \}\}/);

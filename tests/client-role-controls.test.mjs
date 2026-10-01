@@ -27,3 +27,16 @@ test("controls a client cannot use are not offered to one", async () => {
   assert.match(menu, /item\.key !== "import" \|\| canImport !== false/);
   assert.match(menu, /item\.key !== "developers" \|\| canIntegrate !== false/);
 });
+
+/* QA 2026-10-01: on the Overview (which never loads the job list) the bell said
+   "You're all caught up" over two jobs needing attention and the Jobs badge was
+   blank. `/api/notifications` now returns the bell's candidates and the open
+   count under the job feed's own scope. */
+test("the Overview's bell and Jobs badge do not depend on the job list", async () => {
+  const route = await read("app/api/notifications/route.ts");
+  assert.match(route, /liveWorkOrderCondition\(orgId\),\s*memberSiteCondition\(maintenanceRequests\.siteId, siteScope\),\s*sql`not \$\{closedJobSql\}`/);
+  assert.match(route, /candidates: candidates\.map\(\(row\) => exposeRequest\(row\)\)/);
+  const app = await read("app/(app)/portal/portal-app.tsx");
+  assert.match(app, /jobListLoaded \? notificationCandidates\(requests\) : serverNotificationCandidates/);
+  assert.match(app, /: \(serverOpenJobs \?\? 0\);/);
+});
