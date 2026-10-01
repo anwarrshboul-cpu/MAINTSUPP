@@ -932,10 +932,13 @@ export function TimeSeries({
     <div className="ovw-ts" ref={rootRef}>
       <p className="ovw-ts__scales">
         {columnSeries.length > 0 ? (
-          <span className="ovw-ts__scale">Columns to {columnCeiling}</span>
+          /* Through `show`, like every figure in the tooltips: printed raw, a
+             pence series (the cash-flow forecast) read "Columns to 100000" over
+             tooltips saying £784.38. */
+          <span className="ovw-ts__scale">Columns to {show(columnCeiling, columnSeries[0].key)}</span>
         ) : null}
         {lineSeries.length > 0 ? (
-          <span className="ovw-ts__scale">Lines to {lineCeiling}</span>
+          <span className="ovw-ts__scale">Lines to {show(lineCeiling, lineSeries[0].key)}</span>
         ) : null}
       </p>
       {/*
