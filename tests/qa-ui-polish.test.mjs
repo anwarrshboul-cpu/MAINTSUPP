@@ -107,3 +107,42 @@ test("4: the form wires it in, and a new record's button says Create", async () 
   assert.match(source, /typeof form\?\.siteId === "string" \? form\.siteId : null,/);
   assert.match(source, /editorId \? "Save changes" : tab === "planned" \? "Create task" :/);
 });
+
+/* ── 5. Jobs board: named row controls, a no-results state, phone gutter ── */
+
+const LIVE_BOARD = "app/(app)/portal/live-board.tsx";
+
+test("5: row action and select controls are named by the job, not its raw id", async () => {
+  const board = await read(LIVE_BOARD);
+  assert.match(board, /const rowName = boardItemName\(request\);/);
+  assert.match(board, /aria-label=\{"Actions for " \+ rowName\}/);
+  assert.match(board, /aria-label=\{"Select " \+ rowName\}/);
+  assert.match(board, /label=\{"Actions for " \+ rowName\}/);
+  assert.doesNotMatch(board, /"(Actions for|Select) " \+ request\.id/);
+  const drawerMenu = await read("app/(app)/portal/overlay/item-actions.tsx");
+  assert.doesNotMatch(drawerMenu, /Actions for \$\{request\.id\}/);
+  assert.match(drawerMenu, /Actions for \$\{boardItemName\(request\)\}/);
+});
+
+test("5: a search that matches nothing says so and offers Clear search", async () => {
+  const board = await read(LIVE_BOARD);
+  assert.match(
+    board,
+    /<BoardSearchEmpty query=\{query\} matches=\{visibleRows\.length\} noun=\{isMaintenanceBoard \? "jobs" : identity\.itemNoun\} onClear=\{\(\) => setQuery\(""\)\} \/>/,
+  );
+  const empty = await read("app/(app)/portal/board-search-empty.tsx");
+  assert.match(empty, /if \(!searched \|\| matches > 0\) return null;/);
+  assert.match(empty, /No \{noun\} match &ldquo;\{searched\}&rdquo;/);
+  assert.match(empty, /Clear search/);
+  assert.match(empty, /role="status"/);
+});
+
+test("5: Store Documentation's heading, raise button and tabs keep a 16px phone gutter", async () => {
+  const css = await read("app/(app)/portal/views/store-documentation-board.css");
+  const phone = css.slice(css.indexOf("@media (max-width: 760px)"), css.indexOf("@media (min-width: 761px)"));
+  assert.match(phone, /\.store-documentation__title \{\s*padding-inline: 16px;/);
+  assert.match(
+    phone,
+    /\.store-documentation__actions,\s*\.store-documentation:has\(\.live-board-page\) \.store-documentation__tabs \{\s*margin-inline: 16px;/,
+  );
+});
