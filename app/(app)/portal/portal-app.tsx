@@ -55,6 +55,7 @@ import {
  */
 import { isActiveSiteStatus } from "../../lib/site-state";
 import { csvCell } from "../../lib/finance/exports";
+import { fieldsChangedSentence } from "../../lib/activity-fields";
 /*
  * One definition of the compliance score, and one answer to "may this row be
  * edited here". Both screens below read them, so the Overview tile and the
@@ -958,7 +959,10 @@ function activityActor(email: string | null, detail?: Record<string, unknown>) {
     .join(" ");
 }
 
-function activityDescription(entry: RequestActivityEntry) {
+function activityDescription(
+  entry: RequestActivityEntry,
+  columnTitle?: (columnKey: string) => string | null | undefined,
+) {
   /*
    * A per-cell change, from `item_activity` — the one store in this system
    * that records WHICH COLUMN moved and what it held on either side.
@@ -987,7 +991,8 @@ function activityDescription(entry: RequestActivityEntry) {
     return `moved the request to ${stage}.`;
   }
   if (entry.action === "request.fields_changed") {
-    return "updated the request details.";
+    // Names the fields `detail.fields` holds (QA: "updated Priority and Due date.").
+    return fieldsChangedSentence(entry.detail.fields, columnTitle);
   }
   if (entry.action.includes("file") || entry.action.includes("attachment")) {
     return "updated the request files.";
@@ -9084,7 +9089,8 @@ function RequestDrawer({
                     />
                     <p>
                       <strong>{activityActor(entry.actorEmail, entry.detail)}</strong>{" "}
-                      {activityDescription(entry)}
+                      {activityDescription(entry, (key) =>
+                        boardSnapshot?.columns.find((col) => col.key === key)?.column.title)}
                     </p>
                     <small>{formatDate(entry.createdAt, true)}</small>
                   </div>
