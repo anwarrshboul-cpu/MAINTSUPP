@@ -40,6 +40,7 @@ import {
   paymentAllocations,
   payments,
   quotations,
+  sites,
 } from "../../../db/schema";
 import { dateText } from "../dashboard-aggregates";
 import { selectInChunks } from "../sql-batching";
@@ -1295,4 +1296,24 @@ function pounds(pence: number): string {
   return `${negative ? "-" : ""}£${Math.floor(absolute / 100).toLocaleString("en-GB")}.${String(
     absolute % 100,
   ).padStart(2, "0")}`;
+}
+
+
+/**
+ * Site names for the ids on a page of invoices, so the ledger and the invoice
+ * panel can print "Westfield Stratford" rather than `site-westfield-stratford-gpkkww`
+ * (QA, 2026-10-01). One organisation-scoped read; a page is at most 50 rows.
+ */
+export async function siteNamesFor(
+  db: Database,
+  organisationId: string,
+  siteIds: ReadonlyArray<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const ids = [...new Set(siteIds.filter((id): id is string => typeof id === "string" && id.length > 0))];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({ id: sites.id, name: sites.name })
+    .from(sites)
+    .where(and(eq(sites.organisationId, organisationId), inArray(sites.id, ids)));
+  return new Map(rows.map((row: { id: string; name: string }) => [row.id, row.name]));
 }

@@ -27,3 +27,12 @@ test("overdue means past its date AND still owed", async () => {
   const ledger = await read("app/(app)/portal/finance/finance-ledger.tsx");
   assert.match(ledger, /\(balance\.balancePence \?\? 0\) > 0 \? <AgeBadge/);
 });
+
+test("the ledger and the invoice panel name the site", async () => {
+  const route = await read("app/api/finance/invoices/route.ts");
+  assert.match(route, /siteName: row\.siteId \? siteNames\.get\(row\.siteId\) \?\? null : null/);
+  const ledger = await read("app/(app)/portal/finance/finance-ledger.tsx");
+  assert.match(ledger, /\{row\.siteName \?\? row\.siteId\}/);
+  const panel = await read("app/(app)/portal/finance/finance-invoice-panel.tsx");
+  assert.match(panel, /\["Site", invoice\.siteName \?\? invoice\.siteId\]/);
+});

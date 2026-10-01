@@ -392,7 +392,7 @@ function LedgerLine({
       </th>
       <td role="cell" data-label="Counterparty">
         <span className="fin-cell__ref">{row.counterpartyName ?? "—"}</span>
-        {row.siteId ? <span className="fin-cell__sub">{row.siteId}</span> : null}
+        {row.siteId ? <span className="fin-cell__sub">{row.siteName ?? row.siteId}</span> : null}
       </td>
       <td role="cell" data-label="Status">
         <FinanceStatusChip presentation={presentation} size="small" />

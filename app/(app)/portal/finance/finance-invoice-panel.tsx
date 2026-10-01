@@ -169,7 +169,7 @@ export function InvoicePanel({
                 ["Gross", <Money key="gross" pence={invoice.grossPence} currency={invoice.currency ?? undefined} />],
                 ["Category", invoice.category],
                 ["Cost centre", invoice.costCentre],
-                ["Site", invoice.siteId],
+                ["Site", invoice.siteName ?? invoice.siteId],
                 ["Quote", invoice.quoteId],
                 ["PO number", invoice.poNumber],
                 ["Currency", invoice.currency],

@@ -42,6 +42,8 @@ export interface InvoiceRecord {
   quoteId: string | null;
   poNumber: string | null;
   siteId: string | null;
+  /** The site's name, resolved by the route; absent on older payloads. */
+  siteName?: string | null;
   requestId: string | null;
   invoiceDate: string | null;
   receivedDate: string | null;
@@ -243,6 +245,8 @@ export interface QuoteRecord {
   requestId: string;
   contractorId: string | null;
   siteId: string | null;
+  /** The site's name, resolved by the route; absent on older payloads. */
+  siteName?: string | null;
   description: string | null;
   netPence: number | null;
   vatPence: number | null;
