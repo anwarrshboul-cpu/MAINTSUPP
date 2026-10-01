@@ -56,9 +56,13 @@ import {
 export function ItemNameEditor({
   value,
   onSave,
+  onOpen,
 }: {
   value: string;
   onSave: (value: string) => void;
+  /* On a phone a tap on the name opens the job (where the name is still
+     editable) — a "Rename item" sheet was the wrong answer to "show me this". */
+  onOpen?: () => void;
 }) {
   const mobile = useContext(MobileBoardContext);
   const canEdit = useContext(BoardEditContext);
@@ -112,8 +116,9 @@ export function ItemNameEditor({
       <button
         className="sheet-item-name"
         type="button"
-        title="Click to rename item"
+        title={mobile && onOpen ? "Open item" : "Click to rename item"}
         onClick={() => {
+          if (mobile && onOpen) return onOpen();
           if (!canEdit) return;
           setDraft(value);
           setEditing(true);

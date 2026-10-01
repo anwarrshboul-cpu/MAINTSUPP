@@ -108,6 +108,7 @@ export function SubitemRows({
                 <ItemNameEditor
                   value={subitem.title}
                   onSave={(title) => onSave(subitem.id, { title })}
+                  onOpen={onOpen ? () => onOpen(subitem.id) : undefined}
                 />
                 {onOpen && (
                   <button
