@@ -66,6 +66,11 @@ export type AuditAction =
   | "board.items_archived"
   | "data.imported"
   | "data.exported"
+  // Workspace rules and the contractor roster (PATCH/POST/DELETE /api/workspace)
+  | "settings.updated"
+  | "contractor.created"
+  | "contractor.updated"
+  | "contractor.deactivated"
   // Appearance
   | "theme.token_changed"
   | "theme.token_reset"

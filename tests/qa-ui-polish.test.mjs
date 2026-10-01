@@ -190,6 +190,30 @@ test("8: the site import refuses such a file by line, before any row is judged",
   assert.match(route, /`Line \$\{quoteLine\} has an unbalanced quote \(\"\)/);
 });
 
+/* ── 9. Settings and contractor writes reach the audit log ─────────────── */
+
+test("9: /api/workspace audits settings and contractor writes on all three verbs", async () => {
+  const route = await read("app/api/workspace/route.ts");
+  assert.match(route, /import \{ auditActor, recordAudit \} from "\.\.\/\.\.\/lib\/audit";/);
+  assert.match(route, /if \(entity !== "settings" && entity !== "contractor"\) return;/);
+  assert.match(route, /action: "settings\.updated",/);
+  assert.match(route, /const action = deactivated \? "contractor\.deactivated" : `contractor\.\$\{verb\}`;/);
+  for (const [verb, data] of [["created", "data"], ["updated", "data"], ["archived", "\\{\\}"]]) {
+    assert.match(
+      route,
+      new RegExp(
+        `await logChange\\(db, orgId, entity, id, "${verb}", actor\\.email, ${data}\\);\\n\\s*await auditWorkspaceChange\\(request, scope, entity, id, "${verb}", ${data}\\);`,
+      ),
+      `the ${verb} path writes the audit row beside the activity row`,
+    );
+  }
+  assert.equal(
+    route.match(/const scope = await scopedDb\(request\);/g)?.length,
+    3,
+    "POST, PATCH and DELETE keep the whole scope, so the audit row names the real identity",
+  );
+});
+
 /* ── 5. Jobs board: named row controls, a no-results state, phone gutter ── */
 
 const LIVE_BOARD = "app/(app)/portal/live-board.tsx";
