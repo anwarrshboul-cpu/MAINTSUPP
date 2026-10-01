@@ -1,0 +1,24 @@
+/* The board's "no search results" state — see board-search-empty.tsx.
+   Tokens only, so both themes read it. */
+.board-search-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  background: var(--surface-card);
+  color: var(--ink);
+}
+
+.board-search-empty p {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.board-search-empty button {
+  min-height: 36px;
+}

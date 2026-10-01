@@ -4,8 +4,8 @@ import { sites } from "../../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { beyondMemberScope } from "../../../lib/job-site-scope";
-import { csvResponse, parseCsvObjects, toCsv } from "../../../lib/csv";
-import { siteWriteFailure } from "../route";
+import { csvResponse, parseCsvObjects, toCsv, unbalancedQuoteLine } from "../../../lib/csv";
+import { SiteInputError, siteWriteFailure } from "../route";
 import { listOptionValues } from "../../../lib/options-repository";
 import type { AddressParts } from "../../../lib/sites-repository";
 import {
@@ -375,6 +375,18 @@ export async function POST(request: Request) {
     if (!csv.trim()) throw new Error("No CSV content was supplied.");
 
     const dryRun = body.dryRun !== false;
+    /*
+     * An unclosed quote turns the rest of the file into one cell, and every
+     * row from there on was skipped as "The row has no address." (QA). Refuse
+     * the file and name the line instead, as an input refusal (400) — tagged
+     * because it interpolates, per the rule beside `SiteInputError`.
+     */
+    const quoteLine = unbalancedQuoteLine(csv);
+    if (quoteLine !== null) {
+      throw new SiteInputError(
+        `Line ${quoteLine} has an unbalanced quote (") — a quoted value is opened and never closed, so everything after it would be read as one cell. Close or remove the quote and import again.`,
+      );
+    }
     const records = parseCsvObjects(csv);
     if (!records.length) throw new Error("The CSV contained no data rows.");
 

@@ -523,9 +523,9 @@ export function readDrillFilter(
     chips.push({ key: "site", label: "Site", value: named.join(", ") });
   }
   if (priorities.size) {
-    /* The Overview's ring is labelled "High"; its drill carries `priority=urgent`,
+    /* The Overview's ring is labelled "Urgent"; its drill carries `priority=urgent`,
        which is the internal key. Printing the key put "Priority urgent" on screen
-       under a figure the reader had just seen called High. `PRIORITY_DISPLAY_LABEL` is
+       under a figure the reader had just seen called Urgent. `PRIORITY_DISPLAY_LABEL` is
        the map that ring itself draws from. */
     chips.push({
       key: "priority",
@@ -548,7 +548,7 @@ export function readDrillFilter(
     });
   }
   if (overdueOnly) chips.push({ key: "overdue", label: "Overdue", value: "past its date" });
-  if (breachOnly) chips.push({ key: "risk", label: "Breach risk", value: "High or Tier 1, due within 48h" });
+  if (breachOnly) chips.push({ key: "risk", label: "Breach risk", value: "Urgent or Tier 1, due within 48h" });
   if (typeTokens.length) {
     chips.push({
       key: "type",

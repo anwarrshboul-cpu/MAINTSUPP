@@ -182,6 +182,26 @@ test("I: the Unscheduled tray is untouched by any of this", async () => {
   assert.match(trayCss, /touch-action: none/, "and only the grip takes a touch drag");
 });
 
+test("K: up to 1024px the tray stacks under the grid, and its titles wrap (QA)", async () => {
+  /*
+   * QA: between 641 and 1024px the 300px rail beside the grid squeezed every
+   * event chip to one character, and at 1440px tray titles read "D…".
+   */
+  const trayCss = cssCode(await load("app/(app)/portal/unscheduled-tray.css"));
+  const tablet = trayCss.slice(trayCss.indexOf("@media (max-width: 1024px)"));
+  assert.ok(trayCss.includes("@media (max-width: 1024px)"), "a 1024 breakpoint stacks the tray");
+  assert.match(tablet, /\.calendar-with-tray \{\s*flex-direction: column;/);
+  assert.match(tablet, /\.calendar-aside \{\s*width: 100%;/);
+  assert.ok(
+    trayCss.indexOf("@media (max-width: 1024px)") < trayCss.indexOf("@media (max-width: 640px)"),
+    "the phone sheet comes after, so its fixed position still wins",
+  );
+  const title = trayCss.match(/\.unscheduled-tray__title \{[^}]*\}/)[0];
+  assert.doesNotMatch(title, /white-space: nowrap/, "a tray title wraps instead of truncating to one letter");
+  assert.match(title, /-webkit-line-clamp: 2/);
+  assert.match(trayCss, /\.unscheduled-tray__text \{[^}]*min-width: 120px/);
+});
+
 test("J: the desktop cell keeps its own one-click shortcut", async () => {
   const source = codeOnly(await load(VIEWS));
   const desk = source.slice(source.indexOf('className="calendar-month__desk"'));

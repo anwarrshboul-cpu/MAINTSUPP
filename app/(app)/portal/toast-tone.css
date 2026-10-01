@@ -1,0 +1,16 @@
+/*
+ * The error tone of the portal toast — see app/lib/toast-tone.ts.
+ *
+ * The base `.toast` lives in globals.css; only the difference is here. Tokens
+ * only, so both themes read it: the red wash and ink pair is the one the status
+ * chips already use, and a red edge makes the tone legible without colour of
+ * the icon alone.
+ */
+.toast.toast--error {
+  border-color: var(--red-600);
+}
+
+.toast.toast--error > span {
+  background: var(--red-100);
+  color: var(--red-600);
+}

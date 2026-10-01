@@ -142,9 +142,11 @@ test("SLA by priority is the headline's ratio inside each priority", () => {
     ],
     normalisePriority,
   );
-  /* Urgent + critical are both "High": 5 jobs, 2 overdue → 3 within → 60%. */
+  /* Urgent + critical are both "Urgent": 5 jobs, 2 overdue → 3 within → 60%.
+     The band read "High" until QA found Settings → Service levels calling it
+     "Urgent"; the workspace's own word now names it on every surface. */
   assert.deepEqual(rows.map((row) => [row.label, row.jobs, row.withinSla, row.percent]), [
-    ["High", 5, 3, 60],
+    ["Urgent", 5, 3, 60],
     ["Medium", 10, 10, 100],
     ["Low", 0, 0, null],
   ]);

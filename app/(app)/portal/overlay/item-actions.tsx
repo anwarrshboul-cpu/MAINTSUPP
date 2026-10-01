@@ -17,6 +17,7 @@ import { useRef, useState } from "react";
 import { Icon } from "../../../components";
 import type { MaintenanceGroup, MaintenanceRequest } from "../../../lib/types";
 import { AnchoredPopover } from "./anchored";
+import { boardItemName } from "../board-row-name";
 
 /**
  * What the board hands over. Read through a getter on every call, because the
@@ -256,7 +257,7 @@ export function ItemActionsMenu({
         ref={triggerRef}
         className="icon-button detail-drawer__more"
         type="button"
-        aria-label={`Actions for ${request.id}`}
+        aria-label={`Actions for ${boardItemName(request)}`}
         aria-haspopup="menu"
         aria-expanded={open}
         title="Item actions"
@@ -273,7 +274,7 @@ export function ItemActionsMenu({
            opened from inside it has to out-rank the drawer or it is painted
            behind the drawer and its taps land on the drawer instead. */
         layer="popover-raised"
-        label={`Actions for ${request.id}`}
+        label={`Actions for ${boardItemName(request)}`}
       >
         <div className="sheet-row-menu item-actions-menu" data-board-drag-ignore>
           <button type="button" onClick={() => run(() => actions.openInNewTab(request))}>

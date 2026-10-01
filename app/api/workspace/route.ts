@@ -105,6 +105,7 @@ import {
 } from "../../lib/permissions";
 import { linkedContractorIds } from "../../lib/contractor-linking";
 import { RESERVED_EMAIL_TLD } from "../../lib/contact-links";
+import { auditActor, recordAudit } from "../../lib/audit";
 import { isUnreachableEmail } from "../../lib/site-metrics";
 import { jobsBoardCondition } from "../../lib/dashboard-filters";
 import { ensureComplianceProfile } from "../../lib/compliance-profile";
@@ -1378,6 +1379,73 @@ async function logChange(db: WorkspaceDb, orgId: string, entity: WorkspaceEntity
   });
 }
 
+/**
+ * SETTINGS AND THE CONTRACTOR REGISTER ALSO LAND IN THE AUDIT LOG.
+ *
+ * QA: saving the SLA hours, the compliance warning window or the completion
+ * evidence rule, and adding or deactivating a contractor, appeared in the
+ * Activity feed (`logChange` above, `activity_log`) and never in
+ * /dashboard/audit — although the Settings screen promises such a change "lands
+ * in the audit log like any other settings change". `activity_log` is the
+ * operational feed; `audit_events` is the record of who changed the
+ * workspace's rules and its roster, which is what these are. Every other
+ * settings route (`/api/sla-targets`, `/api/theme`, `/api/portal-modules`)
+ * already records there; this brings the workspace route into line.
+ *
+ * Only these two entities: a site, unit or planned task edit is operational
+ * data and stays in the feed alone. `recordAudit` never throws, so a failed
+ * audit write cannot undo a save that already happened.
+ */
+async function auditWorkspaceChange(
+  request: Request,
+  scope: Awaited<ReturnType<typeof scopedDb>>,
+  entity: WorkspaceEntity | undefined,
+  id: string,
+  verb: "created" | "updated" | "archived",
+  data: Record<string, unknown>,
+) {
+  if (entity !== "settings" && entity !== "contractor") return;
+  const fields = Object.keys(data);
+  if (entity === "settings") {
+    await recordAudit({
+      db: scope.db,
+      organisationId: scope.orgId,
+      actor: auditActor(scope),
+      action: "settings.updated",
+      entityType: "workspace_settings",
+      entityId: scope.orgId,
+      summary: `Changed the workspace settings${fields.length ? ` (${fields.join(", ")})` : ""}.`,
+      detail: { fields, settings: data },
+      request,
+    });
+    return;
+  }
+  const [row] = await scope.db
+    .select({ name: contractors.name })
+    .from(contractors)
+    .where(and(eq(contractors.id, id), eq(contractors.organisationId, scope.orgId)))
+    .limit(1);
+  const name = row?.name?.trim() || id;
+  const deactivated = verb === "archived" || data.active === false;
+  const action = deactivated ? "contractor.deactivated" : `contractor.${verb}`;
+  const summary = deactivated
+    ? `Deactivated contractor ${name}.`
+    : verb === "created"
+      ? `Added contractor ${name}.`
+      : `Updated contractor ${name}${fields.length ? ` (${fields.join(", ")})` : ""}.`;
+  await recordAudit({
+    db: scope.db,
+    organisationId: scope.orgId,
+    actor: auditActor(scope),
+    action,
+    entityType: "contractor",
+    entityId: id,
+    summary,
+    detail: { fields },
+    request,
+  });
+}
+
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
@@ -1557,7 +1625,8 @@ async function authoriseWorkspaceWrite(
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
+    const scope = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = scope;
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -1862,6 +1931,7 @@ export async function POST(request: Request) {
     }
 
     await logChange(db, orgId, entity, id, "created", actor.email, data);
+    await auditWorkspaceChange(request, scope, entity, id, "created", data);
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be created.";
@@ -3199,7 +3269,8 @@ export async function PATCH(request: Request) {
     /* `memberSiteScope`, not `siteScope`: this module already has a FUNCTION of
        that name — the register-scope resolver this handler calls a few lines
        below — and destructuring over it would shadow it into a string array. */
-    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
+    const scope = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = scope;
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string; data?: Record<string, unknown> };
     const entity = payload.entity;
@@ -3835,6 +3906,7 @@ export async function PATCH(request: Request) {
     }
 
     await logChange(db, orgId, entity, id, "updated", actor.email, data);
+    await auditWorkspaceChange(request, scope, entity, id, "updated", data);
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be updated.";
@@ -3845,7 +3917,8 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = await scopedDb(request);
+    const scope = await scopedDb(request);
+    const { actor, authenticated, db, orgId, siteScope: memberSiteScope } = scope;
     await seedWorkspaceIfEmpty(db, orgId);
     const payload = await request.json() as { entity?: WorkspaceEntity; id?: string };
     const entity = payload.entity;
@@ -3988,6 +4061,7 @@ export async function DELETE(request: Request) {
     else return Response.json({ error: "This record cannot be archived." }, { status: 400 });
 
     await logChange(db, orgId, entity, id, "archived", actor.email, {});
+    await auditWorkspaceChange(request, scope, entity, id, "archived", {});
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be archived.";

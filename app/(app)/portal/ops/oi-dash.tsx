@@ -1022,10 +1022,10 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
             value={oiCount(breachRisk.count)}
             unit={breachRisk.count === 1 ? "job" : "jobs"}
             caption={`due within ${breachRisk.windowHours}h`}
-            sub={`High priority or Tier 1, still open · ${oiCount(breachRisk.pool)} in all`}
+            sub={`Urgent or Tier 1, still open · ${oiCount(breachRisk.pool)} in all`}
             colour={breachRisk.count > 0 ? OI_COLOUR.critical : OI_COLOUR.primary}
             onSelect={drill(OI_BREACH).go}
-            ariaLabel={`SLA breach risk — open High priority or Tier 1 jobs, not yet overdue, due within ${breachRisk.windowHours} hours (opens them)`}
+            ariaLabel={`SLA breach risk — open Urgent or Tier 1 jobs, not yet overdue, due within ${breachRisk.windowHours} hours (opens them)`}
           />
         </OiCard>
 

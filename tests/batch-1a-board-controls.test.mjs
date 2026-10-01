@@ -276,6 +276,40 @@ test("an option column sorts by the workspace's own order, not the alphabet", ()
   );
 });
 
+test("values outside the option list still sort among themselves (QA)", () => {
+  // Every unlisted value shares one rank (after the list). With no tie-break
+  // the sort did nothing for them; they now fall back to their own text.
+  const columns = [systemColumn("status")];
+  const order = new Map([["Pending Scheduling", 0]]);
+  const rows = [
+    row({ status: "Quoted" }),
+    row({ status: "Awaiting parts" }),
+    row({ status: "Pending Scheduling" }),
+    row({ status: "On hold" }),
+  ];
+  for (const [direction, expected] of [
+    ["asc", ["Pending Scheduling", "Awaiting parts", "On hold", "Quoted"]],
+    ["desc", ["Quoted", "On hold", "Awaiting parts", "Pending Scheduling"]],
+  ]) {
+    const ordered = sort.sortBoardRows(
+      rows,
+      [{ columnId: "col-status", direction }],
+      context(columns, { optionOrderFor: () => order }),
+    );
+    assert.deepEqual(ordered.map((entry) => entry.status), expected, direction);
+  }
+  const custom = customColumn("c-stage", "status", {
+    choices: [{ id: "a", label: "Listed" }],
+  });
+  const cells = { [`${rows[0].id}::c-stage`]: "Zulu", [`${rows[1].id}::c-stage`]: "Alpha" };
+  const customOrdered = sort.sortBoardRows(
+    rows.slice(0, 2),
+    [{ columnId: "c-stage", direction: "asc" }],
+    context([custom], { cells }),
+  );
+  assert.deepEqual(customOrdered.map((entry) => entry.id), [rows[1].id, rows[0].id]);
+});
+
 test("empty values sort last in BOTH directions", () => {
   const columns = [systemColumn("contractor")];
   const rows = [row({ contractor: null }), row({ contractor: "Alpha" }), row({ contractor: "Beta" })];
