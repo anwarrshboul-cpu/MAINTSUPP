@@ -132,50 +132,23 @@ async function contextPayload(request: Request) {
         .filter((id): id is string => Boolean(id)),
     ),
   ];
-  const companyRows = companyIds.length
-    ? await context.db
-        .select({ id: clientCompanies.id, name: clientCompanies.name })
-        .from(clientCompanies)
-        .where(inArray(clientCompanies.id, companyIds))
-    : [];
-  const companyNames = new Map(companyRows.map((row) => [row.id, row.name]));
   /*
-   * THE WORKSPACE LOGO — the brokered address, or null for the default mark.
-   *
-   * `organisations.logo_url` is an old column nothing writes; the row is spread
-   * below, so it is overwritten here rather than trusted. Only the CURRENT
-   * workspace's logo is given: `/api/branding/logo/image` serves the caller's
-   * current workspace and no other, so an address for any other entry would
-   * draw the wrong mark.
+   * Every read below is independent of the others, so they go out together
+   * rather than one round trip after another — this answer is on the path of
+   * every portal page load. `Promise.resolve` because a query builder runs
+   * again each time it is awaited; `Promise.all` subscribes to each once.
    */
-  const logoUrl = await organisationLogoUrl(context.db, context.orgId);
-  const visibleOrganisations = visibleOrganisationRows.map((organisation) => ({
-    ...organisation,
-    logoUrl: organisation.id === context.orgId ? logoUrl : null,
-    companyName: organisation.clientCompanyId
-      ? (companyNames.get(organisation.clientCompanyId) ?? null)
-      : null,
-  }));
-  const companies = companyRows
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      internal: context.internalCompanyIds.includes(row.id),
-      owned: context.ownedCompanyIds.includes(row.id),
-      workspaceCount: visibleOrganisationRows.filter(
-        (organisation) => organisation.clientCompanyId === row.id,
-      ).length,
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name));
-  const currentCompany = context.clientCompanyId
-    ? {
-        id: context.clientCompanyId,
-        name: companyNames.get(context.clientCompanyId) ?? null,
-        owned: context.ownedCompanyIds.includes(context.clientCompanyId),
-      }
-    : null;
-
-  const [siteRows, priorities, engineers, labels, permissions] = await Promise.all([
+  const [companyRows, logoUrl, moduleOverrides, siteRows, priorities, engineers, labels, permissions] = await Promise.all([
+    companyIds.length
+      ? Promise.resolve(
+          context.db
+            .select({ id: clientCompanies.id, name: clientCompanies.name })
+            .from(clientCompanies)
+            .where(inArray(clientCompanies.id, companyIds)),
+        )
+      : Promise.resolve([] as { id: string; name: string }[]),
+    organisationLogoUrl(context.db, context.orgId),
+    readModuleOverrides(context.db, context.orgId),
     context.db
       .select({ id: sites.id, name: sites.name })
       .from(sites)
@@ -203,6 +176,42 @@ async function contextPayload(request: Request) {
     listOptionValues(context.db, context.orgId, "maintenance_label"),
     resolvePermissions(context.db, context.orgId, context.actor.role, context.siteScope),
   ]);
+  const companyNames = new Map(companyRows.map((row) => [row.id, row.name]));
+  /*
+   * THE WORKSPACE LOGO — the brokered address, or null for the default mark.
+   *
+   * `organisations.logo_url` is an old column nothing writes; the row is spread
+   * below, so it is overwritten here rather than trusted. Only the CURRENT
+   * workspace's logo is given: `/api/branding/logo/image` serves the caller's
+   * current workspace and no other, so an address for any other entry would
+   * draw the wrong mark.
+   */
+  // `logoUrl` is read above, with the rest.
+  const visibleOrganisations = visibleOrganisationRows.map((organisation) => ({
+    ...organisation,
+    logoUrl: organisation.id === context.orgId ? logoUrl : null,
+    companyName: organisation.clientCompanyId
+      ? (companyNames.get(organisation.clientCompanyId) ?? null)
+      : null,
+  }));
+  const companies = companyRows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      internal: context.internalCompanyIds.includes(row.id),
+      owned: context.ownedCompanyIds.includes(row.id),
+      workspaceCount: visibleOrganisationRows.filter(
+        (organisation) => organisation.clientCompanyId === row.id,
+      ).length,
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const currentCompany = context.clientCompanyId
+    ? {
+        id: context.clientCompanyId,
+        name: companyNames.get(context.clientCompanyId) ?? null,
+        owned: context.ownedCompanyIds.includes(context.clientCompanyId),
+      }
+    : null;
 
   return {
     actor: context.actor,
@@ -247,7 +256,7 @@ async function contextPayload(request: Request) {
      * sidebar. This field is how the client learns.
      */
     modules: availableModules(
-      await readModuleOverrides(context.db, context.orgId),
+      moduleOverrides,
       effectiveCapabilities(context.actor.role, permissions.capabilities, permissions.siteRestricted),
       context.actor.role,
     ),
