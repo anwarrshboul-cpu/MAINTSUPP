@@ -51,7 +51,7 @@ import {
   quoteStatusKey,
   type InvoiceDirection,
 } from "./model";
-import { invoiceBalances } from "./balance";
+import { invoiceBalances, outstandingInvoiceSql } from "./balance";
 import { paymentAllocationState } from "./rules";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -148,7 +148,9 @@ export function invoiceConditions(organisationId: string, filters: InvoiceFilter
      hence `<` against the day after rather than `<=` against the day. */
   if (filters.to) clauses.push(sql`${dateText(invoices.invoiceDate)} < ${nextDay(filters.to)}`);
 
-  if (filters.overdueOnly) clauses.push(overdueInvoiceSql(today));
+  /* Overdue is past its date AND still owed: settlement lives in balance.ts,
+     which is why the second half is imported rather than written here. */
+  if (filters.overdueOnly) clauses.push(overdueInvoiceSql(today), outstandingInvoiceSql());
 
   if (filters.unmatchedOnly) {
     clauses.push(

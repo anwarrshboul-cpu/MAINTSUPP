@@ -588,14 +588,15 @@ function PaymentsSection({ detail }: { detail: InvoiceDetail | null }) {
         <p className="fin-card__note">No payment has been allocated to this invoice.</p>
       ) : (
         <ul className="fin-unbilled__list">
-          {payments.map((payment) => (
-            <li className="fin-unbilled__job" key={payment.id}>
+          {payments.map(({ allocationId, allocatedPence, payment }) => (
+            <li className="fin-unbilled__job" key={allocationId}>
               <span>
-                {dayText(payment.paymentDate)} · {payment.method.replace(/_/g, " ")}
+                {dayText(payment.paymentDate)} · {(payment.method ?? "").replace(/_/g, " ")}
                 {payment.reference ? ` · ${payment.reference}` : ""}
                 {payment.attachmentId ? " · remittance attached" : ""}
               </span>
-              <Money pence={payment.amountPence} />
+              {/* What reached THIS invoice; one payment can settle several. */}
+              <Money pence={allocatedPence} />
             </li>
           ))}
         </ul>

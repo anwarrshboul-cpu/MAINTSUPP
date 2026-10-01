@@ -123,6 +123,13 @@ export interface PaymentRecord {
   recordedAt: string | null;
 }
 
+/** A payment as allocated to one invoice — see `InvoiceDetail.payments`. */
+export interface InvoicePaymentAllocation {
+  allocationId: string;
+  allocatedPence: number;
+  payment: PaymentRecord;
+}
+
 export interface CreditNoteRecord {
   id: string;
   reference: string | null;
@@ -209,7 +216,11 @@ export interface InvoiceDetail {
   invoice: InvoiceRecord;
   allocations: AllocationRecord[];
   flags: FlagRecord[];
-  payments: PaymentRecord[];
+  /* One row per ALLOCATION, as `listPaymentsForInvoice` returns it: the payment
+     is nested, and `allocatedPence` is what reached THIS invoice. Typed as a
+     flat PaymentRecord, the panel read `payment.method` off the wrapper and
+     every paid invoice crashed on open. */
+  payments: InvoicePaymentAllocation[];
   creditNotes: CreditNoteRecord[];
   history: StatusChange[];
   disputes: DisputeRecord[];

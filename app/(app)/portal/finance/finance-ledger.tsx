@@ -402,7 +402,8 @@ function LedgerLine({
       </td>
       <td role="cell" data-label="Due">
         <span className="fin-cell__ref">{dayText(row.dueAt)}</span>
-        <AgeBadge dueDay={row.dueAt} today={today} />
+        {/* A settled invoice is not "N days overdue", whatever its due date. */}
+        {(balance.balancePence ?? 0) > 0 ? <AgeBadge dueDay={row.dueAt} today={today} /> : null}
       </td>
       <td role="cell" data-label="Gross" className="td--number">
         <Money pence={row.grossPence} currency={row.currency ?? undefined} />
