@@ -56,6 +56,7 @@ import {
 import { isActiveSiteStatus } from "../../lib/site-state";
 import { csvCell } from "../../lib/finance/exports";
 import { fieldsChangedSentence } from "../../lib/activity-fields";
+import { toastToneFor, type ToastTone } from "../../lib/toast-tone";
 /*
  * One definition of the compliance score, and one answer to "may this row be
  * edited here". Both screens below read them, so the Overview tile and the
@@ -174,6 +175,7 @@ import { RaiseTicketButton } from "./raise-ticket";
 // The Updates panel, built against monday's — see update-thread.tsx.
 import { UpdateThread, type ComposerHandle } from "./update-thread";
 import "./update-thread.css";
+import "./toast-tone.css";
 import { useBodyScrollLock } from "./overlay/scroll-lock";
 import { AnchoredPopover } from "./overlay/anchored";
 import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
@@ -1286,7 +1288,14 @@ export default function PortalApp({
      the job list (the Overview above all). See that route. */
   const [serverNotificationCandidates, setServerNotificationCandidates] = useState<MaintenanceRequest[]>([]);
   const [serverOpenJobs, setServerOpenJobs] = useState<number | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /* The toast carries a TONE (QA: refusals showed the green success check).
+     One-argument callers — every child's `onNotify` — are classified from the
+     wording; the failure paths below say "error" outright. */
+  const [toastState, setToastState] = useState<{ message: string; tone: ToastTone } | null>(null);
+  const setToast = useCallback((message: string | null, tone?: ToastTone) => {
+    setToastState(message ? { message, tone: toastToneFor(message, tone) } : null);
+  }, []);
+  const toast = toastState?.message ?? null;
   /*
    * "loading" is the honest starting state, and it used to be "sample" — which
    * was accurate only because sample data was on screen.
@@ -1376,7 +1385,7 @@ export default function PortalApp({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadRuntimeContext().catch((error: unknown) => {
-        setToast(error instanceof Error ? error.message : "The client workspace could not be loaded.");
+        setToast(error instanceof Error ? error.message : "The client workspace could not be loaded.", "error");
       });
     }, 0);
     return () => window.clearTimeout(timer);
@@ -1404,7 +1413,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The test role could not be changed.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The test role could not be changed.");
+      setToast(error instanceof Error ? error.message : "The test role could not be changed.", "error");
       setContextBusy(false);
     }
   };
@@ -1468,7 +1477,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The client workspace could not be selected.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The client workspace could not be selected.");
+      setToast(error instanceof Error ? error.message : "The client workspace could not be selected.", "error");
       setContextBusy(false);
     }
   };
@@ -1499,7 +1508,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The client workspace could not be created.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The client workspace could not be created.");
+      setToast(error instanceof Error ? error.message : "The client workspace could not be created.", "error");
       setContextBusy(false);
     }
   };
@@ -1986,7 +1995,7 @@ export default function PortalApp({
       setContractorReloadToken((token) => token + 1);
       setToast("Shared workspace updated. Dashboard totals have been refreshed.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The shared record could not be saved.");
+      setToast(error instanceof Error ? error.message : "The shared record could not be saved.", "error");
       throw error;
     } finally {
       setWorkspaceBusy(false);
@@ -2010,7 +2019,7 @@ export default function PortalApp({
       setContractorReloadToken((token) => token + 1);
       setToast("Record archived. Its history remains available.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The record could not be archived.");
+      setToast(error instanceof Error ? error.message : "The record could not be archived.", "error");
       throw error;
     } finally {
       setWorkspaceBusy(false);
@@ -2911,6 +2920,7 @@ export default function PortalApp({
         caught instanceof Error
           ? caught.message
           : "The workflow update could not be saved.",
+        "error",
       );
     }
   };
@@ -3003,6 +3013,7 @@ export default function PortalApp({
           caught instanceof Error
             ? caught.message
             : "The notification could not be updated.",
+          "error",
         );
         throw caught;
       }
@@ -3385,7 +3396,7 @@ export default function PortalApp({
                   if (!response.ok || !body.request) throw new Error(body.error || "That job could not be opened.");
                   openRequest(body.request);
                 })
-                .catch((error: unknown) => setToast(error instanceof Error ? error.message : "That job could not be opened."));
+                .catch((error: unknown) => setToast(error instanceof Error ? error.message : "That job could not be opened.", "error"));
             }}
           />
 
@@ -4267,12 +4278,15 @@ export default function PortalApp({
         }}
       />
 
-      {toast && (
-        <div className="toast" role="status">
+      {toastState && (
+        <div
+          className={`toast${toastState.tone === "error" ? " toast--error" : ""}`}
+          role={toastState.tone === "error" ? "alert" : "status"}
+        >
           <span>
-            <Icon name="check" size={17} />
+            <Icon name={toastState.tone === "error" ? "alert" : "check"} size={17} />
           </span>
-          {toast}
+          {toastState.message}
         </div>
       )}
     </div>

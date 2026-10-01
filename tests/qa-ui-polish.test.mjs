@@ -108,6 +108,45 @@ test("4: the form wires it in, and a new record's button says Create", async () 
   assert.match(source, /editorId \? "Save changes" : tab === "planned" \? "Create task" :/);
 });
 
+/* ── 6. A refusal toast is not drawn as a success ──────────────────────── */
+
+const tone = await import(asModule(transpile(await read("app/lib/toast-tone.ts"))));
+
+test("6: failure wording gets the error tone; successes keep theirs", () => {
+  for (const failure of [
+    "You do not have permission to change this date.",
+    "The record could not be archived.",
+    "The board must keep at least one group.",
+    "There is no item above this one to become its parent.",
+    "Upload failed.",
+  ]) {
+    assert.equal(tone.toastToneFor(failure), "error", failure);
+  }
+  for (const success of [
+    "Comment added.",
+    "Record archived. Its history remains available.",
+    "MN-1001 moved to Booked.",
+    "Theme saved.",
+    "Link to MN-1001 copied.",
+  ]) {
+    assert.equal(tone.toastToneFor(success), "success", success);
+  }
+  assert.equal(tone.toastToneFor("Saved.", "error"), "error", "an explicit tone wins");
+});
+
+test("6: the portal toast draws its tone, and its failure paths say error", async () => {
+  const source = await read(PORTAL);
+  assert.match(source, /setToastState\(message \? \{ message, tone: toastToneFor\(message, tone\) \} : null\);/);
+  assert.match(source, /className=\{`toast\$\{toastState\.tone === "error" \? " toast--error" : ""\}`\}/);
+  assert.match(source, /role=\{toastState\.tone === "error" \? "alert" : "status"\}/);
+  assert.match(source, /<Icon name=\{toastState\.tone === "error" \? "alert" : "check"\} size=\{17\} \/>/);
+  assert.match(source, /import "\.\/toast-tone\.css";/);
+  // Every catch-path toast in the shell passes the tone outright.
+  assert.doesNotMatch(source, /setToast\((error|caught) instanceof Error \? \1\.message : "[^"]*"\)/);
+  const css = await read("app/(app)/portal/toast-tone.css");
+  assert.match(css, /\.toast\.toast--error > span \{[^}]*var\(--red-100\)/);
+});
+
 /* ── 5. Jobs board: named row controls, a no-results state, phone gutter ── */
 
 const LIVE_BOARD = "app/(app)/portal/live-board.tsx";
