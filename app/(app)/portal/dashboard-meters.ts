@@ -560,10 +560,14 @@ export interface JobMeters {
  * unchanged.
  */
 export function computeJobMeters(
-  requests: MaintenanceRequest[],
+  allRequests: MaintenanceRequest[],
   period: string,
   now: number,
 ): JobMeters {
+  /* A subitem is part of its parent's job, not a job: the Overview's SQL
+     excludes it (parent_id is null), and counting it here made the Jobs page
+     read Open 28 against the Overview's 27 for the same board. */
+  const requests = allRequests.filter((request) => !request.parentId);
   const stamps = requests
     .map((request) => new Date(request.requestedAt).getTime())
     .filter((stamp) => Number.isFinite(stamp));
