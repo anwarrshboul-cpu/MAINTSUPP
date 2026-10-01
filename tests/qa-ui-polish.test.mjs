@@ -165,6 +165,31 @@ test("7: every priority display map calls the top band Urgent, never High", asyn
   assert.doesNotMatch(oi, /High priority or Tier 1/);
 });
 
+/* ── 8. A CSV with an unclosed quote is reported as one ────────────────── */
+
+const csv = await import(asModule(transpile(await read("app/lib/csv.ts"))));
+
+test("8: an unclosed quote is found, with the line it opened on", () => {
+  assert.equal(
+    csv.unbalancedQuoteLine('name,address_line1\nAldgate,1 High St\nBank,"2 Low St\nCity,3 Mid St\n'),
+    3,
+  );
+  assert.equal(
+    csv.unbalancedQuoteLine('name,address_line1\n"Aldgate","1 High St,\nLondon"\n"Say ""hi""",x\n'),
+    null,
+    "a multi-line quoted field and escaped quotes are balanced",
+  );
+  assert.equal(csv.unbalancedQuoteLine("﻿name\nA\n"), null);
+});
+
+test("8: the site import refuses such a file by line, before any row is judged", async () => {
+  const route = await read("app/api/sites/csv/route.ts");
+  const guard = route.indexOf("const quoteLine = unbalancedQuoteLine(csv);");
+  assert.ok(guard > 0, "the importer checks quotes");
+  assert.ok(guard < route.indexOf("const records = parseCsvObjects(csv);"), "before parsing rows");
+  assert.match(route, /`Line \$\{quoteLine\} has an unbalanced quote \(\"\)/);
+});
+
 /* ── 5. Jobs board: named row controls, a no-results state, phone gutter ── */
 
 const LIVE_BOARD = "app/(app)/portal/live-board.tsx";

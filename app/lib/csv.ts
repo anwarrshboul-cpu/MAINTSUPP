@@ -72,6 +72,39 @@ export function parseCsv(input: string): string[][] {
   return rows.filter((entry) => entry.some((cell) => cell.trim().length));
 }
 
+/**
+ * The 1-based LINE on which a quoted field opens and never closes, or null.
+ *
+ * `parseCsv` is forgiving by design: a quote that is never closed simply keeps
+ * the field open to the end of the file, swallowing every comma and newline
+ * after it. QA met the consequence on the site import — a row with one stray
+ * `"` was reported as "The row has no address." because its address, and
+ * every row below it, had become part of a single cell. Nothing about that
+ * message points at the real fault. This runs the same state machine and
+ * reports where the unterminated quote began, so the importer can say so.
+ *
+ * A quoted field that legitimately spans lines (an address with a line break)
+ * closes, and is not reported.
+ */
+export function unbalancedQuoteLine(input: string): number | null {
+  const text = input.replace(/^﻿/, "");
+  let quoted = false;
+  let line = 1;
+  let openedOn = 1;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\n") line += 1;
+    if (char !== '"') continue;
+    if (quoted && text[index + 1] === '"') {
+      index += 1; // an escaped quote inside a quoted field
+      continue;
+    }
+    if (!quoted) openedOn = line;
+    quoted = !quoted;
+  }
+  return quoted ? openedOn : null;
+}
+
 export function parseCsvObjects(input: string): Array<Record<string, string>> {
   const rows = parseCsv(input);
   if (rows.length < 2) return [];
