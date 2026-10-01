@@ -17,7 +17,7 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { getD1 } from "../../db";
-import { seedBoardStructure, seedJobTypes } from "../../db/init";
+import { seedBoardStructure, seedJobTypes, seedWorkspaceDefaults } from "../../db/init";
 import { seedStoreDocumentationBoard } from "../../db/seed-store-documentation";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "./generic-board-template";
 import {
@@ -200,6 +200,10 @@ export async function createWorkspace(
     .run();
   await seedStoreDocumentationBoard(d1, created.id);
   await seedJobTypes(d1, created.id);
+  /* The status map, reminder cascade, Overview meters, SLA targets, invoice
+     status map and approval bands. Without them every invoice approval in a
+     new workspace failed - see `seedTargets` in db/init.ts. */
+  await seedWorkspaceDefaults(d1, created.id);
 
   if (demoIdentityAllowed()) {
     for (const role of ["admin", "client"] as const) {

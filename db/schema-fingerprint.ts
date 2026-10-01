@@ -161,6 +161,11 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   /* 3 — dashboard §9 item 25: `sla_targets.target_percent` and the
      one-current-row index `sla_targets_current_idx`. Additive only. */
   "7ae1ea67",
+  /* 4 — the six per-workspace seeders take an optional workspace id, so
+     `createWorkspace` seeds a new workspace's defaults itself
+     (`seedWorkspaceDefaults`). Same INSERT OR IGNORE statements; no schema
+     change. */
+  "3a628760",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

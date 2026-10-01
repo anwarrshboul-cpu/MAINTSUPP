@@ -5948,11 +5948,39 @@ const JOB_STATUS_MAP_SEED: ReadonlyArray<{
   { label: "Waiting for payment", colour: "#64748B", style: "hatched", icon: "pause", open: 1, overdue: 0 },
 ];
 
-async function seedJobStatusMap(d1: D1DatabaseLike) {
+/**
+ * The workspaces a per-workspace default is written for: every active one when
+ * the migrations run, or exactly one when `createWorkspace` has just made it.
+ *
+ * The six seeders below used to read the organisation list themselves and ran
+ * only from `applyMigrations`. Since the schema fingerprint (2026-09-23) that is
+ * once per migration change, so a workspace created in the app between two
+ * migration changes had NO status map, reminder cascade, Overview meters, SLA
+ * targets, invoice status map or approval bands: every invoice approval failed
+ * with "No approval band covers this amount" and the Planned calendar listed
+ * every status as unmapped. The write path now finishes its own rows
+ * (`seedWorkspaceDefaults`), as CLAUDE.md asks, instead of waiting on a replay.
+ */
+async function seedTargets(d1: D1DatabaseLike, only?: string): Promise<Array<{ id?: string }>> {
+  if (only) return [{ id: only }];
   const organisations = await d1
     .prepare("SELECT id FROM organisations WHERE status = 'active'")
     .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+  return (organisations.results ?? []) as Array<{ id?: string }>;
+}
+
+/** Every per-workspace default, for one workspace. Idempotent (INSERT OR IGNORE). */
+export async function seedWorkspaceDefaults(d1: D1DatabaseLike, organisationId: string) {
+  await seedJobStatusMap(d1, organisationId);
+  await seedReminderDefaults(d1, organisationId);
+  await seedDashboardMeters(d1, organisationId);
+  await seedSlaTargets(d1, organisationId);
+  await seedInvoiceStatusMap(d1, organisationId);
+  await seedApprovalRules(d1, organisationId);
+}
+
+async function seedJobStatusMap(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     const statements = JOB_STATUS_MAP_SEED.map((entry, index) =>
       d1
@@ -6011,11 +6039,8 @@ const REMINDER_DEFAULTS_SEED: ReadonlyArray<{
   { scope: "job", key: "stale", value: 14, direction: "after", groups: ["job-owner"], repeat: 1, interval: 7, cap: 8 },
 ];
 
-async function seedReminderDefaults(d1: D1DatabaseLike) {
-  const organisations = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+async function seedReminderDefaults(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     const statements = REMINDER_DEFAULTS_SEED.map((entry, index) =>
       d1
@@ -7003,11 +7028,8 @@ async function ensureOverviewFoundation(d1: D1DatabaseLike) {
   await seedSlaTargets(d1);
 }
 
-async function seedDashboardMeters(d1: D1DatabaseLike) {
-  const organisations = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+async function seedDashboardMeters(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     await d1.batch(
       DASHBOARD_METER_SEED.map((entry, index) =>
@@ -7065,11 +7087,8 @@ async function seedDashboardMeters(d1: D1DatabaseLike) {
   }
 }
 
-async function seedSlaTargets(d1: D1DatabaseLike) {
-  const organisations = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+async function seedSlaTargets(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     await d1.batch(
       SLA_TARGET_SEED.map((entry) =>
@@ -7643,11 +7662,8 @@ async function ensureInvoiceTracker(d1: D1DatabaseLike) {
   await seedApprovalRules(d1);
 }
 
-async function seedInvoiceStatusMap(d1: D1DatabaseLike) {
-  const organisations = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+async function seedInvoiceStatusMap(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     await d1.batch(
       INVOICE_STATUS_SEED.map((entry, index) =>
@@ -7676,11 +7692,8 @@ async function seedInvoiceStatusMap(d1: D1DatabaseLike) {
   }
 }
 
-async function seedApprovalRules(d1: D1DatabaseLike) {
-  const organisations = await d1
-    .prepare("SELECT id FROM organisations WHERE status = 'active'")
-    .all();
-  for (const row of (organisations.results ?? []) as Array<{ id?: string }>) {
+async function seedApprovalRules(d1: D1DatabaseLike, only?: string) {
+  for (const row of await seedTargets(d1, only)) {
     if (!row.id) continue;
     await d1.batch(
       APPROVAL_RULE_SEED.map((entry, index) =>
