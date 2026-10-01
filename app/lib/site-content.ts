@@ -325,7 +325,9 @@ export const CONTENT_PAGES: readonly ContentPageSpec[] = [
     label: "Home page",
     path: "/",
     seo: { ...SEO_COPY.home },
-    titleIsAbsolute: false,
+    /* The default already names the brand; with the layout's suffix the tab
+       read "Maintsupp — ... | MAINTSUPP" at 76 characters. */
+    titleIsAbsolute: true,
     sections: HOME_SECTIONS.map((definition) => sectionSpec("home", definition)),
   },
   {
@@ -418,7 +420,8 @@ export function validateSiteContent(
     if (page.seo !== undefined) {
       if (!page.seo || typeof page.seo !== "object") return refuse(`${spec.label}: the search-engine fields must be an object.`);
       const seo: NonNullable<StoredPage["seo"]> = {};
-      for (const [name, max] of [["title", 70], ["description", 200], ["socialDescription", 200]] as const) {
+      /* 160 for the description: search results cut longer ones off mid-sentence. */
+      for (const [name, max] of [["title", 70], ["description", 160], ["socialDescription", 200]] as const) {
         if (!(name in page.seo)) continue;
         if (name === "socialDescription" && spec.seo.socialDescription === undefined) {
           return refuse(`${spec.label} has no shared-link description.`);

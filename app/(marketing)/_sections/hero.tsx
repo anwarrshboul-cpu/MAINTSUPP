@@ -199,7 +199,7 @@ export function Hero({
               accent span is kept because it is the hero's typographic identity;
               it just falls on the half that says what the reader gets. */}
           <h1 className="hero__title">
-            <span>{copy.titleLead}</span>
+            <span>{copy.titleLead}</span>{" "}
             <span className="hero__accent">{copy.titleAccent}</span>
           </h1>
           <p className="hero__lede">{copy.lede}</p>

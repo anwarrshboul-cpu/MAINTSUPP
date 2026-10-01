@@ -2146,6 +2146,12 @@ img,svg,table{max-width:100%}
 .ph__img{opacity:0;transition:opacity .45s var(--ease),transform var(--t-slow) var(--ease)}
 .ph__img.is-loaded{opacity:1}
 @media (prefers-reduced-motion: reduce){.ph__img{transition:none}}
+/* The hero banner paints with the HTML, never after it. Its <img> is eager,
+   high-priority and server-rendered, but the rule above kept it at opacity 0
+   until React hydrated the whole homepage bundle and set .is-loaded, then
+   faded it in over .45s: the banner appeared up to a second after the page.
+   Below-the-fold photographs keep their fade. */
+.hero .ph__img{opacity:1;transition:none}
 
 
 /* ==========================================================================

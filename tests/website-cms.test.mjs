@@ -564,7 +564,10 @@ test("the public page declares its own canonical, because the root declares one"
      declares none inherits it and tells a crawler it is the homepage. Four of the
      existing static marketing pages do exactly that today; a page whose address is
      its identity cannot afford to. */
-  assert.match(layout, /alternates: \{\s*\n\s*canonical: "\/",/);
+  /* Re-pointed 2026-10-01: the root canonical is gone (it made /login and the
+     404 page claim to be the homepage), so every page must declare its own -
+     which is exactly what this test protects for /p/[slug]. */
+  assert.doesNotMatch(layout, /alternates: \{\s*\n\s*canonical: "\/",/);
   /* RE-POINTED when a page gained a canonical OVERRIDE: the page's own address
      is now the fallback of a same-site override (`cleanCanonical` refuses any
      other host), and is still what a page with none declares — never the

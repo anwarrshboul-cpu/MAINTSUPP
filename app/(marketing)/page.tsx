@@ -82,6 +82,7 @@ import { Founder } from "./_sections/founder";
 import { Portal } from "./_sections/portal";
 import { Faq } from "./_sections/faq";
 import { FinalCta, TrustStrip } from "./_sections/final-cta";
+import { pageSocial } from "../lib/page-social";
 
 /**
  * The title and the description staff have saved, or the ones the site ships
@@ -97,18 +98,13 @@ import { FinalCta, TrustStrip } from "./_sections/final-cta";
 export async function generateMetadata(): Promise<Metadata> {
   const { home } = await readPublicSiteContent();
   return {
-    title: home.seo.title,
+    /* Absolute: the title names the brand already (see CONTENT_PAGES). */
+    title: { absolute: home.seo.title },
     description: home.seo.description,
+    /* The shorter line, which is what a shared link shows - now with an image
+       and a Twitter card that follow the editor too. */
     alternates: { canonical: "https://maintsupp.com/" },
-    openGraph: {
-      title: home.seo.title,
-      /* The shorter line, which is what a shared link shows. */
-      description: home.seo.socialDescription,
-      url: "https://maintsupp.com/",
-      siteName: "Maintsupp",
-      locale: "en_GB",
-      type: "website",
-    },
+    ...pageSocial("/", home.seo.title, home.seo.socialDescription ?? home.seo.description),
   };
 }
 

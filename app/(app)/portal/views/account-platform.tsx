@@ -109,7 +109,7 @@ export function AccountDevelopersPanel({ onNotify }: { onNotify?: (message: stri
           key={credential.key}
           title={credential.name}
           description={credential.summary}
-          aside={<AccountStatus ok={credential.available} okLabel="Available" offLabel="Not implemented" />}
+          aside={<AccountStatus ok={credential.available} okLabel="Available" offLabel="Not configured" />}
         >
           {credential.stats && <AccountStats items={credential.stats} />}
           {(credential.managedAt || credential.endpoint) && (

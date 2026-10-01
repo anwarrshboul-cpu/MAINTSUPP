@@ -6,7 +6,7 @@ import ConfirmReminderAction from "./confirm-action";
  * rule the contractor job link follows, for the same reason.
  */
 export const metadata: Metadata = {
-  title: "Reminder | MAINTSUPP",
+  title: "Reminder", // the root template adds " | MAINTSUPP"
   robots: { index: false, follow: false, nocache: true },
 };
 

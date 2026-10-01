@@ -1,6 +1,7 @@
 import { Breadcrumbs } from "../_components/breadcrumbs";
 import Link from "next/link";
 import type { Metadata } from "next";
+import { pageSocial } from "../../lib/page-social";
 
 export const metadata: Metadata = {
   /*
@@ -24,6 +25,7 @@ export const metadata: Metadata = {
    * declares none.
    */
   alternates: { canonical: "https://maintsupp.com/privacy" },
+  ...pageSocial("/privacy", "Privacy notice", "How Maintsupp collects, uses and retains personal data, and the rights you have under UK GDPR."),
 };
 
 /**

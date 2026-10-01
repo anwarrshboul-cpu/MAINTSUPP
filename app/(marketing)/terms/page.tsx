@@ -1,5 +1,6 @@
 import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
+import { pageSocial } from "../../lib/page-social";
 
 export const metadata: Metadata = {
   /*
@@ -22,6 +23,7 @@ export const metadata: Metadata = {
    * declares none.
    */
   alternates: { canonical: "https://maintsupp.com/terms" },
+  ...pageSocial("/terms", "Terms", "Terms of use for the Maintsupp website and client portal."),
 };
 
 /** DRAFT — REQUIRES OWNER AND LEGAL REVIEW BEFORE PUBLICATION. */

@@ -4,7 +4,7 @@ import jobLinkCss from "./job-link.css?url";
 
 // A shared link must never be indexed — it is a credential in a URL.
 export const metadata: Metadata = {
-  title: "Job details | MAINTSUPP",
+  title: "Job details", // the root template adds " | MAINTSUPP"
   robots: { index: false, follow: false, nocache: true },
 };
 
