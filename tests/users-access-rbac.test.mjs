@@ -122,6 +122,9 @@ const EXPECTED = {
   admin: [
     "board.view",
     "board.edit",
+    /* Owner decision 2026-10-01: raising a request is its own grant, held by
+       every role, so a client can report a fault without editing the board. */
+    "requests.create",
     "sites.edit",
     "data.import",
     "data.export",
@@ -138,8 +141,8 @@ const EXPECTED = {
     "integrations.manage",
     "navigation.personalise",
   ],
-  manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],
-  client: ["board.view", "data.export", "navigation.personalise"],
+  manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
+  client: ["board.view", "requests.create", "data.export", "navigation.personalise"],
 };
 // An Owner holds exactly the Admin set; their extra authority is SCOPE (every
 // workspace of their company), not extra capabilities.

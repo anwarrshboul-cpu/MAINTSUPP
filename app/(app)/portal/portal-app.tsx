@@ -2672,6 +2672,9 @@ export default function PortalApp({
 
     const payload = (await response.json()) as {
       request: MaintenanceRequest;
+      /* Present when the raiser holds `requests.create` but not `board.edit`
+         (a client): the job's own short-lived upload grant. */
+      uploadToken?: string;
     };
     let created = payload.request;
     const failedUploads: string[] = [];
@@ -2683,6 +2686,7 @@ export default function PortalApp({
             file,
             requestId: created.id,
             kind: "issue",
+            ...(payload.uploadToken ? { uploadToken: payload.uploadToken } : {}),
           });
           if (uploadPayload.request) {
             created = uploadPayload.request;
@@ -3627,7 +3631,8 @@ export default function PortalApp({
             </div>
             {/* Only for a role the job route will serve (`board.edit`): a client
                 was offered New request, filled it in and was refused with a 403. */}
-            {runtimeContext?.capabilities?.["board.edit"] !== false ? (
+            {runtimeContext?.capabilities?.["board.edit"] !== false ||
+            runtimeContext?.capabilities?.["requests.create"] === true ? (
               <button
                 className="primary-button topbar-create"
                 type="button"

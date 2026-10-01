@@ -78,5 +78,20 @@ test("the Jobs board is read-only for a role without board.edit", async () => {
    client was offered it and refused after filling the form. */
 test("New request is offered only to a role that may create a job", async () => {
   const app = await read("app/(app)/portal/portal-app.tsx");
-  assert.match(app, /capabilities\?\.\["board\.edit"\] !== false \? \(\s*<button\s+className="primary-button topbar-create"/);
+  /* Re-pointed 2026-10-01: clients now hold requests.create (owner decision),
+     so the button follows either grant. */
+  assert.match(app, /\["board\.edit"\] !== false \|\|\s*runtimeContext\?\.capabilities\?\.\["requests\.create"\] === true \? \(\s*<button\s+className="primary-button topbar-create"/);
+});
+
+/* Owner decision 2026-10-01: clients may raise requests. Verified live as a
+   client: create 201 with an upload token, photo upload 201, edit still 403. */
+test("a client raises a request with photos, and still cannot edit one", async () => {
+  const route = await read("app/api/maintenance/route.ts");
+  assert.match(route, /if \(guard\.denied\) guard = await scopedDbWithCapability\(request, "requests\.create"\);/);
+  assert.match(route, /const uploadToken = boardEditor \? null : crypto\.randomUUID\(\)/);
+  assert.match(route, /publicUploadTokenHash: await hashToken\(uploadToken\)/);
+  const app = await read("app/(app)/portal/portal-app.tsx");
+  assert.match(app, /\.\.\.\(payload\.uploadToken \? \{ uploadToken: payload\.uploadToken \} : \{\}\)/);
+  const perms = await read("app/lib/permissions.ts");
+  assert.match(perms, /client: \["board\.view", "requests\.create", "data\.export", "navigation\.personalise"\]/);
 });
