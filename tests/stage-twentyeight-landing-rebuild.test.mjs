@@ -1057,11 +1057,20 @@ test("every nav anchor names a section that exists", async () => {
      `HOMEPAGE_ANCHORS`, and every one of those must be a section, below. */
   const chrome = await read("app/lib/site-navigation.ts");
   const nav = chrome.slice(chrome.indexOf("const NAV = ["), chrome.indexOf("] as const;"));
+  /* RE-POINTED: the brief's four destinations and Contact Us are PAGES now
+     (`/services` … `/contact`), each opening with the homepage section it used
+     to scroll to. The claim is the same one — every menu entry lands somewhere
+     real — so it is checked against the page files; any anchor still in the
+     list is checked against the sections, as before. */
   const targets = [...nav.matchAll(/\["#([a-z-]+)"/g)].map((match) => match[1]);
-  assert.ok(targets.length >= 5, "four in-page destinations from the brief, plus Contact Us");
-  assert.ok(targets.includes("contact"), "Contact Us points at #contact");
   for (const target of targets) {
     assert.ok(ANCHORS.includes(target), `#${target} has no section`);
+  }
+  const pages = [...nav.matchAll(/\["\/([a-z-]+)"/g)].map((match) => match[1]);
+  assert.ok(pages.length + targets.length >= 6, "four destinations from the brief, Contractors and Contact Us");
+  assert.ok(pages.includes("contact"), "Contact Us opens /contact");
+  for (const page of pages) {
+    await read(`app/(marketing)/${page}/page.tsx`);
   }
   const { HOMEPAGE_ANCHORS } = await import("../app/lib/site-navigation.ts");
   for (const anchor of HOMEPAGE_ANCHORS) {
@@ -1080,7 +1089,8 @@ test("every nav anchor names a section that exists", async () => {
      footer, now resolved against the page it is rendered on.
      RE-POINTED AGAIN (decision J): the entry is in the shipped footer data, and
      the chrome renders every footer entry through `SectionLink`. */
-  assert.match(chrome, /\{ id: "ftr-contact", href: "#contact", label: "Contact" \}/);
+  /* RE-POINTED: the footer's Contact opens the /contact page, like the header. */
+  assert.match(chrome, /\{ id: "ftr-contact", href: "\/contact", label: "Contact" \}/);
   assert.match(chromeSrc, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/);
   /* RE-POINTED: those two buttons book. They jumped to the enquiry panel while
      the hero and the final CTA opened the calendar, so the chrome's only CTA —

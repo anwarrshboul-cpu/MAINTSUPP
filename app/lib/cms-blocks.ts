@@ -425,7 +425,7 @@ export function readBlockBody(kind: string, raw: unknown): BlockBody | null {
 /**
  * The slugs a CMS page may NOT take, because something else already answers there.
  *
- * `p` itself, and the six static marketing routes. A CMS page at `/p/terms` would
+ * `p` itself, and the static marketing routes. A CMS page at `/p/terms` would
  * not collide with `/terms` technically — the prefix keeps them apart — but a
  * second page called "terms" on one site is a support call, so the name is refused
  * at the door.
@@ -437,6 +437,12 @@ export const RESERVED_SLUGS: readonly string[] = [
   "faqs",
   "privacy",
   "terms",
+  /* The menu's own pages, which were homepage anchors until they had addresses. */
+  "services",
+  "how-it-works",
+  "pricing",
+  "case-study",
+  "contact",
   "admin",
   "dashboard",
   "login",

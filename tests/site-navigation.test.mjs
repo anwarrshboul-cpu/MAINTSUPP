@@ -47,13 +47,17 @@ test("the built-in navigation is today's menu, and it passes its own rules", () 
   const built = nav.defaultNavigation();
   assert.deepEqual(
     built.primary.map((link) => [link.href, link.label]),
+    /* RE-POINTED: the same six destinations, in the same order, with the same
+       labels — each is a page of its own now rather than an anchor into the
+       homepage (`app/(marketing)/<path>/page.tsx`, whose existence the
+       SITE_ROUTES test below checks). */
     [
-      ["#services", "Services"],
-      ["#how", "How It Works"],
-      ["#pricing", "Pricing"],
-      ["#case-study", "Case Study"],
+      ["/services", "Services"],
+      ["/how-it-works", "How It Works"],
+      ["/pricing", "Pricing"],
+      ["/case-study", "Case Study"],
       ["/contractors", "Contractors"],
-      ["#contact", "Contact Us"],
+      ["/contact", "Contact Us"],
     ],
   );
   assert.deepEqual(built.footer.map((group) => group.id), ["services", "company", "clients", "legal"]);

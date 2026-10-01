@@ -330,7 +330,9 @@ test("Contact Us is in both navs, and both send you to the section the footer al
      list, or the one staff saved — as `NAV`, in both bars (asserted below). */
   const navigation = await read("app/lib/site-navigation.ts");
   const nav = navigation.slice(navigation.indexOf("const NAV = ["), navigation.indexOf("] as const;"));
-  assert.match(nav, /\["#contact", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
+  /* RE-POINTED: Contact Us opens the /contact page now, which renders the same
+     enquiry form (`FinalCta`, asserted below to still carry `id="contact"`). */
+  assert.match(nav, /\["\/contact", "Contact Us"\]/, "Contact Us belongs in the shared nav list");
   assert.match(chrome, /const NAV = navigation\.primary;/, "one list feeds both bars");
 
   /* RE-POINTED: the nav gained "Contractors", which is a ROUTE and not a hash,
@@ -376,10 +378,17 @@ test("Contact Us is in both navs, and both send you to the section the footer al
      Contact link moved with the nav, so both now say `#contact`. */
   /* RE-POINTED (decision J): the footer's Contact entry is shipped footer data
      now, rendered through the same `SectionLink`. */
+  /* RE-POINTED AGAIN: both now open the /contact page, and that page is built
+     around the same form. */
   assert.match(
     navigation,
-    /\{ id: "ftr-contact", href: "#contact", label: "Contact" \}/,
+    /\{ id: "ftr-contact", href: "\/contact", label: "Contact" \}/,
     "the footer convention this reuses",
+  );
+  assert.match(
+    await read("app/(marketing)/contact/page.tsx"),
+    /<FinalCta copy=\{home\.copy\.finalCta\} \/>/,
+    "the Contact page is the enquiry form",
   );
   assert.match(chrome, /<SectionLink href=\{link\.href\}>\{link\.label\}<\/SectionLink>/);
   const finalCta = await read("app/(marketing)/_sections/final-cta.tsx");
