@@ -75,7 +75,7 @@ import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { attachments, maintenanceBoardColumns, maintenanceRequests } from "../../db/schema";
 import { boardKeyForRequest } from "./board-registry";
-import { chunkIds } from "./sql-batching";
+import { chunkIds, SQL_VARIABLE_CHUNK } from "./sql-batching";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -245,6 +245,11 @@ function bucketFor(
  * `IN (…)` here is — D1 counts one bound variable per element and rejects the
  * statement past its limit, which a 745-row board would cross on the first try.
  *
+ * More jobs than one chunk holds — a whole board — is ONE org-wide grouped
+ * query instead, filtered to the jobs named here. The answer is identical (the
+ * same WHERE, minus the IN list, served by `attachments_organisation_idx`), and
+ * a 776-job board stops paying nine sequential round trips to Postgres.
+ *
  * A job with no attachments has no group and therefore no entry in the map.
  * Callers read through `attachmentCountsFor`, which returns four zeroes for a
  * miss, so "absent" and "none" cannot be confused into leaving a stale counter
@@ -259,7 +264,9 @@ export async function attachmentCountsByRequest(
   const counts = new Map<string, AttachmentCounts>();
   if (!requestIds.length) return counts;
 
-  for (const chunk of chunkIds(requestIds)) {
+  const wanted = new Set(requestIds);
+  const chunks = wanted.size > SQL_VARIABLE_CHUNK ? [null] : chunkIds(requestIds);
+  for (const chunk of chunks) {
     const rows = await db
       .select({
         requestId: attachments.requestId,
@@ -271,7 +278,7 @@ export async function attachmentCountsByRequest(
       .where(
         and(
           eq(attachments.organisationId, orgId),
-          inArray(attachments.requestId, chunk),
+          chunk ? inArray(attachments.requestId, chunk) : undefined,
           // Superseded versions and archived documents are not extra files.
           liveRows(),
         ),
@@ -279,7 +286,7 @@ export async function attachmentCountsByRequest(
       .groupBy(attachments.requestId, attachments.boardColumnId, attachments.kind);
 
     for (const row of rows) {
-      if (!row.requestId) continue;
+      if (!row.requestId || !wanted.has(row.requestId)) continue;
       let entry = counts.get(row.requestId);
       if (!entry) {
         entry = { ...ZERO };

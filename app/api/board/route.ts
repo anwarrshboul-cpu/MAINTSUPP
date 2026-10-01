@@ -1196,43 +1196,79 @@ async function boardPayload(
   include: { requests: boolean } = { requests: true },
 ) {
   const seeded = await ensureBoardState(db, orgId, boardId);
-  const groups =
-    seeded?.groups ??
-    (await db
-      .select()
-      .from(maintenanceGroups)
-      .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
-            isNull(maintenanceGroups.deletedAt),))
-      .orderBy(asc(maintenanceGroups.position)));
-  const items = await db
-    .select()
-    .from(maintenanceGroupItems)
-    .where(and(eq(maintenanceGroupItems.boardId, boardId), eq(maintenanceGroupItems.organisationId, orgId)))
-    .orderBy(asc(maintenanceGroupItems.groupId), asc(maintenanceGroupItems.position));
-  const storedOptions = await db
-    .select()
-    .from(maintenanceBoardOptions)
-    .where(and(eq(maintenanceBoardOptions.boardId, boardId), eq(maintenanceBoardOptions.organisationId, orgId)))
-    .orderBy(
-      asc(maintenanceBoardOptions.columnKey),
-      asc(maintenanceBoardOptions.position),
-    );
   /*
-   * The Location column is drawn from the site register, not from the chip
-   * store.
-   *
-   * Those chips were twenty-one captured monday spellings, and they behaved as
-   * a second estate: a store could be added to the board in a spelling no site
-   * answered to, and after canonicalisation the two lists would simply have
-   * disagreed. The register is the estate now, so the column offers what a
-   * person can actually be standing in — open, and retail. Closed stores, the
-   * office, the warehouses and anything unverified stay canonical Sites and
-   * stay out of the picker.
-   *
-   * The stored chips for this column are ignored rather than deleted: they are
-   * still the historical record of what the board once offered.
+   * Six reads that depend on nothing but the board, sent together rather than
+   * one round trip after another. `Promise.resolve` because a query builder
+   * runs again each time it is awaited; `Promise.all` subscribes to each once.
    */
-  const retailSites = await listRetailSites(db, orgId);
+  const [groups, items, storedOptions, retailSites, columnRows, cells] = await Promise.all([
+    seeded?.groups ??
+      Promise.resolve(
+        db
+          .select()
+          .from(maintenanceGroups)
+          .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
+                isNull(maintenanceGroups.deletedAt),))
+          .orderBy(asc(maintenanceGroups.position)),
+      ),
+    Promise.resolve(
+      db
+        .select()
+        .from(maintenanceGroupItems)
+        .where(and(eq(maintenanceGroupItems.boardId, boardId), eq(maintenanceGroupItems.organisationId, orgId)))
+        .orderBy(asc(maintenanceGroupItems.groupId), asc(maintenanceGroupItems.position)),
+    ),
+    Promise.resolve(
+      db
+        .select()
+        .from(maintenanceBoardOptions)
+        .where(and(eq(maintenanceBoardOptions.boardId, boardId), eq(maintenanceBoardOptions.organisationId, orgId)))
+        .orderBy(
+          asc(maintenanceBoardOptions.columnKey),
+          asc(maintenanceBoardOptions.position),
+        ),
+    ),
+    /*
+     * The Location column is drawn from the site register, not from the chip
+     * store.
+     *
+     * Those chips were twenty-one captured monday spellings, and they behaved as
+     * a second estate: a store could be added to the board in a spelling no site
+     * answered to, and after canonicalisation the two lists would simply have
+     * disagreed. The register is the estate now, so the column offers what a
+     * person can actually be standing in — open, and retail. Closed stores, the
+     * office, the warehouses and anything unverified stay canonical Sites and
+     * stay out of the picker.
+     *
+     * The stored chips for this column are ignored rather than deleted: they are
+     * still the historical record of what the board once offered.
+     */
+    listRetailSites(db, orgId),
+    seeded?.columns ??
+      Promise.resolve(
+        db
+          .select()
+          .from(maintenanceBoardColumns)
+          .where(
+            and(
+              eq(maintenanceBoardColumns.boardId, boardId),
+              eq(maintenanceBoardColumns.organisationId, orgId),
+              isNull(maintenanceBoardColumns.deletedAt),
+            ),
+          )
+          .orderBy(asc(maintenanceBoardColumns.position)),
+      ),
+    Promise.resolve(
+      db
+        .select({
+          requestId: maintenanceBoardCells.requestId,
+          columnId: maintenanceBoardCells.columnId,
+          value: maintenanceBoardCells.value,
+        })
+        .from(maintenanceBoardCells)
+        .where(and(eq(maintenanceBoardCells.boardId, boardId), eq(maintenanceBoardCells.organisationId, orgId))),
+    ),
+  ]);
   const options = [
     ...storedOptions.filter((option) => option.columnKey !== "storeLocation"),
     ...retailSites.map((site, index) => ({
@@ -1255,27 +1291,6 @@ async function boardPayload(
       updatedAt: site.updatedAt,
     })),
   ];
-  const columnRows =
-    seeded?.columns ??
-    (await db
-      .select()
-      .from(maintenanceBoardColumns)
-      .where(
-        and(
-          eq(maintenanceBoardColumns.boardId, boardId),
-          eq(maintenanceBoardColumns.organisationId, orgId),
-          isNull(maintenanceBoardColumns.deletedAt),
-        ),
-      )
-      .orderBy(asc(maintenanceBoardColumns.position)));
-  const cells = await db
-    .select({
-      requestId: maintenanceBoardCells.requestId,
-      columnId: maintenanceBoardCells.columnId,
-      value: maintenanceBoardCells.value,
-    })
-    .from(maintenanceBoardCells)
-    .where(and(eq(maintenanceBoardCells.boardId, boardId), eq(maintenanceBoardCells.organisationId, orgId)));
   /*
    * Counts AND the first few files per cell, in one pass.
    *
@@ -1580,8 +1595,9 @@ async function boardPayload(
    * asks with `?compact=1`, which says "I have the rows"; every other caller is
    * untouched and still gets them.
    */
-  const requestRows = include.requests
-    ? await selectInChunks(placedIds, (chunk) =>
+  // Started here, awaited below with the counts: the two are independent.
+  const requestRowsRead = include.requests
+    ? selectInChunks(placedIds, (chunk) =>
         db
           .select()
           .from(maintenanceRequests)
@@ -1615,8 +1631,8 @@ async function boardPayload(
    * `?compact=1` says "I have the rows" and this would be one aggregate query
    * spent on nothing.
    */
-  const countedAttachments = include.requests
-    ? await attachmentCountsByRequest(db, orgId, placedIds, {
+  const countedAttachmentsRead = include.requests
+    ? attachmentCountsByRequest(db, orgId, placedIds, {
         /*
          * The SAME two columns `kindColumns` above is built from, so the number
          * on the request row and the number on the cell are the same number
@@ -1627,6 +1643,10 @@ async function boardPayload(
         completion: kindColumns.get("completion") ?? null,
       })
     : new Map();
+  const [requestRows, countedAttachments] = await Promise.all([
+    requestRowsRead,
+    countedAttachmentsRead,
+  ]);
 
   /*
    * The one compliance fact the board cannot hold.
