@@ -223,7 +223,7 @@ export async function loadSiteMetrics(
         siteId: maintenanceRequests.siteId,
         totalJobs: count(),
         openJobs: sql<number>`sum(case when not ${closedJobSql} then 1 else 0 end)`,
-        urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]} then 1 else 0 end)`,
+        urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "high", "p1"]} then 1 else 0 end)`,
         spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
       })
       .from(maintenanceRequests)

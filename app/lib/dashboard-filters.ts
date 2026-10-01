@@ -752,6 +752,8 @@ const PRIORITY_CANDIDATES = [
   "urgent",
   "Critical",
   "critical",
+  "High",
+  "high",
   "P1",
   "p1",
   "Medium",

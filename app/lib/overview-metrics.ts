@@ -639,7 +639,7 @@ export async function loadOverviewMetrics(
       .where(
         and(
           openScope,
-          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1", "medium", "normal", "standard"]} or ${overdueSql})`,
+          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "high", "p1", "medium", "normal", "standard"]} or ${overdueSql})`,
         ),
       )
       .groupBy(maintenanceRequests.siteId),
@@ -738,7 +738,7 @@ export async function loadOverviewMetrics(
   const dueDay = dayOnly(maintenanceRequests.dueAt);
   const dueSoonSql = sql`(${maintenanceRequests.dueAt} is not null and ${dueText} <> '' and ((length(${dueText}) <= 10 and ${dueDay} >= ${today} and ${dueDay} < ${dueSoonEnd}) or (length(${dueText}) > 10 and ${dueText} >= ${instant} and ${dueText} < ${instantEnd})))`;
   /* High is `urgent` by `normalisePriority`'s spellings; Tier 1 is the top tier. */
-  const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1"]} or ${maintenanceRequests.tier} = 1)`;
+  const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "high", "p1"]} or ${maintenanceRequests.tier} = 1)`;
   const requestedDay = dayOnly(maintenanceRequests.requestedAt);
   const completedDay = dayOnly(maintenanceRequests.completedAt);
   const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, cohortRows, closureRows, slaTargets] = await Promise.all([

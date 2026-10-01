@@ -348,6 +348,14 @@ test("a stringified object is not a priority", () => {
   assert.equal(metrics.normalisePriority("URGENT"), "urgent");
 });
 
+test("a High priority is the top band, never Not recorded", () => {
+  // The Overview prints the top band as "High", and the demo workspace's board
+  // stores that word. 19 such jobs in Production were counted as "Unset" until
+  // 2026-10-01, so the rings did not add up to what the board showed.
+  assert.equal(metrics.normalisePriority("High"), "urgent");
+  assert.equal(metrics.normalisePriority(" high "), "urgent");
+});
+
 test("Not recorded is one colour across every dimension", () => {
   const grey = metrics.NOT_RECORDED_COLOUR;
   const band = metrics.PRIORITY_BANDS.find((entry) => entry.key === "not_recorded");

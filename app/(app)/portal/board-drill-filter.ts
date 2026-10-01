@@ -81,7 +81,7 @@ function day(value: string | null | undefined): string {
   return text.slice(0, 10);
 }
 
-const URGENT = new Set(["urgent", "critical", "p1"]);
+const URGENT = new Set(["urgent", "critical", "high", "p1"]);
 const MEDIUM = new Set(["medium", "normal", "standard"]);
 const LOW = new Set(["low"]);
 

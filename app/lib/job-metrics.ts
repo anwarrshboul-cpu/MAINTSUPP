@@ -544,7 +544,10 @@ export const NOT_RECORDED_LABEL = "Not recorded";
 export function normalisePriority(value: string | null | undefined): PriorityKey {
   const key = statusKey(value);
   if (!key || key === "[object object]") return "not_recorded";
-  if (key === "urgent" || key === "critical" || key === "p1") return "urgent";
+  /* "High" is the word this page prints for the band, and the word a
+     non-monday board (the demo workspace, a hand-built one) stores; it is the
+     same band as Urgent, never "Not recorded". */
+  if (key === "urgent" || key === "critical" || key === "high" || key === "p1") return "urgent";
   if (key === "medium" || key === "normal" || key === "standard") return "medium";
   if (key === "low") return "low";
   return "not_recorded";
