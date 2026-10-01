@@ -476,6 +476,9 @@
     /* One column: a 300px rail beside a month grid on a phone leaves neither
        of them usable. The tray itself leaves the flow entirely below. */
     flex-direction: column;
+    /* Room for the fixed 45px "Unscheduled" bar below, which covered the
+       bottom of the last day card. */
+    padding-bottom: 60px;
   }
 
   .calendar-aside {

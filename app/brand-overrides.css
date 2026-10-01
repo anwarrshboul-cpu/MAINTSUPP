@@ -2352,6 +2352,10 @@ button.analytics-score-panel {
     min-height: 46px;
     max-height: 46px;
     margin-top: 0;
+    /* Opaque, and masking the strip's padding beside it: the cards scrolled
+       underneath showed through ("Awai... n") on a phone. */
+    background: var(--surface-card);
+    box-shadow: -12px 0 0 var(--surface-card);
   }
 
   /* The words go, the control does not: 171px of button is most of the room
@@ -10362,5 +10366,14 @@ body[data-theme="dark"] .contractor-summary__state.is-active {
   .portal-sidebar .workspace-switcher__copy select,
   .portal-sidebar .workspace-switcher__copy strong {
     font-size: 13px;
+  }
+}
+
+/* Phones: the row's comment button gave the frozen Name column's title only
+   81px ("Three ...", "Two ca..."). Updates are one tap away in the job drawer,
+   which the row's open arrow reaches; the title gets the room back. */
+@media (max-width: 767px) {
+  .sheet-comment {
+    display: none;
   }
 }

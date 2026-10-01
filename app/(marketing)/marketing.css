@@ -2082,6 +2082,12 @@ fieldset.field:focus{outline:none}
   /* The opening hours are a whole sentence with an icon; they take the full
      row rather than being squeezed into half of one. */
   .ftr li:has(.ftr__hours){grid-column:1/-1}
+  /* The email address is one word; in a 130px column it broke to
+     "info@maintsupp.co / m". It takes the full row like the hours. */
+  .ftr li:has(a[href^="mailto:"]){grid-column:1/-1}
+  /* A finger, not a cursor: footer, contact-bar and portal links were 20-26px
+     tall on a phone. 44px is the platform guidance for a tap target. */
+  .ftr a,.utility a,.portal__login{min-height:44px}
   .ctaband__inner{padding-block:28px}
   .ctaband .btn{width:100%}
   .cookie__act .btn{flex:1 1 auto}

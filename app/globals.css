@@ -8647,7 +8647,9 @@ th.sheet-column--name {
   position: relative;
   z-index: 1;
   display: flex;
-  width: min(640px, 96vw);
+  /* 100% of the padded wrap, not 96vw: 96vw is wider than what is left inside
+     .modal-wrap's 22px padding, so on a phone the dialog ran off the right edge. */
+  width: min(640px, 100%);
   max-height: calc(100vh - 44px);
   flex-direction: column;
   overflow: hidden;
