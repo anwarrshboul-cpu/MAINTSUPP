@@ -900,7 +900,13 @@ export async function createPayment(
 
   const targets = await selectInChunks([...seen], (chunk) =>
     db
-      .select({ id: invoices.id, direction: invoices.direction, voidedAt: invoices.voidedAt })
+      .select({
+        id: invoices.id,
+        direction: invoices.direction,
+        voidedAt: invoices.voidedAt,
+        status: invoices.status,
+        internalRef: invoices.internalRef,
+      })
       .from(invoices)
       .where(and(eq(invoices.organisationId, organisationId), inArray(invoices.id, chunk))),
   );
@@ -910,6 +916,24 @@ export async function createPayment(
     const invoice = byId.get(row.invoiceId);
     if (!invoice) return { ok: false, error: `${row.invoiceId} is not an invoice in this workspace.` };
     if (invoice.voidedAt) return { ok: false, error: `${row.invoiceId} has been voided and cannot take a payment.` };
+    /*
+     * A PAYABLE IS PAID ONLY ONCE IT IS APPROVED (owner decision, 2026-10-01).
+     * Payments were accepted against an invoice still under review with an open
+     * blocking flag, which made the approval bands advisory. A receivable is
+     * money coming IN and needs no approval, only to have been issued.
+     */
+    const statusKey = financeStatusKey(invoice.status ?? "");
+    const payable = (invoice.direction ?? "payable") === "payable";
+    if (payable ? !PAYABLE_PAYMENT_STATUSES.has(statusKey) : !RECEIVABLE_PAYMENT_STATUSES.has(statusKey)) {
+      const name = invoice.internalRef ?? row.invoiceId;
+      const said = (invoice.status ?? "").replace(/_/g, " ");
+      return {
+        ok: false,
+        error: payable
+          ? `${name} is ${said || "not approved"}. Approve it before recording a payment against it.`
+          : `${name} is ${said || "a draft"}. Issue it before recording money received against it.`,
+      };
+    }
     if ((invoice.direction ?? "payable") !== wanted) {
       return {
         ok: false,
@@ -986,8 +1010,41 @@ export async function createPayment(
       createdAt: stamp,
     });
   }
+
+  /*
+   * PAID AND PART PAID ARE WRITTEN, NOT LEFT TO BE INFERRED.
+   *
+   * Both keys were in the status ladder and nothing ever wrote them, so a fully
+   * settled invoice stayed "under review" or "approved" for ever and the status
+   * chips, filters and the ageing tabs disagreed with Outstanding £0.00. The
+   * balance still comes from `balance.ts`; this only moves the status to match
+   * it, with a history row like every other transition.
+   */
+  const after = await invoiceBalances(db, organisationId, [...seen]);
+  for (const row of cleaned) {
+    const invoice = byId.get(row.invoiceId);
+    const balance = after.get(row.invoiceId);
+    if (!invoice || !balance) continue;
+    const next = balance.balancePence <= 0 ? "paid" : "part_paid";
+    if (financeStatusKey(invoice.status ?? "") === next) continue;
+    await updateInvoice(db, organisationId, row.invoiceId, { status: next }, now);
+    await recordStatusChange(db, organisationId, {
+      invoiceId: row.invoiceId,
+      fromStatus: invoice.status ?? null,
+      toStatus: next,
+      actorEmail: input.recordedBy ?? null,
+      actorUserId: null,
+      reason: `Payment ${input.reference ?? id} recorded.`,
+      now,
+    });
+  }
   return { ok: true, id };
 }
+
+/** Statuses a payable may take a payment in: approved onwards, not yet settled. */
+const PAYABLE_PAYMENT_STATUSES: ReadonlySet<string> = new Set(["approved", "scheduled", "part_paid"]);
+/** Statuses a receivable may take money in: issued onwards, not yet settled. */
+const RECEIVABLE_PAYMENT_STATUSES: ReadonlySet<string> = new Set(["issued", "sent", "viewed", "overdue", "part_paid"]);
 
 export async function readPayment(
   db: Database,
