@@ -131,5 +131,50 @@ export const assetWidths: Record<string, AssetEntry> = {
     ],
     "width": 1672,
     "height": 941
+  },
+  "/assets/pages/page-services-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-how-it-works-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-pricing-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-case-study-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-contact-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
   }
 };

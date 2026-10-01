@@ -93,13 +93,11 @@ export default async function ServicesPage() {
         title="Maintenance services for multi-site commercial operators"
         lede="Reactive repairs, planned maintenance, compliance administration and store projects — run through one managed point of contact and a vetted UK contractor network, with photo evidence on every close-out."
         media={
-          <PhotoSlot
-            slot="hero-london-maintenance"
-            w={1774}
-            h={887}
-            art="city"
-            alt={photoAlt["hero-london-maintenance"]}
-            sizes={SIZES}
+          <ApprovedPhoto
+            src="/assets/pages/page-services-hero-v1.jpg"
+            alt="A Maintsupp engineer in a hi-vis vest on a stepladder repairing an illuminated shopfront sign on a rain-wet UK high street at dusk"
+            sizes="(min-width: 1024px) 600px, 100vw"
+            loading="eager"
             className="pagehero__photo"
           />
         }

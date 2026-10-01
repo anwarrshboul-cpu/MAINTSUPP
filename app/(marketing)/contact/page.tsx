@@ -40,9 +40,9 @@ export default async function ContactPage() {
         lede="Book a free 30-minute portfolio review, call or email us, or send an enquiry below. We reply within one working day."
         media={
           <ApprovedPhoto
-            src="/assets/workflow/how-it-works-07-reporting-v3.png"
-            alt="Two colleagues reviewing a performance dashboard on a large monitor"
-            sizes="(min-width: 1024px) 560px, 100vw"
+            src="/assets/pages/page-contact-hero-v1.jpg"
+            alt="A smiling Maintsupp coordinator in a headset taking notes at a bright office desk"
+            sizes="(min-width: 1024px) 600px, 100vw"
             loading="eager"
             className="pagehero__photo"
           />

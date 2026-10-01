@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { HeroActions, PageCta, PageHero, PageSection } from "../_components/page-parts";
 import { ContractorChoice } from "../_sections/contractor-choice";
 import { faq as SHIPPED_QUESTIONS } from "../_sections/content";
-import { PhotoSlot } from "../_sections/photo";
-import { photoAlt } from "../_sections/photo-slot";
+import { ApprovedPhoto } from "../_sections/approved-photo";
 import { Pricing } from "../_sections/pricing";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
 import { pageSocial } from "../../lib/page-social";
@@ -70,13 +69,11 @@ export default async function PricingPage() {
         title="Clear per-store pricing, with no markup on trades"
         lede="You pay one coordination fee per store. Contractors invoice you directly at their agreed rates, and every cost is reconciled against the approved quote."
         media={
-          <PhotoSlot
-            slot="dashboard-spend-v2"
-            w={1672}
-            h={941}
-            art="room"
-            alt={photoAlt["dashboard-spend-v2"]}
-            sizes="(min-width: 1024px) 560px, 100vw"
+          <ApprovedPhoto
+            src="/assets/pages/page-pricing-hero-v1.jpg"
+            alt="A facilities manager reviewing an invoice on a laptop beside a printed maintenance summary report"
+            sizes="(min-width: 1024px) 600px, 100vw"
+            loading="eager"
             className="pagehero__photo"
           />
         }

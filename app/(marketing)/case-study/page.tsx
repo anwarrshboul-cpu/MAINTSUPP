@@ -45,9 +45,9 @@ export default async function CaseStudyPage() {
         lede="Stores on the high street and kiosks in shopping centres, each with its own access rules, contractors and compliance dates — now run through one accountable coordinator and one monthly report."
         media={
           <ApprovedPhoto
-            src="/assets/audience/who-we-help-shopping-centre-kiosks.png"
-            alt="A dark green retail kiosk with lit glass display counters in a bright shopping centre"
-            sizes={SIZES}
+            src="/assets/pages/page-case-study-hero-v1.jpg"
+            alt="A Maintsupp engineer adjusting a spotlight on a dark green and gold fragrance kiosk in a shopping centre"
+            sizes="(min-width: 1024px) 600px, 100vw"
             loading="eager"
             className="pagehero__photo"
           />
