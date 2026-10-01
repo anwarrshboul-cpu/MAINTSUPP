@@ -265,10 +265,14 @@ test("the consent checkbox links to a privacy notice that exists", async () => {
   );
 });
 
-test("the privacy notice is marked as needing review", async () => {
+test("the privacy notice states retention periods the owner confirmed", async () => {
   const privacy = await read("app/(marketing)/privacy/page.tsx");
-  assert.match(privacy, /REQUIRES OWNER REVIEW/);
-  assert.match(privacy, /\[TO CONFIRM/, "retention periods must not be invented");
+  /* Re-pointed 2026-10-01: this guarded against INVENTED periods while the
+     notice awaited the owner. The owner confirmed them, so it now holds the
+     reverse: the confirmation is recorded and no placeholder reaches the page. */
+  assert.match(privacy, /OWNER-CONFIRMED 2026-10-01/);
+  assert.doesNotMatch(privacy, /\[TO CONFIRM/);
+  assert.doesNotMatch(privacy, /Draft for review/);
   /*
    * It must describe what the platform actually does — and RE-POINTED, because
    * what it does changed and the notice had not.

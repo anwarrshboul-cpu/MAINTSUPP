@@ -29,12 +29,14 @@ export const metadata: Metadata = {
 };
 
 /**
- * DRAFT — REQUIRES OWNER REVIEW BEFORE PUBLICATION.
+ * OWNER-CONFIRMED 2026-10-01 (previously "DRAFT — REQUIRES OWNER REVIEW").
  *
  * This covers what the platform actually does today: the enquiry form, the job
  * reporting form, evidence photographs and the contractor link. It is written
- * from the code, not from a template, but it is not legal advice and the
- * retention periods in particular are placeholders the owner must confirm.
+ * from the code, not from a template, and is not legal advice. The retention
+ * periods were confirmed by the owner on 2026-10-01: 12 months for enquiries,
+ * six years after the contract ends for job records, and six years after
+ * expiry for compliance certificates.
  */
 export default function PrivacyPage() {
   return (
@@ -42,10 +44,6 @@ export default function PrivacyPage() {
       <div className="m-shell m-shell--narrow m-prose">
           <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Privacy notice", path: "/privacy" }]} />
         <h1>Privacy notice</h1>
-        <p className="m-note">
-          <strong>Draft for review.</strong> Retention periods marked
-          [TO CONFIRM] must be agreed before this is published.
-        </p>
 
         <h2>Who we are</h2>
         <p>
@@ -110,9 +108,9 @@ export default function PrivacyPage() {
 
         <h2>How long we keep it</h2>
         <ul>
-          <li>Enquiries that do not become clients: [TO CONFIRM — suggested 12 months]</li>
-          <li>Job records and evidence for active clients: for the term of the contract plus [TO CONFIRM]</li>
-          <li>Compliance certificates: for as long as they are current, plus [TO CONFIRM]</li>
+          <li>Enquiries that do not become clients: 12 months from the last contact</li>
+          <li>Job records and evidence for clients: for the term of the contract plus six years</li>
+          <li>Compliance certificates: for as long as they are current, plus six years</li>
           <li>Contractor job links: expire automatically, by default after 14 days</li>
         </ul>
 
