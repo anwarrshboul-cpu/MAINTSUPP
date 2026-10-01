@@ -212,7 +212,7 @@ const PRIORITY_COLOUR: Record<string, string> = {
 };
 
 const PRIORITY_LABEL: Record<string, string> = {
-  urgent: "High",
+  urgent: "Urgent",
   medium: "Medium",
   low: "Low",
   not_recorded: "Unset",
@@ -872,7 +872,7 @@ export async function loadOverviewMetrics(
       value: priorityTally.get(key) ?? 0,
       colour: PRIORITY_COLOUR[key],
       /* The board's priority filter speaks `PriorityKey`, not the display
-         word: "High" is `urgent` there. */
+         word: "Urgent" is `urgent` there. */
       labels: [key],
     }))
     /* "Unset" appears only when it has a count, so the rings always add up to

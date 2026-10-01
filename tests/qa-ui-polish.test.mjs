@@ -147,6 +147,24 @@ test("6: the portal toast draws its tone, and its failure paths say error", asyn
   assert.match(css, /\.toast\.toast--error > span \{[^}]*var\(--red-100\)/);
 });
 
+/* ── 7. One word for the top priority: Urgent ──────────────────────────── */
+
+test("7: every priority display map calls the top band Urgent, never High", async () => {
+  for (const file of [
+    "app/(app)/portal/dashboard-meters.ts",
+    "app/lib/overview-metrics.ts",
+    "app/(app)/portal/ops/overview-performance.tsx",
+  ]) {
+    const source = await read(file);
+    assert.match(source, /^ {2}urgent: "Urgent",$/m, file);
+    assert.doesNotMatch(source, /^ {2}urgent: "High",$/m, file);
+  }
+  const drill = await read("app/(app)/portal/board-drill-filter.ts");
+  assert.match(drill, /value: "Urgent or Tier 1, due within 48h"/);
+  const oi = await read("app/(app)/portal/ops/oi-dash.tsx");
+  assert.doesNotMatch(oi, /High priority or Tier 1/);
+});
+
 /* ── 5. Jobs board: named row controls, a no-results state, phone gutter ── */
 
 const LIVE_BOARD = "app/(app)/portal/live-board.tsx";

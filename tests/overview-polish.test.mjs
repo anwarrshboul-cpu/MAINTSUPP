@@ -161,7 +161,9 @@ test("B23 a single-day window reads as that one day", () => {
 });
 
 test("the priority chip says what the ring that opened it said", () => {
-  assert.equal(chipsOf("family=open&priority=urgent").priority, "High");
+  /* "Urgent", not "High": the ring was renamed to the workspace's word (QA —
+     Settings → Service levels already said Urgent), and the chip follows it. */
+  assert.equal(chipsOf("family=open&priority=urgent").priority, "Urgent");
   assert.equal(chipsOf("family=open&priority=medium").priority, "Medium");
   assert.equal(chipsOf("family=open&priority=low").priority, "Low");
   /* An unknown value is shown as written rather than swallowed. */

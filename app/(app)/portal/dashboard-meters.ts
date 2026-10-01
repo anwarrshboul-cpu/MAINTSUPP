@@ -207,9 +207,11 @@ export const COMPLETED_STAGE = "Completed" as const;
  * THE WORDS A READER SEES FOR A PRIORITY KEY.
  *
  * `urgent` / `medium` / `low` / `not_recorded` are the internal keys the board's
- * filter and the Overview's drills carry. "High" is what the ring is labelled,
+ * filter and the Overview's drills carry. "Urgent" is what the ring is labelled,
  * and a chip that printed `Priority urgent` under a figure the reader had just
- * seen called High was showing them the query string.
+ * seen called Urgent was showing them the query string. (It read "High" until
+ * QA found Settings → Service levels calling the same band "Urgent" — the
+ * workspace's own word, and the board's; every surface now says Urgent.)
  *
  * Here rather than in `overview-intel.ts` for a mechanical reason: this module
  * imports nothing but a type, so `board-drill-filter.ts` can take it with an
@@ -217,7 +219,7 @@ export const COMPLETED_STAGE = "Completed" as const;
  * `overview-intel.ts` reads it from here, so there is one map.
  */
 export const PRIORITY_DISPLAY_LABEL: Record<string, string> = {
-  urgent: "High",
+  urgent: "Urgent",
   medium: "Medium",
   low: "Low",
   not_recorded: "Unset",
