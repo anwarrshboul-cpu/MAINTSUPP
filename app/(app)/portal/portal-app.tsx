@@ -275,6 +275,7 @@ import { useGeneratorDocument } from "./reports/invoice-generator";
 import { ReportTab } from "./reports/report-tab";
 import { InvoiceTab } from "./reports/invoice-tab";
 import { GeneratedDocuments } from "./reports/generated-documents";
+import { OptionsAdmin } from "./admin/options-admin";
 
 export type Section =
   | "overview"
@@ -7084,6 +7085,13 @@ function SettingsView({
           one source for a built-in section's icon, and four tests slice that
           declaration by source position, so it is read from here and never moved. */}
       <NavIconsPanel catalogue={navCatalogue} />
+
+      {/* The workspace's dropdown lists - site types and statuses, asset
+          categories, trades, labels. Every "is not a configured site type. Add
+          it in Settings first." refusal pointed here, and the editor existed
+          but was mounted nowhere. Writes need board.edit; shown with the rest of
+          the workspace settings. */}
+      {canEditSettings ? <OptionsAdmin onNotify={onNotify} /> : null}
 
       {/* §33 — what this workspace emails and to whom, in place of three
           switches nothing read. See views/workspace-email-panel.tsx for why they

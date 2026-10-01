@@ -95,3 +95,11 @@ test("a client raises a request with photos, and still cannot edit one", async (
   const perms = await read("app/lib/permissions.ts");
   assert.match(perms, /client: \["board\.view", "requests\.create", "data\.export", "navigation\.personalise"\]/);
 });
+
+/* The option-list editor existed and was mounted nowhere, while refusals told
+   people to "add it in Settings first". It is in Settings now. */
+test("Settings carries the dropdown-list editor for those who edit settings", async () => {
+  const app = await read("app/(app)/portal/portal-app.tsx");
+  assert.match(app, /import \{ OptionsAdmin \} from "\.\/admin\/options-admin";/);
+  assert.match(app, /\{canEditSettings \? <OptionsAdmin onNotify=\{onNotify\} \/> : null\}/);
+});
