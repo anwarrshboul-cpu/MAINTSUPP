@@ -237,7 +237,7 @@ export async function PATCH(request: Request) {
 
       const moved: Array<{ id: string; title: string; from: number; to: number }> = [];
       for (const entry of body.order) {
-        const id = text(entry?.id, 64);
+        const id = text(entry?.id, 100);
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
         const existing = byId.get(id);
@@ -298,7 +298,7 @@ export async function PATCH(request: Request) {
       return Response.json({ ok: true });
     }
 
-    const id = text(body.id, 64);
+    const id = text(body.id, 100);
     if (!id) return bad("A column id is required.");
 
     const [existing] = await db
@@ -430,7 +430,7 @@ export async function DELETE(request: Request) {
     if (structureRefusal) return structureRefusal;
     const { db, orgId } = guard.scope;
     const url = new URL(request.url);
-    const id = text(url.searchParams.get("id"), 64);
+    const id = text(url.searchParams.get("id"), 100);
     const confirmed = url.searchParams.get("confirm") === "true";
     if (!id) return bad("A column id is required.");
 

@@ -438,7 +438,12 @@ export async function POST(request: Request) {
       return siteRequired();
     }
 
-    const groupId = text(body.groupId, 64);
+    /* 100, not 64: group ids are `seed-<orgId>-maintenance-<key>`, and a
+       workspace created in the app has a 36-character org id, so its group ids
+       run 65-71 characters. `text()` truncates, the lookup missed, and every job
+       in such a workspace answered "Group not found" when moved. Same fault and
+       same width as the column ids at the cell intent below. */
+    const groupId = text(body.groupId, 100);
     if (groupId) {
       const [group] = await db
         .select({ id: maintenanceGroups.id })
@@ -805,7 +810,7 @@ export async function PATCH(request: Request) {
 
     // O7 — move items between or within groups.
     if (body.intent === "move") {
-      const groupId = text(body.groupId, 64);
+      const groupId = text(body.groupId, 100);
       const namedIds: string[] = Array.isArray(body.itemIds)
         ? body.itemIds.map((v: unknown) => text(v, 64)).filter(Boolean)
         : [];
