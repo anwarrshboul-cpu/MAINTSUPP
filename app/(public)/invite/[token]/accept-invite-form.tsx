@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { useHydrated } from "../../../lib/use-hydrated";
 import { PasswordInput } from "../../password-input";
 
 /**
@@ -42,6 +43,8 @@ export default function AcceptInviteForm({
   const [shown, setShown] = useState({ password: false, confirm: false });
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /* Until hydrated, a submit is native — see app/lib/use-hydrated.ts. */
+  const hydrated = useHydrated();
 
   function clearPasswords() {
     if (passwordRef.current) passwordRef.current.value = "";
@@ -103,7 +106,7 @@ export default function AcceptInviteForm({
 
   if (existingAccount) {
     return (
-      <form className="invite__form" onSubmit={submit}>
+      <form className="invite__form" method="post" onSubmit={submit}>
         <div aria-live="polite" aria-atomic="true">
           {error ? (
             <p className="invite__error" role="alert">
@@ -122,7 +125,7 @@ export default function AcceptInviteForm({
         >
           Sign in to continue
         </a>
-        <button className="invite__submit" type="submit" disabled={pending}>
+        <button className="invite__submit" type="submit" disabled={pending || !hydrated}>
           {pending ? "Joining…" : "I am already signed in — join now"}
         </button>
       </form>
@@ -130,7 +133,7 @@ export default function AcceptInviteForm({
   }
 
   return (
-    <form className="invite__form" onSubmit={submit} noValidate>
+    <form className="invite__form" method="post" onSubmit={submit} noValidate>
       <div aria-live="polite" aria-atomic="true">
         {error ? (
           <p className="invite__error" role="alert">
@@ -181,7 +184,7 @@ export default function AcceptInviteForm({
         inputRef={confirmRef}
       />
 
-      <button className="invite__submit" type="submit" disabled={pending}>
+      <button className="invite__submit" type="submit" disabled={pending || !hydrated}>
         {pending ? "Setting up…" : "Accept invitation"}
       </button>
     </form>
