@@ -72,3 +72,38 @@ test("3: the drawer's activity feed uses it, with the board's column titles", as
     /activityDescription\(entry, \(key\) =>\s*boardSnapshot\?\.columns\.find\(\(col\) => col\.key === key\)\?\.column\.title\)/,
   );
 });
+
+/* ── 4. Planned task: units follow the site, and a new task is created ─── */
+
+const MANAGER = "app/(app)/portal/workspace-data-manager.tsx";
+const unitOptions = await import(
+  asModule(transpile(await read("app/(app)/portal/planned-unit-options.ts")))
+);
+
+test("4: Linked unit offers only the chosen site's units, told apart by serial", () => {
+  const units = [
+    { id: "u-aaa1", siteId: "s1", siteName: "Aldgate", name: "Boiler", serialNumber: "B-1", model: null, manufacturer: null },
+    { id: "u-aaa2", siteId: "s1", siteName: "Aldgate", name: "Boiler", serialNumber: null, model: "Vitodens", manufacturer: null },
+    { id: "u-bbb1", siteId: "s2", siteName: "Bank", name: "Boiler", serialNumber: "B-9", model: null, manufacturer: null },
+    { id: "u-aaa3", siteId: "s1", siteName: "Aldgate", name: "Shutter", serialNumber: null, model: null, manufacturer: null },
+  ];
+  assert.deepEqual(unitOptions.plannedUnitOptions(units, "s1"), [
+    { value: "", label: "No linked unit" },
+    { value: "u-aaa1", label: "Boiler — S/N B-1" },
+    { value: "u-aaa2", label: "Boiler — Vitodens" },
+    { value: "u-aaa3", label: "Shutter" },
+  ]);
+  const kept = unitOptions.plannedUnitOptions(units, "s1", "u-bbb1");
+  assert.deepEqual(
+    kept.at(-1),
+    { value: "u-bbb1", label: "Boiler (at Bank)" },
+    "a link the record already holds stays visible, named with its own site",
+  );
+});
+
+test("4: the form wires it in, and a new record's button says Create", async () => {
+  const source = await read(MANAGER);
+  assert.match(source, /const unitOptions = plannedUnitOptions\(workspace\.units, formSiteId, formUnitId\);/);
+  assert.match(source, /typeof form\?\.siteId === "string" \? form\.siteId : null,/);
+  assert.match(source, /editorId \? "Save changes" : tab === "planned" \? "Create task" :/);
+});
