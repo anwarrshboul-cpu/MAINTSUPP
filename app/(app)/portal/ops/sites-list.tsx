@@ -593,10 +593,19 @@ export function SitesList({
            * stores in the sea or nowhere at all. The figure is printed rather
            * than the view being quietly absent.
            */
-          <p className="ops-card__note">
-            Map view is unavailable: {coverage.withCoordinates} of {coverage.total} sites have
-            coordinates and {coverage.withPostcode} have a postcode. Add locations to enable it.
-          </p>
+          /* Only blame the data when the data is short. With every site located
+             (a new workspace typed in properly) "add locations to enable it" sent
+             people to fix records that were already complete. */
+          coverage.total > 0 && coverage.withCoordinates >= coverage.total ? (
+            <p className="ops-card__note">
+              All {coverage.total} sites have coordinates. A map view is not part of this page yet.
+            </p>
+          ) : (
+            <p className="ops-card__note">
+              Map view is unavailable: {coverage.withCoordinates} of {coverage.total} sites have
+              coordinates and {coverage.withPostcode} have a postcode. Add locations to enable it.
+            </p>
+          )
         ) : null}
       </OpsCard>
 
