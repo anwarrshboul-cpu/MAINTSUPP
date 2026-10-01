@@ -176,5 +176,50 @@ export const assetWidths: Record<string, AssetEntry> = {
     ],
     "width": 1586,
     "height": 992
+  },
+  "/assets/pages/service-reactive-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-planned-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-compliance-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-projects-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/case-work-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
   }
 };

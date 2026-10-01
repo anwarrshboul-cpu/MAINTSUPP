@@ -35,20 +35,20 @@ export const metadata: Metadata = {
 /* The photograph that shows each service happening. */
 const SERVICE_MEDIA: Record<(typeof SERVICE_DETAIL)[number]["id"], { src: string; alt: string }> = {
   reactive: {
-    src: "/assets/workflow/how-it-works-05-attend-v3.png",
-    alt: "A hi-vis engineer working on a wall-mounted electrical panel",
+    src: "/assets/pages/service-reactive-v1.jpg",
+    alt: "A Maintsupp engineer kneeling at a shop entrance to repair a jammed roller shutter, with an open toolbox and phone beside him",
   },
   planned: {
-    src: "/assets/workflow/how-it-works-04-assign-v3.png",
-    alt: "A contractor reading a work order on a phone at an open van of toolboxes",
+    src: "/assets/pages/service-planned-v1.jpg",
+    alt: "A Maintsupp technician in a hard hat checking a tablet checklist beside an open rooftop air-conditioning unit above the London skyline",
   },
   compliance: {
-    src: "/assets/workflow/how-it-works-06-verify-v3.png",
-    alt: "A hi-vis engineer photographing a completed ceiling unit in a corridor",
+    src: "/assets/pages/service-compliance-v1.jpg",
+    alt: "A Maintsupp technician testing an emergency light beside a red fire alarm panel in a back-of-house corridor",
   },
   projects: {
-    src: "/assets/audience/who-we-help-shopping-centre-kiosks.png",
-    alt: "A dark green retail kiosk with lit glass display counters in a bright shopping centre",
+    src: "/assets/pages/service-projects-v1.jpg",
+    alt: "A Maintsupp fit-out team installing a glass display kiosk in a shopping centre, one fitting a panel while another checks a drawing",
   },
 };
 

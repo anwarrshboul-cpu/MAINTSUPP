@@ -87,12 +87,9 @@ export default async function CaseStudyPage() {
               "Completion verified with photo evidence",
             ]}
             media={
-              <PhotoSlot
-                slot="evidence-closeout"
-                w={1040}
-                h={650}
-                art="tool"
-                alt={photoAlt["evidence-closeout"]}
+              <ApprovedPhoto
+                src="/assets/pages/case-work-v1.jpg"
+                alt="A Maintsupp contractor in a hi-vis vest carrying a toolbag into a shopping centre while checking the job on his phone"
                 sizes={SIZES}
                 className="featurerow__photo"
               />
