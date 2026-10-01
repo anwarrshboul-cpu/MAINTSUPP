@@ -1234,3 +1234,67 @@ export async function seedDemoWorkspaceAssets(
       .run();
   }
 }
+
+/**
+ * THE DEMONSTRATION WORKSPACE'S VOCABULARIES — 2026-10-01.
+ *
+ * Measured in Production that day: this workspace held 2 of the 14 option sets
+ * every other customer workspace has (only `unit_category` and `unit_status`).
+ * With no `site_type` set, every site edit failed with '"Store" is not a
+ * configured site type' and Add site with "No site_type options are
+ * configured", and the board's status, priority and label pickers had nothing
+ * behind them.
+ *
+ * Copied from the primary workspace exactly as `createWorkspace` copies them —
+ * by set KEY, never the customer's own `store_location` list — then the site
+ * types this workspace's own sites already use (Flagship, Store, ...) are added
+ * so the existing rows validate. Additive and idempotent: `INSERT OR IGNORE`
+ * against the (organisation, key) and (organisation, set, value) unique
+ * indexes, so a set or value the workspace already has is left as it is.
+ * Booleans are written as `(1=1)` / `(1=0)`, which is a boolean on Postgres and
+ * 1/0 on SQLite, so no literal depends on the translator.
+ */
+export async function ensureDemoWorkspaceVocabularies(
+  d1: D1DatabaseLike,
+  primaryOrganisationId: string,
+): Promise<void> {
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO option_sets (id, organisation_id, key, name, description)
+       SELECT 'set-' || ? || '-' || source.key, ?, source.key, source.name, source.description
+         FROM option_sets source
+        WHERE source.organisation_id = ? AND source.key <> 'store_location'`,
+    )
+    .bind(DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID, primaryOrganisationId)
+    .run();
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO option_values
+         (id, organisation_id, option_set_id, value, label, colour_hex, text_colour,
+          position, is_done, is_default, active, system)
+       SELECT 'value-' || ? || '-' || source_value.id, ?, target_set.id,
+              source_value.value, source_value.label, source_value.colour_hex,
+              source_value.text_colour, source_value.position, source_value.is_done,
+              source_value.is_default, source_value.active, source_value.system
+         FROM option_values source_value
+         JOIN option_sets source_set ON source_set.id = source_value.option_set_id
+         JOIN option_sets target_set
+           ON target_set.key = source_set.key AND target_set.organisation_id = ?
+        WHERE source_value.organisation_id = ? AND source_set.key <> 'store_location'`,
+    )
+    .bind(DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID, primaryOrganisationId)
+    .run();
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO option_values
+         (id, organisation_id, option_set_id, value, label, colour_hex, text_colour,
+          position, is_done, is_default, active, system)
+       SELECT 'value-' || ? || '-site-type-' || lower(used.value), ?, type_set.id,
+              used.value, used.value, '#808799', '#ffffff', 50, (1=0), (1=0), (1=1), (1=0)
+         FROM (SELECT DISTINCT site_type_value AS value FROM sites
+                WHERE organisation_id = ? AND site_type_value IS NOT NULL AND site_type_value <> '') used
+         JOIN option_sets type_set ON type_set.organisation_id = ? AND type_set.key = 'site_type'`,
+    )
+    .bind(DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID, DEMO_WORKSPACE_ID)
+    .run();
+}

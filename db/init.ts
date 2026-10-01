@@ -15,6 +15,7 @@ import {
   ensureDemoWorkspaceOrganisation,
   seedDemoWorkspaceAssets,
   seedDemoWorkspaceData,
+  ensureDemoWorkspaceVocabularies,
 } from "./demo-workspace";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
@@ -503,6 +504,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
    */
   await seedBoardStructure(d1, DEMO_WORKSPACE_ID, "maintenance", JOBS_TEMPLATE_GROUP_KEYS);
   await seedDemoWorkspaceData(d1, new Date().toISOString().slice(0, 10));
+  /* Its option sets, which it never had - see the function. After the data,
+     so the site types its own sites use are known. */
+  await ensureDemoWorkspaceVocabularies(d1, PRIMARY_ORGANISATION_ID);
   /*
    * THE DEMONSTRATION ASSET REGISTER, and its own guard.
    *

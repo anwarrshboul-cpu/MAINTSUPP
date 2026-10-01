@@ -385,7 +385,11 @@ async function validateOption(
   if (!candidate) {
     if (!required) return "";
     const fallback = active.find((entry) => entry.isDefault) ?? active[0];
-    if (!fallback) throw new Error(`No ${key} options are configured for this workspace.`);
+    /* The reader's words, not the option-set key: "No site_type options are
+       configured" printed an identifier at somebody adding a site. */
+    if (!fallback) {
+      throw new SiteInputError(`This workspace has no ${key.replace(/_/g, " ")}s configured yet.`);
+    }
     return fallback.value;
   }
   const match = values.find((entry) => entry.value === candidate);

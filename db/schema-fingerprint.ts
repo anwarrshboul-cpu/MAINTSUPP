@@ -166,6 +166,15 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
      (`seedWorkspaceDefaults`). Same INSERT OR IGNORE statements; no schema
      change. */
   "3a628760",
+  /* 5 — the demonstration workspace's missing option sets
+     (`ensureDemoWorkspaceVocabularies`): copied by key from the primary
+     workspace, store list excluded, plus the site types its own sites use.
+     Additive INSERT OR IGNORE only. */
+  "2b4db39b",
+  /* 6 — the same step with the demo workspace id named literally in every
+     insert (the confinement pins in tests/demo-workspace.test.mjs). No
+     statement changed meaning. */
+  "7a290950",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */
