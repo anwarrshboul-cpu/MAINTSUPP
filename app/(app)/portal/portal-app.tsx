@@ -6729,7 +6729,7 @@ function ReportsView({
           },
           {
             key: "cost-by-category",
-            label: "Cost by job type",
+            label: "Cost by label",
             render: () => <CostByCategory requests={scopedRequests} loading={loading} />,
           },
           {
