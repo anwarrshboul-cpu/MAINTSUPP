@@ -295,15 +295,21 @@ export async function resolveTenantAccess(
 ): Promise<TenantAccess> {
   const actor = await getWorkspaceActor(request);
 
-  const activeOrganisations = await db
-    .select()
-    .from(organisations)
-    .where(eq(organisations.status, "active"))
-    .orderBy(asc(organisations.createdAt), asc(organisations.id));
-
-  if (!activeOrganisations.length) {
-    throw new Error("No active organisation is configured for this workspace.");
-  }
+  /*
+   * Started here and awaited after the session read below: the two do not
+   * depend on each other, so this takes one round trip off every scoped request.
+   */
+  // `Promise.resolve` starts the query now and runs it once: a drizzle query
+  // re-executes on every `.then`, so it must not be subscribed to twice.
+  const organisationsRead = Promise.resolve(
+    db
+      .select()
+      .from(organisations)
+      .where(eq(organisations.status, "active"))
+      .orderBy(asc(organisations.createdAt), asc(organisations.id)),
+  );
+  // A rejection is handled where it is awaited; this only stops it surfacing early.
+  organisationsRead.catch(() => undefined);
 
   /*
    * Stage 20 — the signed-in account, if there is one.
@@ -315,6 +321,11 @@ export async function resolveTenantAccess(
    * path that leaves somebody holding whatever access the previous request had.
    */
   const session = await getSession(request);
+  const activeOrganisations = await organisationsRead;
+
+  if (!activeOrganisations.length) {
+    throw new Error("No active organisation is configured for this workspace.");
+  }
 
   const candidates = resolveIdentityCandidates(request, actor, session);
   const [grantsByEmail, authorityByEmail, internalCompanies] = await Promise.all([

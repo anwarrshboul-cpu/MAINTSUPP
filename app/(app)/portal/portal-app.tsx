@@ -116,7 +116,7 @@ import { ContractorContact } from "./contractor-contact";
  * two fetches and five verbs of its own, and this component is already nine
  * thousand lines.
  */
-import { ContractorProfile } from "./contractor-profile";
+import { ContractorProfile } from "./lazy-sections";
 import { AccountMenu } from "./account-menu";
 import {
   formatDayMonth,
@@ -204,13 +204,14 @@ import {
   JobsByTrade,
 } from "./dashboard-insights";
 import { OverviewPage } from "./ops/overview-page";
-import { InvoiceTrackerPage } from "./finance/invoice-tracker-page";
+import { InvoiceTrackerPage } from "./lazy-sections";
 import { OPS_REFRESH, URL_CHANGED, useQueryState } from "./ops/ops-url-state";
 import { DRILL_KEYS, readDrillFilter } from "./board-drill-filter";
-import { CompliancePage } from "./ops/compliance-page";
+import { CompliancePage } from "./lazy-sections";
 import { CpDash } from "./ops/cp-dash";
 import { RpDash } from "./ops/rp-dash";
-import { ContractorsList, type ContractorRow } from "./ops/contractors-list";
+import { ContractorsList } from "./lazy-sections";
+import type { ContractorRow } from "./ops/contractors-list";
 /*
  * The one definition of "open", imported rather than re-derived. The sidebar
  * badge and the Overview both read it, which is what stops the two disagreeing
@@ -221,7 +222,7 @@ import { jobTypeChoices, jobTypeLabel, useJobTypes } from "./use-job-types";
 import { JobTypeDrawerField } from "./cells/job-type-cell";
 import { JobTypesSettings } from "./admin/job-types-settings";
 import ContractorLinkPanel from "./contractor-link-panel";
-import { SitesManager } from "./sites/sites-manager";
+import { SitesManager } from "./lazy-sections";
 import { AppearancePanel } from "./views/appearance-panel";
 import { BrandColoursPanel } from "./views/brand-colours-panel";
 import { WorkspaceLogoPanel } from "./views/workspace-logo-panel";
@@ -234,12 +235,12 @@ import { GlobalSearch } from "./global-search";
 import { ReportSchedules } from "./ops/report-schedules";
 import { StatusHistory, type StatusHistoryEntry } from "./status-history";
 import { JobMilestonesPanel } from "./job-milestones-panel";
-import { AdminClientsView } from "./views/admin-clients";
+import { AdminClientsView } from "./lazy-sections";
 import { RecycleBinSection } from "./views/recycle-bin-section";
-import { AdminRolesView } from "./views/admin-roles";
-import { AdminUsersView } from "./views/admin-users";
-import { AuditLog } from "./views/audit-log";
-import { ReconcilePanel } from "./views/reconcile-panel";
+import { AdminRolesView } from "./lazy-sections";
+import { AdminUsersView } from "./lazy-sections";
+import { AuditLog } from "./lazy-sections";
+import { ReconcilePanel } from "./lazy-sections";
 import { StoreDocumentationBoard } from "./views/store-documentation-board";
 import { AssetsManager } from "./assets/assets-manager";
 import {
@@ -250,10 +251,8 @@ import {
   type WorkspaceSettings,
   type WorkspaceSnapshot,
 } from "../../lib/workspace-data";
-import {
-  WorkspaceDataManager,
-  type ManagerTab,
-} from "./workspace-data-manager";
+import { WorkspaceDataManager } from "./lazy-sections";
+import type { ManagerTab } from "./workspace-data-manager";
 import {
   AnalyticsToolbar,
   withinAnalyticsPeriod,
@@ -275,9 +274,9 @@ import {
   useReportTab,
 } from "./reports/reports-tabs";
 import { useGeneratorDocument } from "./reports/invoice-generator";
-import { ReportTab } from "./reports/report-tab";
-import { InvoiceTab } from "./reports/invoice-tab";
-import { GeneratedDocuments } from "./reports/generated-documents";
+import { ReportTab } from "./lazy-sections";
+import { InvoiceTab } from "./lazy-sections";
+import { GeneratedDocuments } from "./lazy-sections";
 import { OptionsAdmin } from "./admin/options-admin";
 
 export type Section =

@@ -360,8 +360,12 @@ export function OiDash({
    * timer, never during the effect.
    */
   useEffect(() => {
+    /* Coming back to the tab fires focus AND visibilitychange: one reload, not two. */
+    let lastReload = 0;
     const refreshIfVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastReload < 2_000) return;
+      lastReload = Date.now();
       const now = new Date();
       const today = oiDefaultRange(now);
       setCalendar((current) =>

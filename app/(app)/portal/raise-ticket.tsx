@@ -180,6 +180,10 @@ type GroupsPayload = {
 };
 
 async function loadAccess(): Promise<RaiseTicketAccess> {
+  /* Started now, awaited below: the group read does not depend on the context. */
+  const groupsRequest = fetch("/api/board/groups?board=maintenance", {
+    headers: { accept: "application/json" },
+  }).catch(() => null);
   const contextResponse = await fetch("/api/context", {
     headers: { accept: "application/json" },
   });
@@ -209,10 +213,8 @@ async function loadAccess(): Promise<RaiseTicketAccess> {
    */
   let group: RaiseTicketAccess["group"] = null;
   try {
-    const groupsResponse = await fetch("/api/board/groups?board=maintenance", {
-      headers: { accept: "application/json" },
-    });
-    if (groupsResponse.ok) {
+    const groupsResponse = await groupsRequest;
+    if (groupsResponse?.ok) {
       const groupsPayload = (await groupsResponse.json()) as GroupsPayload;
       const groups = groupsPayload.groups ?? [];
       const incoming = groups.find((entry) => entry.stageKey === "Incoming") ?? groups[0];

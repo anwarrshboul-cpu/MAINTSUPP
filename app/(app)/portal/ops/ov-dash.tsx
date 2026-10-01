@@ -384,8 +384,12 @@ export function OvDash({
    * is about.
    */
   useEffect(() => {
+    let lastReload = 0;
     const refreshIfVisible = () => {
+      /* Coming back to the tab fires focus AND visibilitychange: one reload, not two. */
+      if (Date.now() - lastReload < 2_000) return;
       if (document.visibilityState === "visible") reload();
+      lastReload = document.visibilityState === "visible" ? Date.now() : 0;
     };
     window.addEventListener("focus", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
