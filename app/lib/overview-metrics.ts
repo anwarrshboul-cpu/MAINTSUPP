@@ -1124,6 +1124,8 @@ export function formatDay(day: string): string {
  * three blocks' endpoints so their header pills read alike.
  */
 export function formatDayRange(from: string, to: string): string {
+  /* One day is one date: "This month" on the 1st read "1 Oct – 1 Oct 2026". */
+  if (from === to) return formatDay(to);
   if (from.slice(0, 4) !== to.slice(0, 4)) return `${formatDay(from)} – ${formatDay(to)}`;
   const short = new Date(`${from}T12:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
