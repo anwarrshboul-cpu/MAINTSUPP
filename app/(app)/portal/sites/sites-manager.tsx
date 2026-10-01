@@ -339,7 +339,7 @@ export function SitesManager({
       ) : null}
 
       {importing ? (
-        <div className="panel" role="status">
+        <div className="panel settings-card" role="status">
           <h3>{importing.dryRun ? "Preview of this file" : "Import complete"}</h3>
           <p>
             {importing.created} to add, {importing.updated} to update,{" "}
@@ -374,6 +374,8 @@ export function SitesManager({
               <button
                 type="button"
                 className="primary-button"
+                /* A preview that adds and updates nothing has nothing to apply. */
+                disabled={!importing.created && !importing.updated}
                 onClick={() => runImport(pendingCsv, false)}
               >
                 Apply this import

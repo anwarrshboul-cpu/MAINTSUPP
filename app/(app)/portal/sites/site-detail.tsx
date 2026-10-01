@@ -391,7 +391,7 @@ export function SiteDetail({
           />
           <Row label="Region" value={site.region} />
           <Row label="Country" value={site.country} />
-          <Row label="Address" value={site.addressLine2} />
+          <Row label="Address line 2" value={site.addressLine2} />
           <Row
             label="Coordinates"
             value={
