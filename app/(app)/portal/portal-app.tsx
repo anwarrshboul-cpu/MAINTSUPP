@@ -1389,7 +1389,7 @@ export default function PortalApp({
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadRuntimeContext]);
+  }, [loadRuntimeContext, setToast]);
 
   /* A new or removed workspace logo redraws the sidebar mark without a reload:
      the logo panel announces the change and the context is read again. */
@@ -1937,7 +1937,7 @@ export default function PortalApp({
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
-  }, [toast]);
+  }, [toast, setToast]);
 
   /*
    * WHICH CONTRACTOR REGISTER THIS SCREEN IS ON — W2.
@@ -3018,7 +3018,7 @@ export default function PortalApp({
         throw caught;
       }
     },
-    [],
+    [setToast],
   );
 
   /*
