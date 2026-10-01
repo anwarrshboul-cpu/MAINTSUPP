@@ -587,6 +587,9 @@ export function emptyRegisterReason(input: {
 }) {
   if (!input.windowRecognised) return input.windowReason;
   if (!input.inRangeCount) {
+    /* "No documents were uploaded in All records." read as a typo; the
+       all-time window is the register being empty, and says so. */
+    if (/^all\b/i.test(input.windowLabel.trim())) return "No documents have been uploaded yet.";
     return `No documents were uploaded in ${input.windowLabel}.`;
   }
   const query = input.query.trim();

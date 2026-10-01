@@ -50,6 +50,7 @@ import {
   readInvoice,
   updateInvoice,
   type InvoicePatch,
+  siteNamesFor,
 } from "../../../../lib/finance/repository";
 
 export const dynamic = "force-dynamic";
@@ -77,8 +78,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         invoiceBalanceFor(db, orgId, id),
       ]);
 
+    const siteNames = await siteNamesFor(db, orgId, [invoice.siteId]);
     return Response.json({
-      invoice,
+      invoice: { ...invoice, siteName: invoice.siteId ? siteNames.get(invoice.siteId) ?? null : null },
       allocations,
       flags,
       payments,

@@ -127,6 +127,7 @@ import {
   jobScheduleTarget,
 } from "./unscheduled-tray";
 import "./calendar-page.css";
+import { isOnJobsBoard } from "../../lib/job-metrics";
 
 /**
  * Every date source, as a stable array.
@@ -237,7 +238,13 @@ export function OperationsCalendarPanel({
    */
   const [jobEdits, setJobEdits] = useState<Record<string, CalendarJob>>({});
   const requests = useMemo(
-    () => hostRequests.map((request) => jobEdits[request.id] ?? request),
+    /* Jobs only: the shell's list also carries Store Documentation rows (a
+       "New store" sat in the tray as "Job · Pending Approval") and subitems
+       ("Working on it (unmapped status)"). The same cut the Overview makes. */
+    () =>
+      hostRequests
+        .filter((request) => isOnJobsBoard(request) && !request.parentId)
+        .map((request) => jobEdits[request.id] ?? request),
     [hostRequests, jobEdits],
   );
 

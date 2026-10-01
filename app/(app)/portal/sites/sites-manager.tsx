@@ -21,6 +21,7 @@ import { confirmSiteClosure } from "./site-closure";
  * Contractors registers would come to disagree about what a column is.
  */
 import { RegisterGrid } from "../register/register-grid";
+import { useCapability } from "../../../lib/client-capabilities";
 import { SitesList, type SiteCoverage, type SiteListRow } from "../ops/sites-list";
 import {
   api,
@@ -112,6 +113,9 @@ export function SitesManager({
   onNotify: (message: string) => void;
 }) {
   const [mode, setMode] = useState<Mode>({ kind: "list" });
+  /* `!== false`: shown while the answer is in flight, as the assets screen does. */
+  const canEditSites = useCapability("sites.edit") !== false;
+  const canImportSites = useCapability("data.import") !== false;
   /*
    * W05-08 — WHICH OF THE TWO VIEWS OF ONE REGISTER IS OPEN.
    *
@@ -335,7 +339,7 @@ export function SitesManager({
       ) : null}
 
       {importing ? (
-        <div className="panel" role="status">
+        <div className="panel settings-card" role="status">
           <h3>{importing.dryRun ? "Preview of this file" : "Import complete"}</h3>
           <p>
             {importing.created} to add, {importing.updated} to update,{" "}
@@ -370,6 +374,8 @@ export function SitesManager({
               <button
                 type="button"
                 className="primary-button"
+                /* A preview that adds and updates nothing has nothing to apply. */
+                disabled={!importing.created && !importing.updated}
                 onClick={() => runImport(pendingCsv, false)}
               >
                 Apply this import
@@ -418,7 +424,9 @@ export function SitesManager({
           const record = (data?.sites ?? []).find((row) => row.id === site.id);
           if (record) void archive(record);
         }}
-        onAddSite={() => setMode({ kind: "form", site: null, groupIds: [] })}
+        /* Add and Import only with the capability the server checks: a client
+           was offered both, filled the form, and was refused on save. */
+        onAddSite={canEditSites ? () => setMode({ kind: "form", site: null, groupIds: [] }) : undefined}
         registerView={view === "register"}
         /*
           W05-08 — THE CONFIGURABLE REGISTER, over the SAME rows the list drew.
@@ -451,13 +459,15 @@ export function SitesManager({
             >
               Export CSV
             </a>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => fileInput.current?.click()}
-            >
-              Import CSV
-            </button>
+            {canImportSites ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => fileInput.current?.click()}
+              >
+                Import CSV
+              </button>
+            ) : null}
           </>
         }
       />

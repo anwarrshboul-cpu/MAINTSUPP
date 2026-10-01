@@ -868,6 +868,8 @@ export function WorkspaceDataManager({
   initialTab,
   initialRecordId,
   busy,
+  canEdit = true,
+  canImport = true,
   onClose,
   onSave,
   onArchive,
@@ -877,13 +879,20 @@ export function WorkspaceDataManager({
   initialTab: ManagerTab;
   initialRecordId?: string | null;
   busy: boolean;
+  /*
+   * Whether this person may write records (`sites.edit`) and import
+   * (`data.import`). The server refuses both for a client, but the dialog
+   * offered a working "+ New" form and an Import tab that then failed on save.
+   */
+  canEdit?: boolean;
+  canImport?: boolean;
   onClose: () => void;
   onSave: (entity: Exclude<ManagerTab, "activity" | "import">, id: string | null, data: Record<string, unknown>) => Promise<void>;
   onArchive: (entity: Exclude<ManagerTab, "activity" | "import">, id: string) => Promise<void>;
   /** Fired after a monday import writes, so the dashboard reloads its data. */
   onImported?: () => void;
 }) {
-  const [tab, setTab] = useState<ManagerTab>(initialTab);
+  const [tab, setTab] = useState<ManagerTab>(initialTab === "import" && !canImport ? tabs[0].key : initialTab);
   const [query, setQuery] = useState("");
   /* §25 — "Create due visits now". */
   const [plannedRunBusy, setPlannedRunBusy] = useState(false);
@@ -1063,7 +1072,7 @@ export function WorkspaceDataManager({
       return hay.includes(needle) || (digits.length >= 4 && hay.includes(digits));
     });
   }, [query, tab, workspace, customRecords]);
-  const readOnlyTab = tab === "activity" || tab === "import";
+  const readOnlyTab = tab === "activity" || tab === "import" || !canEdit;
 
   /*
    * W05-07 — the configured site types, fetched once.
@@ -1412,14 +1421,14 @@ export function WorkspaceDataManager({
           <button className="icon-button" type="button" aria-label="Close" onClick={onClose}><Icon name="close" size={19} /></button>
         </div>
         <div className="workspace-manager__tabs" role="tablist" aria-label="Data sections">
-          {tabs.map((item) => (
+          {tabs.filter((item) => item.key !== "import" || canImport).map((item) => (
             <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className={tab === item.key ? "is-active" : ""} onClick={() => { setTab(item.key); setForm(null); setEditorId(null); setQuery(""); }}>
               <Icon name={item.icon} size={16} /><span>{item.label}</span>
             </button>
           ))}
         </div>
         <div className={`workspace-manager__body${form ? " has-editor" : ""}`}>
-          {tab === "import" ? (
+          {tab === "import" && canImport ? (
             <MondayImportPanel onImported={onImported} />
           ) : (
           <div className="workspace-manager__records">

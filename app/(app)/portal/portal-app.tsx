@@ -54,6 +54,7 @@ import {
  * used to stand here counted something else entirely.
  */
 import { isActiveSiteStatus } from "../../lib/site-state";
+import { csvCell } from "../../lib/finance/exports";
 /*
  * One definition of the compliance score, and one answer to "may this row be
  * edited here". Both screens below read them, so the Overview tile and the
@@ -416,6 +417,8 @@ type RuntimeWorkspaceContext = {
    */
   requestConfiguration?: {
     engineers?: Array<{ value: string; label: string; isDefault?: boolean }>;
+    priorities?: Array<{ value: string; label: string; isDefault?: boolean }>;
+    categories?: Array<{ value: string; label: string; isDefault?: boolean }>;
   };
   /**
    * The portal modules this workspace has switched on AND this actor may reach
@@ -1058,8 +1061,9 @@ function downloadCsv(requests: MaintenanceRequest[]) {
     "dueAt",
     "cost",
   ];
-  const escapeCell = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  /* `csvCell`, not a bare quote: job titles arrive from the public request
+     form, and a title beginning "=HYPERLINK(" ran as a formula in Excel. */
+  const escapeCell = csvCell;
   const csv = [
     columns.join(","),
     ...requests.map((request) =>
@@ -1142,8 +1146,9 @@ function downloadFileRegister(files: FileRecord[], now = new Date()) {
    * is passed in and used for every row, so a long export cannot straddle
    * midnight and classify its first rows against a different day from its last.
    */
-  const escapeCell = (value: unknown) =>
-    `"${String(value ?? "").replaceAll('"', '""')}"`;
+  /* `csvCell`, not a bare quote: job titles arrive from the public request
+     form, and a title beginning "=HYPERLINK(" ran as a formula in Excel. */
+  const escapeCell = csvCell;
   const csv = [
     [...columns, "status"].join(","),
     ...files.map((file) =>
@@ -1272,6 +1277,10 @@ export default function PortalApp({
   const [notificationStates, setNotificationStates] = useState<
     Record<string, NotificationState>
   >({});
+  /* What `/api/notifications` counted itself, for the screens that do not load
+     the job list (the Overview above all). See that route. */
+  const [serverNotificationCandidates, setServerNotificationCandidates] = useState<MaintenanceRequest[]>([]);
+  const [serverOpenJobs, setServerOpenJobs] = useState<number | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   /*
    * "loading" is the honest starting state, and it used to be "sample" — which
@@ -1885,8 +1894,12 @@ export default function PortalApp({
         if (!response.ok) return;
         const payload = (await response.json()) as {
           states?: NotificationStateEntry[];
+          candidates?: MaintenanceRequest[];
+          openJobs?: number;
         };
         if (!active) return;
+        setServerNotificationCandidates(payload.candidates ?? []);
+        setServerOpenJobs(typeof payload.openJobs === "number" ? payload.openJobs : null);
         setNotificationStates(
           Object.fromEntries(
             (payload.states ?? []).map((entry) => [
@@ -3030,13 +3043,18 @@ export default function PortalApp({
    * the window the reader chose; the two agree whenever that window is All
    * time, and the tile carries the period in its own subtitle.
    */
-  const openCount = openJobCount(requests.filter(countsAsWorkOrder));
+  /* The job list when this screen has loaded it; the server's own count and
+     candidates when it has not (the Overview), so neither goes blank there. */
+  const jobListLoaded = requests.length > 0;
+  const openCount = jobListLoaded
+    ? openJobCount(requests.filter(countsAsWorkOrder))
+    : (serverOpenJobs ?? 0);
   const notificationItems = useMemo(
     () =>
-      notificationCandidates(requests).filter(
+      (jobListLoaded ? notificationCandidates(requests) : serverNotificationCandidates).filter(
         (request) => notificationStates[request.id] !== "dismissed",
       ),
-    [notificationStates, requests],
+    [jobListLoaded, notificationStates, requests, serverNotificationCandidates],
   );
   const unreadNotificationCount = notificationItems.filter(
     (request) => notificationStates[request.id] !== "read",
@@ -3523,22 +3541,29 @@ export default function PortalApp({
                 they come before the bell rather than after it; their order among
                 themselves is monday's still.
               */}
-              <Link
-                className="icon-button topbar-icon"
-                href="/dashboard/account/invite"
-                aria-label="Invite members"
-                title="Invite members"
-              >
-                <Icon name="users" size={19} />
-              </Link>
-              <Link
-                className="icon-button topbar-icon"
-                href="/dashboard/account/integrations"
-                aria-label="Integrations"
-                title="Integrations"
-              >
-                <Icon name="grid" size={19} />
-              </Link>
+              {/* Offered only to a role the destination will serve: a client
+                  holds neither `users.invite` nor `integrations.manage`, and both
+                  screens refused them after the click. */}
+              {runtimeContext?.capabilities?.["users.invite"] !== false ? (
+                <Link
+                  className="icon-button topbar-icon"
+                  href="/dashboard/account/invite"
+                  aria-label="Invite members"
+                  title="Invite members"
+                >
+                  <Icon name="users" size={19} />
+                </Link>
+              ) : null}
+              {runtimeContext?.capabilities?.["integrations.manage"] !== false ? (
+                <Link
+                  className="icon-button topbar-icon"
+                  href="/dashboard/account/integrations"
+                  aria-label="Integrations"
+                  title="Integrations"
+                >
+                  <Icon name="grid" size={19} />
+                </Link>
+              ) : null}
               <Link
                 className="icon-button topbar-icon"
                 href="/dashboard/account/help"
@@ -4083,6 +4108,8 @@ export default function PortalApp({
             <TeamView
               userName={displayUserName}
               userEmail={displayUserEmail}
+              userRole={roleLabel(runtimeContext?.actor.role)}
+              canManage={runtimeContext?.capabilities?.["users.edit"] !== false}
               team={currentTeam}
               onManage={(id) => openWorkspaceManager("member", id)}
             />
@@ -4116,6 +4143,8 @@ export default function PortalApp({
           {activeSurface === "settings" && (
             <SettingsView
               navCatalogue={navCatalogue}
+              canEditModules={isSuperAdmin}
+              canEditSettings={runtimeContext?.capabilities?.["settings.edit"] !== false}
               settings={currentSettings}
               /*
                * The categories actually in use, counted from the jobs on
@@ -4187,6 +4216,11 @@ export default function PortalApp({
           locations={currentStores.filter((store) => store.lifecycle === "Current").map((store) => store.name)}
           /* Decision O — this workspace's own trades, not a list written here. */
           trades={runtimeContext?.requestConfiguration?.engineers ?? []}
+          /* The same for Priority and Category: hard-coded lists offered "High"
+             and "Glass", which a workspace without them snapped to its
+             fallback on save - "High" became Medium, "Plumbing" became Other. */
+          priorities={runtimeContext?.requestConfiguration?.priorities ?? []}
+          categories={runtimeContext?.requestConfiguration?.categories ?? []}
           onClose={() => setShowCreateRequest(false)}
           onCreate={createRequest}
         />
@@ -4198,6 +4232,8 @@ export default function PortalApp({
           initialTab={workspaceManager.tab}
           initialRecordId={workspaceManager.recordId}
           busy={workspaceBusy}
+          canEdit={runtimeContext?.capabilities?.["sites.edit"] !== false}
+          canImport={runtimeContext?.capabilities?.["data.import"] !== false}
           onClose={() => setWorkspaceManager(null)}
           onSave={saveWorkspaceRecord}
           onArchive={archiveWorkspaceRecord}
@@ -6728,7 +6764,7 @@ function ReportsView({
           },
           {
             key: "cost-by-category",
-            label: "Cost by job type",
+            label: "Cost by label",
             render: () => <CostByCategory requests={scopedRequests} loading={loading} />,
           },
           {
@@ -6834,17 +6870,25 @@ function ReportsView({
 function TeamView({
   userName,
   userEmail,
+  userRole,
+  canManage,
   team,
   onManage,
 }: {
   userName: string;
   userEmail: string;
+  /** The signed-in person's own role, for the one-row fallback below. */
+  userRole: string;
+  /** `users.edit`: a client was offered "Add team member" and per-row manage. */
+  canManage: boolean;
   team: WorkspaceMember[];
   onManage: (id?: string | null) => void;
 }) {
+  /* With no team rows yet, the page shows the person reading it - under their
+     OWN role. It said "Super Admin" for everyone, client included. */
   const members = team.length
     ? team
-    : [{ id: "current-user", name: userName, email: userEmail, role: "Super Admin", active: true, lastActive: "Now" }];
+    : [{ id: "current-user", name: userName, email: userEmail, role: userRole, active: true, lastActive: "Now" }];
 
   return (
     <div className="section-stack">
@@ -6860,14 +6904,16 @@ function TeamView({
             portfolio.
           </p>
         </div>
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => onManage(null)}
-        >
-          <Icon name="plus" size={18} />
-          Add team member
-        </button>
+        {canManage ? (
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => onManage(null)}
+          >
+            <Icon name="plus" size={18} />
+            Add team member
+          </button>
+        ) : null}
       </section>
       <section className="panel team-panel">
         <div className="team-list">
@@ -6880,14 +6926,16 @@ function TeamView({
               </span>
               <span className="role-chip">{member.role}</span>
               <span className="last-active">{member.lastActive}</span>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label={`Manage ${member.name}`}
-                onClick={() => onManage(member.id)}
-              >
-                <Icon name="more" size={18} />
-              </button>
+              {canManage ? (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={`Manage ${member.name}`}
+                  onClick={() => onManage(member.id)}
+                >
+                  <Icon name="more" size={18} />
+                </button>
+              ) : null}
             </div>
           ))}
         </div>
@@ -6901,6 +6949,8 @@ function SettingsView({
   categories,
   busy,
   navCatalogue,
+  canEditModules,
+  canEditSettings,
   onSave,
   onNotify,
 }: {
@@ -6917,6 +6967,15 @@ function SettingsView({
    * from here instead.
    */
   navCatalogue: SidebarNavEntry[];
+  /*
+   * Whether this person holds `navigation.edit` (Super Admin only). The panel
+   * already renders nothing on its 403, but the browser still logs every 403 as a
+   * console error, so a client or manager opening Settings saw a red "Failed to
+   * load resource" for a request that should never have been made.
+   */
+  canEditModules: boolean;
+  /** `settings.edit`; without it the workspace save is not offered. */
+  canEditSettings: boolean;
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
@@ -6976,10 +7035,13 @@ function SettingsView({
             this workspace emails.
           </p>
         </div>
-        <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
-          <Icon name="check" size={17} />
-          {busy ? "Saving…" : "Save settings"}
-        </button>
+        {/* Only for `settings.edit`; a client's Save was refused with a 403. */}
+        {canEditSettings ? (
+          <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
+            <Icon name="check" size={17} />
+            {busy ? "Saving…" : "Save settings"}
+          </button>
+        ) : null}
       </section>
 
       {/* Appearance is a per-person device setting, not part of the workspace
@@ -7003,8 +7065,9 @@ function SettingsView({
           Super Admin (`navigation.edit`), so the panel renders nothing for every
           other role rather than showing a refusal; see
           views/portal-modules-panel.tsx for why a 403 is an answer here and a
-          read-only card next door. */}
-      <PortalModulesPanel />
+          read-only card next door. Not mounted at all for other roles, so the
+          refused request is never sent. */}
+      {canEditModules ? <PortalModulesPanel /> : null}
 
       {/* And which glyph each sidebar entry wears — the third workspace-wide
           presentation decision, beside the palette and the module switches. It takes
@@ -10221,15 +10284,38 @@ function defaultTrade(trades: readonly TradeChoice[]): string {
   return (choices.find((choice) => choice.isDefault) ?? choices[0])?.value ?? "";
 }
 
+/* What the modal offers when the workspace has no configured list yet. */
+const BUILT_IN_PRIORITIES = ["Urgent", "Medium", "Low"];
+const BUILT_IN_CATEGORIES = ["Lighting", "Electrical", "Joinery", "Glass", "HVAC", "Plumbing", "CCTV", "Digital display", "Other"];
+
+function configuredChoices(configured: readonly TradeChoice[], builtIn: readonly string[]): TradeChoice[] {
+  if (configured.length) return [...configured];
+  return builtIn.map((value) => ({ value, label: value }));
+}
+
+function defaultChoice(choices: readonly TradeChoice[], preferred?: string): string {
+  return (
+    choices.find((choice) => choice.isDefault)?.value ??
+    choices.find((choice) => choice.value === preferred)?.value ??
+    choices[0]?.value ??
+    ""
+  );
+}
+
 function CreateRequestModal({
   locations: siteLocations,
   trades,
+  priorities: configuredPriorities = [],
+  categories: configuredCategories = [],
   onClose,
   onCreate,
 }: {
   locations: string[];
   /** This workspace's active trades, from `/api/context`. Empty until it answers. */
   trades: TradeChoice[];
+  /** Its priorities and labels, the same way. Empty means the built-in lists. */
+  priorities?: TradeChoice[];
+  categories?: TradeChoice[];
   onClose: () => void;
   onCreate: (draft: CreateRequestDraft, files: File[]) => Promise<void>;
 }) {
@@ -10237,14 +10323,16 @@ function CreateRequestModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const priorityChoices = configuredChoices(configuredPriorities, BUILT_IN_PRIORITIES);
+  const categoryChoices = configuredChoices(configuredCategories, BUILT_IN_CATEGORIES);
   const [draft, setDraft] = useState<CreateRequestDraft>({
     location: "",
     requester: "",
     contact: "",
     description: "",
-    category: "Lighting",
+    category: defaultChoice(categoryChoices, "Lighting"),
     engineer: defaultTrade(trades),
-    priority: "Medium",
+    priority: defaultChoice(priorityChoices, "Medium"),
     /* Unclassified until somebody says otherwise — never guessed. */
     jobTypeId: "",
   });
@@ -10398,10 +10486,11 @@ function CreateRequestModal({
                       update("priority", event.target.value)
                     }
                   >
-                    <option>Urgent</option>
-                    <option>High</option>
-                    <option>Medium</option>
-                    <option>Low</option>
+                    {priorityChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="form-field">
@@ -10412,15 +10501,11 @@ function CreateRequestModal({
                       update("category", event.target.value)
                     }
                   >
-                    <option>Lighting</option>
-                    <option>Electrical</option>
-                    <option>Joinery</option>
-                    <option>Glass</option>
-                    <option>HVAC</option>
-                    <option>Plumbing</option>
-                    <option>CCTV</option>
-                    <option>Digital display</option>
-                    <option>Other</option>
+                    {categoryChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
               </div>

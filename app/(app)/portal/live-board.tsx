@@ -126,7 +126,7 @@ import {
   type BoardItemActions,
 } from "./overlay/item-actions";
 import {
-  MobileBoardContext,
+  BoardEditContext, MobileBoardContext,
   MobileCellSheet,
   useRevealBoardPopover,
 } from "./board-primitives";
@@ -448,6 +448,7 @@ export function LiveMaintenanceBoard({
    * page load — see lib/client-capabilities.ts.
    */
   const canExport = useCapability("data.export");
+  const canEditBoard = useCapability("board.edit") !== false; // to every cell, via BoardEditContext
   /*
    * HIDDEN COLUMNS ARE SERVER STATE, seeded here and written back on change.
    *
@@ -3148,7 +3149,7 @@ export function LiveMaintenanceBoard({
   const addItemToGroupLabel = isStoreDocumentation ? "Add store to group" : "Add item to group";
 
   return (
-    <MobileBoardContext.Provider value={isMobile}>
+    <MobileBoardContext.Provider value={isMobile}><BoardEditContext.Provider value={canEditBoard}>
     <div className="section-stack live-board-page" ref={pageRef} data-jobs-rail={railState}>
       {boardId === "maintenance" && (
       <section className="analytics-page-heading live-jobs-analytics-heading" ref={anchorRef}>
@@ -3333,7 +3334,7 @@ export function LiveMaintenanceBoard({
           }}
         >
         <div className="live-board-toolbar">
-          <div className="live-board-split" data-board-popover>
+          <div className="live-board-split" data-board-popover hidden={!canEditBoard}>
             <button
               className="primary-button"
               type="button"
@@ -4459,7 +4460,7 @@ export function LiveMaintenanceBoard({
         </div>
         )}
       </section>
-      {selectedIds.size > 0 && (
+      {canEditBoard && selectedIds.size > 0 && (
         <div className="live-selection-bar" role="toolbar" aria-label="Selected item actions">
           <span className="live-selection-count">{selectedIds.size}</span>
           <strong>
@@ -4640,7 +4641,7 @@ export function LiveMaintenanceBoard({
         />
       )}
     </div>
-    </MobileBoardContext.Provider>
+    </BoardEditContext.Provider></MobileBoardContext.Provider>
   );
 }
 

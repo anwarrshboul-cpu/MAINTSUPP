@@ -476,6 +476,10 @@ export function AccountMenu({
    */
   const canAdminister = useCapability("users.view");
   const canInvite = useCapability("users.invite");
+  /* Read the same way as `canInvite` (`!== false`): a client has neither, and
+     was offered an importer and an API-token screen that both refuse them. */
+  const canImport = useCapability("data.import");
+  const canIntegrate = useCapability("integrations.manage");
 
   /*
    * AND DOORS TO MODULES THIS WORKSPACE HAS SWITCHED OFF — §19.
@@ -827,6 +831,8 @@ export function AccountMenu({
                 .filter((item) => item.key !== "admin" || canAdminister === true)
                 .filter((item) => moduleAllows(item.key))
                 .filter((item) => item.key !== "platform" || isPlatformStaff === true)
+                .filter((item) => item.key !== "import" || canImport !== false)
+                .filter((item) => item.key !== "developers" || canIntegrate !== false)
                 .map((item) => renderItem(item))}
             </section>
             <section data-menu-column="explore">

@@ -174,7 +174,11 @@ test("the default range is the last twelve months, month-aligned, never written 
   assert.match(page, /return \{ range: oiDefaultRange\(now\), presets: oiRangePresets\(now\) \};/);
   assert.match(page, /current\.range\.from === today\.from && current\.range\.to === today\.to\s*\? current/);
   /* And a URL day must be a real calendar day, not just the right shape. */
-  assert.match(page, /const from = oiIsCalendarDay\(fromParam\) \? fromParam : fallback\.from;/);
+  /* Re-pointed 2026-10-01: the parsed day is `rawFrom`, and a backwards range
+     is then put the right way round on the page, as the server reads it. The
+     fallback contract is unchanged. */
+  assert.match(page, /const rawFrom = oiIsCalendarDay\(fromParam\) \? fromParam : fallback\.from;/);
+  assert.match(page, /const \[from, to\] = rawFrom <= rawTo \? \[rawFrom, rawTo\] : \[rawTo, rawFrom\];/);
   assert.equal(jobs.oiIsCalendarDay("2026-02-30"), false);
   assert.equal(jobs.oiIsCalendarDay("2026-09-11"), true);
   assert.match(page, /resetLabel="Reset to the last 12 months"/);

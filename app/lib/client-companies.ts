@@ -17,8 +17,9 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { getD1 } from "../../db";
-import { seedBoardStructure, seedJobTypes } from "../../db/init";
+import { seedBoardStructure, seedJobTypes, seedWorkspaceDefaults } from "../../db/init";
 import { seedStoreDocumentationBoard } from "../../db/seed-store-documentation";
+import { JOBS_TEMPLATE_GROUP_KEYS } from "./generic-board-template";
 import {
   clientCompanies,
   clientCompanyMembers,
@@ -88,6 +89,9 @@ export async function createClientCompany(
  * The set itself is still created, empty, so the pickers that expect it work.
  */
 const CUSTOMER_SPECIFIC_OPTION_SETS = new Set(["store_location"]);
+
+/** The spec key of the one Completed lane a new workspace is given; see createWorkspace. */
+const NEW_WORKSPACE_COMPLETED_GROUP_KEY = "completed-2026-08";
 
 /**
  * Creates a workspace inside `clientCompanyId`, structurally complete.
@@ -173,9 +177,33 @@ export async function createWorkspace(
    * a row of operational data.
    */
   const d1 = await getD1();
-  await seedBoardStructure(d1, created.id);
+  /*
+   * THE JOBS PRODUCT'S LANES, NOT A CUSTOMER'S FILING.
+   *
+   * Called with no group keys, the seeder writes all 38 of the primary estate's
+   * monday groups, and 31 of them are that customer's own filing: a lane per
+   * store ("Wood Green completed", "Bluewater completed", ...) and three dated
+   * month archives. Every workspace created here opened with another client's
+   * store list on its Jobs board - the same leak `CUSTOMER_SPECIFIC_OPTION_SETS`
+   * closes for the store-location options. A new workspace gets the template's
+   * lanes (as the demo workspace and a Jobs-template section do) plus the one
+   * Completed lane, which keeps its spec key so `STAGE_BY_GROUP_KEY` still
+   * files a completed job into it, under a name that is not a date.
+   */
+  await seedBoardStructure(d1, created.id, "maintenance", [
+    ...JOBS_TEMPLATE_GROUP_KEYS,
+    NEW_WORKSPACE_COMPLETED_GROUP_KEY,
+  ]);
+  await d1
+    .prepare(`UPDATE maintenance_groups SET name = ? WHERE id = ?`)
+    .bind("Completed", `seed-${created.id}-maintenance-${NEW_WORKSPACE_COMPLETED_GROUP_KEY}`)
+    .run();
   await seedStoreDocumentationBoard(d1, created.id);
   await seedJobTypes(d1, created.id);
+  /* The status map, reminder cascade, Overview meters, SLA targets, invoice
+     status map and approval bands. Without them every invoice approval in a
+     new workspace failed - see `seedTargets` in db/init.ts. */
+  await seedWorkspaceDefaults(d1, created.id);
 
   if (demoIdentityAllowed()) {
     for (const role of ["admin", "client"] as const) {

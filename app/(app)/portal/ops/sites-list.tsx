@@ -180,7 +180,8 @@ export function SitesList({
   onOpenSite: (id: string) => void;
   onEditSite: (site: SiteListRow) => void;
   onCloseSite: (site: SiteListRow) => void;
-  onAddSite: () => void;
+  /** Absent for a role that cannot add one; every add control is then hidden. */
+  onAddSite?: () => void;
   headerActions?: React.ReactNode;
   /**
    * Whether the configurable register is the view rather than the row list.
@@ -486,9 +487,11 @@ export function SitesList({
         </div>
         <div className="ops-actions">
           {headerActions}
-          <button type="button" className="primary-button" onClick={onAddSite}>
-            Add site
-          </button>
+          {onAddSite ? (
+            <button type="button" className="primary-button" onClick={onAddSite}>
+              Add site
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -593,10 +596,19 @@ export function SitesList({
            * stores in the sea or nowhere at all. The figure is printed rather
            * than the view being quietly absent.
            */
-          <p className="ops-card__note">
-            Map view is unavailable: {coverage.withCoordinates} of {coverage.total} sites have
-            coordinates and {coverage.withPostcode} have a postcode. Add locations to enable it.
-          </p>
+          /* Only blame the data when the data is short. With every site located
+             (a new workspace typed in properly) "add locations to enable it" sent
+             people to fix records that were already complete. */
+          coverage.total > 0 && coverage.withCoordinates >= coverage.total ? (
+            <p className="ops-card__note">
+              All {coverage.total} sites have coordinates. A map view is not part of this page yet.
+            </p>
+          ) : (
+            <p className="ops-card__note">
+              Map view is unavailable: {coverage.withCoordinates} of {coverage.total} sites have
+              coordinates and {coverage.withPostcode} have a postcode. Add locations to enable it.
+            </p>
+          )
         ) : null}
       </OpsCard>
 
@@ -683,9 +695,11 @@ export function SitesList({
           {sites.length === 0 ? (
             <EmptyState>
               No sites yet.{" "}
-              <button type="button" className="ops-link" onClick={onAddSite}>
-                Add the first one
-              </button>
+              {onAddSite ? (
+                <button type="button" className="ops-link" onClick={onAddSite}>
+                  Add the first one
+                </button>
+              ) : null}
             </EmptyState>
           ) : (
             <>

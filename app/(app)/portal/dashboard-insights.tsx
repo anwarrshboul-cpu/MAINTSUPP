@@ -1480,7 +1480,7 @@ export function CostByCategory({
     return (
       <InsightPanel
         loading={loading}
-        title="Cost by job type"
+        title="Cost by label"
         hint="Which kinds of fault cost the most"
         empty={{
           message: "No costed jobs yet",
@@ -1495,7 +1495,10 @@ export function CostByCategory({
   const maximum = Math.max(...rows.map((row) => row.total), 1);
 
   return (
-    <InsightPanel title="Cost by job type" hint="Total spend, with the average per job">
+    /* "by label", not "by job type": this groups by the Label column
+       (`category`). Job type is its own dimension (reactive, planned,
+       project), so the old title named a split this panel does not make. */
+    <InsightPanel title="Cost by label" hint="Total spend, with the average per job">
       <div className="insight-ageing">
         {rows.map((row) => (
           <div

@@ -42,6 +42,8 @@ export interface InvoiceRecord {
   quoteId: string | null;
   poNumber: string | null;
   siteId: string | null;
+  /** The site's name, resolved by the route; absent on older payloads. */
+  siteName?: string | null;
   requestId: string | null;
   invoiceDate: string | null;
   receivedDate: string | null;
@@ -121,6 +123,13 @@ export interface PaymentRecord {
   note: string | null;
   recordedBy: string | null;
   recordedAt: string | null;
+}
+
+/** A payment as allocated to one invoice — see `InvoiceDetail.payments`. */
+export interface InvoicePaymentAllocation {
+  allocationId: string;
+  allocatedPence: number;
+  payment: PaymentRecord;
 }
 
 export interface CreditNoteRecord {
@@ -209,7 +218,11 @@ export interface InvoiceDetail {
   invoice: InvoiceRecord;
   allocations: AllocationRecord[];
   flags: FlagRecord[];
-  payments: PaymentRecord[];
+  /* One row per ALLOCATION, as `listPaymentsForInvoice` returns it: the payment
+     is nested, and `allocatedPence` is what reached THIS invoice. Typed as a
+     flat PaymentRecord, the panel read `payment.method` off the wrapper and
+     every paid invoice crashed on open. */
+  payments: InvoicePaymentAllocation[];
   creditNotes: CreditNoteRecord[];
   history: StatusChange[];
   disputes: DisputeRecord[];
@@ -232,6 +245,8 @@ export interface QuoteRecord {
   requestId: string;
   contractorId: string | null;
   siteId: string | null;
+  /** The site's name, resolved by the route; absent on older payloads. */
+  siteName?: string | null;
   description: string | null;
   netPence: number | null;
   vatPence: number | null;

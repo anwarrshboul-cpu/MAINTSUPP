@@ -32,7 +32,7 @@
  * existing user and nobody ever finds out.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Icon } from "../../components";
 import { VersionHistory } from "./views/version-history";
@@ -102,6 +102,8 @@ export function DashboardWidgets({
      in flight; leaving while one is asks first. */
   useUnsavedChanges(saving);
 
+  /* The workspace default as loaded, so Reset can fall back to it — see reset. */
+  const workspaceDefaultRef = useRef<LayoutItem[]>([]);
   useEffect(() => {
     let active = true;
     fetch(`/api/dashboard-layout?surface=${surface}`, {
@@ -115,6 +117,7 @@ export function DashboardWidgets({
         const saved = payload?.items?.length
           ? payload.items
           : payload?.workspaceDefault ?? [];
+        workspaceDefaultRef.current = payload?.workspaceDefault ?? [];
         setLayout(mergeLayout(widgets, saved));
       })
       .catch(() => {
@@ -146,6 +149,7 @@ export function DashboardWidgets({
           const body = (await response.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? "That layout could not be saved.");
         }
+        if (scope === "workspace") workspaceDefaultRef.current = next;
         onNotify?.(
           scope === "workspace"
             ? "Saved as the workspace default."
@@ -215,6 +219,7 @@ export function DashboardWidgets({
       () => null,
     );
     const body = response ? ((await response.json().catch(() => ({}))) as { error?: string }) : {};
+    if (response?.ok) workspaceDefaultRef.current = [];
     onNotify?.(
       response?.ok
         ? "The workspace default was removed; the built-in order applies to anyone without their own layout."
@@ -226,7 +231,10 @@ export function DashboardWidgets({
     await fetch(`/api/dashboard-layout?surface=${surface}`, { method: "DELETE" }).catch(
       () => undefined,
     );
-    setLayout(mergeLayout(widgets, []));
+    /* Deleting MY layout leaves the workspace default in force, which is what a
+       reload shows. Merging over [] drew the built-in order instead, so the
+       screen and the next reload disagreed. */
+    setLayout(mergeLayout(widgets, workspaceDefaultRef.current));
     onNotify?.("Dashboard reset to the default arrangement.");
   };
 

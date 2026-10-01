@@ -555,7 +555,8 @@ export function ContractorSummary({
           </div>
           <div className="panel">
             <span className="drawer-label">Completion rate</span>
-            <strong>{completion}%</strong>
+            {/* No assigned job is no rate, not a rate of 0%. */}
+            <strong>{performance.assignedJobs > 0 ? `${completion}%` : "—"}</strong>
           </div>
           <div className="panel">
             <span className="drawer-label">Open urgent</span>

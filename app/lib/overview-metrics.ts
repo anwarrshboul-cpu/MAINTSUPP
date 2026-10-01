@@ -639,7 +639,7 @@ export async function loadOverviewMetrics(
       .where(
         and(
           openScope,
-          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1", "medium", "normal", "standard"]} or ${overdueSql})`,
+          sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "high", "p1", "medium", "normal", "standard"]} or ${overdueSql})`,
         ),
       )
       .groupBy(maintenanceRequests.siteId),
@@ -738,7 +738,7 @@ export async function loadOverviewMetrics(
   const dueDay = dayOnly(maintenanceRequests.dueAt);
   const dueSoonSql = sql`(${maintenanceRequests.dueAt} is not null and ${dueText} <> '' and ((length(${dueText}) <= 10 and ${dueDay} >= ${today} and ${dueDay} < ${dueSoonEnd}) or (length(${dueText}) > 10 and ${dueText} >= ${instant} and ${dueText} < ${instantEnd})))`;
   /* High is `urgent` by `normalisePriority`'s spellings; Tier 1 is the top tier. */
-  const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "p1"]} or ${maintenanceRequests.tier} = 1)`;
+  const riskPoolSql = sql`(lower(trim(coalesce(${maintenanceRequests.priority}, ''))) in ${["urgent", "critical", "high", "p1"]} or ${maintenanceRequests.tier} = 1)`;
   const requestedDay = dayOnly(maintenanceRequests.requestedAt);
   const completedDay = dayOnly(maintenanceRequests.completedAt);
   const [tierRows, engineerRows, priorityOverdueRows, agingRows, breachRows, cohortRows, closureRows, slaTargets] = await Promise.all([
@@ -1124,6 +1124,8 @@ export function formatDay(day: string): string {
  * three blocks' endpoints so their header pills read alike.
  */
 export function formatDayRange(from: string, to: string): string {
+  /* One day is one date: "This month" on the 1st read "1 Oct – 1 Oct 2026". */
+  if (from === to) return formatDay(to);
   if (from.slice(0, 4) !== to.slice(0, 4)) return `${formatDay(from)} – ${formatDay(to)}`;
   const short = new Date(`${from}T12:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",

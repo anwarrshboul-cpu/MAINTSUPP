@@ -385,7 +385,7 @@ function assetPayload(data: Record<string, unknown>) {
     locationInSite: optionalText(data.locationInSite, 160),
     installedAt: isoDate(data.installedAt),
     warrantyExpiry: isoDate(data.warrantyExpiry),
-    purchasePricePence: costPence(data.purchasePrice ?? data.purchasePricePence),
+    purchasePricePence: priceInPence(data.purchasePrice, data.purchasePricePence),
     lastServicedAt: isoDate(data.lastServicedAt),
     serviceIntervalMonths: intervalMonths(data.serviceIntervalMonths),
 
@@ -402,10 +402,25 @@ function assetPayload(data: Record<string, unknown>) {
     replacementSpecification: optionalText(data.replacementSpecification, 1000),
     replacementSupplier: optionalText(data.replacementSupplier, 160),
     replacementNotes: optionalText(data.replacementNotes, 1000),
-    replacementCostPence: costPence(data.replacementCost ?? data.replacementCostPence),
+    replacementCostPence: priceInPence(data.replacementCost, data.replacementCostPence),
 
     notes: optionalText(data.notes, 2000),
   };
+}
+
+/**
+ * A price sent either way: POUNDS under the form's key (`purchasePrice`), or
+ * PENCE under the column's own name (`purchasePricePence`).
+ *
+ * Both used to go through `costPence`, which multiplies by 100, so an
+ * integration sending `purchasePricePence: 125000` (£1,250) stored £125,000.
+ * The form always sends pounds and was unaffected.
+ */
+function priceInPence(pounds: unknown, pence: unknown): number | null {
+  if (pounds !== undefined) return costPence(pounds);
+  if (pence === null || pence === undefined || pence === "") return null;
+  const parsed = Number(pence);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 }
 
 /**

@@ -1654,6 +1654,17 @@ button.ops-meter__fill:focus-visible {
     gap: 18px;
     align-items: start;
   }
+
+  /* A card in the grid is a third of the page wide, so the 768px row layout
+     (meters in a 42% second column) squeezed a site's name to a few letters a
+     line: "Kings / way / Centr / al", the status pill cut to "ac". In the grid
+     the parts stack again, as on a phone. */
+  .ops-grid-3 > .ops-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
 }
 
 @media (min-width: 1280px) {

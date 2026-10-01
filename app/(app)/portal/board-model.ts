@@ -170,8 +170,15 @@ const FALLBACK_STAGE_BY_GROUP_KEY: Record<string, RequestStage> = {
   "completed-2026-08": "Completed",
 };
 
-export const fallbackGroups: MaintenanceGroup[] = maintenanceGroupSeeds.map(
-  (group, position) => ({
+/*
+ * Only the four stage lanes. Drawn for the seconds before /api/board answers,
+ * the full seed list put the primary estate's 28 store lanes ("Wood Green
+ * completed", ...) on EVERY workspace's board while it loaded - another
+ * client's store list, which createWorkspace no longer seeds either.
+ */
+export const fallbackGroups: MaintenanceGroup[] = maintenanceGroupSeeds
+  .filter((group) => group.key in FALLBACK_STAGE_BY_GROUP_KEY)
+  .map((group, position) => ({
     id: `group-${group.key}`,
     name: group.name,
     color: group.colour,

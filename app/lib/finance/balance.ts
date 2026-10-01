@@ -30,7 +30,7 @@
  * that cannot appear locally because Miniflare declares the same column TEXT.
  */
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { getDb } from "../../../db";
 import { creditNotes, invoices, paymentAllocations } from "../../../db/schema";
 import { dateText } from "../dashboard-aggregates";
@@ -90,6 +90,26 @@ export interface BalanceOptions {
  * caller would get for an id that does not exist, and is deliberately
  * indistinguishable from it.
  */
+/**
+ * "Still owes money", as a WHERE clause: the same arithmetic as
+ * `invoiceBalance` (gross, falling back to net, less allocations, less credit
+ * notes), kept in this file so there is still one definition of outstanding.
+ *
+ * For a filter that must narrow in SQL so its paging and totals stay exact.
+ * The Overdue tab used `overdueInvoiceSql` alone, which is only "past its due
+ * date", so every settled invoice past its date was listed as overdue with an
+ * Outstanding of £0.00 (QA, 2026-10-01).
+ */
+export function outstandingInvoiceSql(): SQL {
+  return sql`(coalesce(${invoices.grossPence}, ${invoices.netPence}, 0)
+    - coalesce((select sum(${paymentAllocations.amountPence}) from ${paymentAllocations}
+        where ${paymentAllocations.organisationId} = ${invoices.organisationId}
+          and ${paymentAllocations.invoiceId} = ${invoices.id}), 0)
+    - coalesce((select sum(${creditNotes.amountPence}) from ${creditNotes}
+        where ${creditNotes.organisationId} = ${invoices.organisationId}
+          and ${creditNotes.invoiceId} = ${invoices.id}), 0)) > 0`;
+}
+
 export async function invoiceBalances(
   db: Database,
   organisationId: string,

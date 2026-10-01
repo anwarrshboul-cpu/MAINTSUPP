@@ -81,7 +81,7 @@ function day(value: string | null | undefined): string {
   return text.slice(0, 10);
 }
 
-const URGENT = new Set(["urgent", "critical", "p1"]);
+const URGENT = new Set(["urgent", "critical", "high", "p1"]);
 const MEDIUM = new Set(["medium", "normal", "standard"]);
 const LOW = new Set(["low"]);
 
@@ -514,7 +514,12 @@ export function readDrillFilter(
   if (meterLabel) chips.push({ key: "meter", label: "Status", value: meterLabel.replace(/_/g, " ") });
   else if (statuses.size) chips.push({ key: "status", label: "Status", value: `${statuses.size} selected` });
   if (sites.size) {
-    const named = [...sites].map((id) => (id === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : id));
+    /* A site's NAME, read off any job at it: printed raw, the chip said "Site
+       site-oxford-street-pw93ot" under a figure the reader had just seen called
+       Oxford Street. The id stands only when no job in hand is at that site. */
+    const siteName = (id: string) =>
+      context.population?.find((request) => request.siteId === id && request.location)?.location ?? id;
+    const named = [...sites].map((id) => (id === NO_SITE_IN_SCOPE ? NO_SITE_IN_SCOPE_LABEL : siteName(id)));
     chips.push({ key: "site", label: "Site", value: named.join(", ") });
   }
   if (priorities.size) {

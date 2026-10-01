@@ -304,8 +304,12 @@ export function OiDash({
   const fallback = calendar.range;
   const presets = calendar.presets;
   /* A real calendar day, not merely the right shape — "2026-13-01" falls back. */
-  const from = oiIsCalendarDay(fromParam) ? fromParam : fallback.from;
-  const to = oiIsCalendarDay(toParam) ? toParam : fallback.to;
+  const rawFrom = oiIsCalendarDay(fromParam) ? fromParam : fallback.from;
+  const rawTo = oiIsCalendarDay(toParam) ? toParam : fallback.to;
+  /* A range typed backwards is read forwards, HERE as the server reads it:
+     swapped only on the server, the pill kept "1 Sep – 30 Sep" in the page's
+     own format while every caption beneath it used the server's. */
+  const [from, to] = rawFrom <= rawTo ? [rawFrom, rawTo] : [rawTo, rawFrom];
 
   const search = useMemo(() => {
     const next = new URLSearchParams();

@@ -118,7 +118,7 @@ export function closedJobSqlFor(closedKeys: readonly string[]): SQL {
 }
 
 /** Urgent, by the same spellings `normalisePriority` recognises. */
-const urgentSql = sql`lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "p1"]}`;
+const urgentSql = sql`lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "high", "p1"]}`;
 
 /**
  * A job with no site — the bucket that used to render as a blank row.

@@ -931,3 +931,32 @@ test("a weak password is refused when accepting an invitation", async (t) => {
   const still = await fetch(`${BASE_URL}/api/auth/invitations/${inviteToken}`);
   assert.equal(still.status, 200);
 });
+
+/*
+ * Before hydration a submit is NATIVE, and a form with no method is a GET: QA on
+ * 2026-10-01 typed into /login before the bundle had run and the browser went to
+ * `/login?email=…&password=…`. The invitation and reset forms carried the same
+ * fault with the one-time token already in their URL. Each credential form now
+ * POSTs natively and keeps its submit disabled until hydrated.
+ */
+test("no credential form can put a password in the URL before it hydrates", async () => {
+  const hook = await source("app/lib/use-hydrated.ts");
+  assert.match(hook, /useSyncExternalStore\(/);
+  assert.match(hook, /\(\) => false,\s*\);/, "false in the server HTML");
+  for (const file of [
+    "app/(app)/login/sign-in-form.tsx",
+    "app/(public)/reset/[token]/set-password-form.tsx",
+    "app/(public)/invite/[token]/accept-invite-form.tsx",
+  ]) {
+    const form = await source(file);
+    assert.match(form, /const hydrated = useHydrated\(\);/, file);
+    const tags = form.match(/<form className=[^>]*>/g) ?? [];
+    assert.ok(tags.length > 0, file);
+    for (const tag of tags) {
+      assert.match(tag, /method="post"/, `${file}: ${tag}`);
+    }
+    for (const button of form.match(/<button[^>]*type="submit"[^>]*>/g) ?? []) {
+      assert.match(button, /!hydrated/, `${file}: ${button}`);
+    }
+  }
+});

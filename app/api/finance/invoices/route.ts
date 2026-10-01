@@ -53,6 +53,7 @@ import {
   listInvoices,
   normaliseStatuses,
   recordStatusChange,
+  siteNamesFor,
 } from "../../../lib/finance/repository";
 import { readFinanceSettings } from "../../../lib/finance/settings";
 
@@ -83,15 +84,17 @@ export async function GET(request: Request) {
     });
 
     const ids = page.rows.map((row) => row.id);
-    const [balances, flags, allocations] = await Promise.all([
+    const [balances, flags, allocations, siteNames] = await Promise.all([
       invoiceBalances(db, orgId, ids, { now }),
       listFlagsForInvoices(db, orgId, ids),
       listAllocationsForInvoices(db, orgId, ids),
+      siteNamesFor(db, orgId, page.rows.map((row) => row.siteId)),
     ]);
 
     return Response.json({
       invoices: page.rows.map((row) => ({
         ...row,
+        siteName: row.siteId ? siteNames.get(row.siteId) ?? null : null,
         balance: balances.get(row.id) ?? null,
         flags: flags.get(row.id) ?? [],
         allocations: allocations.get(row.id) ?? [],

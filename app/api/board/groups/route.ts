@@ -166,7 +166,7 @@ export async function PATCH(request: Request) {
 
     if (Array.isArray(body.order)) {
       for (const entry of body.order) {
-        const id = text(entry?.id, 64);
+        const id = text(entry?.id, 100);
         const position = Number(entry?.position);
         if (!id || !Number.isFinite(position)) continue;
         await db
@@ -179,7 +179,9 @@ export async function PATCH(request: Request) {
       return Response.json({ ok: true });
     }
 
-    const id = text(body.id, 64);
+    /* 100, not 64: `seed-<orgId>-maintenance-<key>` passes 64 for any
+       workspace created in the app — see board/items/route.ts. */
+    const id = text(body.id, 100);
     if (!id) return bad("A group id is required.");
 
     const [existing] = await db
@@ -238,8 +240,8 @@ export async function DELETE(request: Request) {
     if (structureRefusal) return structureRefusal;
     const { db, orgId, actor, identityEmail, siteScope } = guard.scope;
     const url = new URL(request.url);
-    const id = text(url.searchParams.get("id"), 64);
-    const moveTo = text(url.searchParams.get("moveTo"), 64);
+    const id = text(url.searchParams.get("id"), 100);
+    const moveTo = text(url.searchParams.get("moveTo"), 100);
     if (!id) return bad("A group id is required.");
 
     const [existing] = await db

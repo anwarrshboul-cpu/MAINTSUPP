@@ -235,7 +235,9 @@ export function AssetsManager({
       loading={!list.data && !list.error}
       onRetry={list.reload}
       onOpenAsset={openAsset}
-      onAddAsset={() =>
+      /* Only with `sites.edit`: a client was offered "Add asset", filled the form
+         and was refused on save. Absent, the list draws no add control. */
+      onAddAsset={!canEdit ? undefined : () =>
         setMode({
           kind: "form",
           assetId: null,

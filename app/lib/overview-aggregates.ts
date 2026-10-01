@@ -192,6 +192,8 @@ const PRIORITY_SPELLINGS = [
   "urgent",
   "Critical",
   "critical",
+  "High",
+  "high",
   "P1",
   "p1",
   "Medium",

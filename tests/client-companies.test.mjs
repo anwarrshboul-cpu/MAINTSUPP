@@ -1100,3 +1100,20 @@ test("live: display labels grant nothing, and the Team tab cannot switch an acco
   assert.equal(after.active, true);
   assert.equal(after.role, "owner");
 });
+
+/*
+ * The store list leaked through the board as well as the options: with no group
+ * keys the seeder wrote all 38 monday groups, so a workspace created on
+ * 2026-10-01 opened with "Wood Green completed", "Bluewater completed" and 26
+ * more of the primary estate's lanes. It now gets the template lanes and one
+ * undated Completed lane.
+ */
+test("a new workspace's Jobs board has the product's lanes, not a customer's stores", async () => {
+  const source = await read("app/lib/client-companies.ts");
+  assert.doesNotMatch(source, /await seedBoardStructure\(d1, created\.id\);/);
+  assert.match(source, /await seedBoardStructure\(d1, created\.id, "maintenance", \[\s*\.\.\.JOBS_TEMPLATE_GROUP_KEYS,\s*NEW_WORKSPACE_COMPLETED_GROUP_KEY,\s*\]\);/);
+  assert.match(source, /\.bind\("Completed", `seed-\$\{created\.id\}-maintenance-\$\{NEW_WORKSPACE_COMPLETED_GROUP_KEY\}`\)/);
+  const template = await read("app/lib/generic-board-template.ts");
+  const keys = template.slice(template.indexOf("JOBS_TEMPLATE_GROUP_KEYS"));
+  assert.doesNotMatch(keys.slice(0, keys.indexOf("];")), /done-/);
+});

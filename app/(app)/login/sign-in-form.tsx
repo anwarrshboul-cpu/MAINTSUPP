@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { useHydrated } from "../../lib/use-hydrated";
+
 /**
  * The sign-in form — Stage 20.
  *
@@ -26,6 +28,8 @@ export default function SignInForm({ next }: { next: string }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /* Until hydrated, a submit is native — see app/lib/use-hydrated.ts. */
+  const hydrated = useHydrated();
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,7 +66,7 @@ export default function SignInForm({ next }: { next: string }) {
   }
 
   return (
-    <form className="login-form" onSubmit={submit} noValidate>
+    <form className="login-form" method="post" onSubmit={submit} noValidate>
       {/* aria-live on a container that is always rendered, so the message is
           announced when it arrives rather than missed with the element. */}
       <div aria-live="polite" aria-atomic="true">
@@ -104,7 +108,7 @@ export default function SignInForm({ next }: { next: string }) {
         />
       </div>
 
-      <button className="login-form__submit" type="submit" disabled={pending}>
+      <button className="login-form__submit" type="submit" disabled={pending || !hydrated}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
     </form>

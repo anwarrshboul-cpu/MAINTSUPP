@@ -323,3 +323,12 @@ test("the attention figure and the ids it links to are the same set", async (t) 
     "and the ids are distinct, because the figure counts distinct sites",
   );
 });
+
+/* QA 2026-10-01: the site chip printed the raw id, and a one-day range printed
+   its date twice ("1 Oct – 1 Oct 2026"). */
+test("a drilled site is named, and a one-day range is one date", async () => {
+  const drill = await readFile(new URL("../app/(app)/portal/board-drill-filter.ts", import.meta.url), "utf8");
+  assert.match(drill, /request\.siteId === id && request\.location\)\?\.location \?\? id/);
+  const metrics = await readFile(new URL("../app/lib/overview-metrics.ts", import.meta.url), "utf8");
+  assert.match(metrics, /if \(from === to\) return formatDay\(to\);/);
+});

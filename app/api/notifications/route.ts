@@ -1,6 +1,10 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
-import { activityLog } from "../../../db/schema";
+import { activityLog, maintenanceRequests } from "../../../db/schema";
+import { closedJobSql } from "../../lib/dashboard-aggregates";
+import { liveWorkOrderCondition } from "../../lib/dashboard-filters";
+import { memberSiteCondition } from "../../lib/member-site-scope";
+import { exposeRequest } from "../../lib/request-payload";
 import { anonymousRefusal, scopedDb } from "../../lib/tenant-db";
 
 type NotificationState = "read" | "dismissed";
@@ -38,7 +42,7 @@ function exposeStates(
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const { actor, db, orgId } = await scopedDb(request);
+    const { actor, db, orgId, siteScope } = await scopedDb(request);
     const rows = await db
       .select()
       .from(activityLog)
@@ -52,7 +56,35 @@ export async function GET(request: Request) {
       .orderBy(desc(activityLog.createdAt))
       .limit(500);
 
-    return Response.json({ states: exposeStates(rows) });
+    /*
+     * THE BELL'S OWN JOBS, AND THE SIDEBAR'S OPEN COUNT.
+     *
+     * The shell built both from the full job list, which it downloads only on
+     * the screens that draw jobs (`JOB_LIST_SURFACES`). The Overview, the page
+     * everybody lands on, is not one of them, so its bell said "You're all
+     * caught up" over two jobs needing attention, and the Jobs badge was blank.
+     * The same rule as `notificationCandidates` in the shell (open, and in
+     * Attention or Urgent) and the same scope as the job feed (live work
+     * orders on the Jobs board, the member's sites), so the two never differ.
+     */
+    const open = and(
+      liveWorkOrderCondition(orgId),
+      memberSiteCondition(maintenanceRequests.siteId, siteScope),
+      sql`not ${closedJobSql}`,
+    );
+    const candidates = await db
+      .select()
+      .from(maintenanceRequests)
+      .where(and(open, or(eq(maintenanceRequests.stage, "Attention"), eq(maintenanceRequests.priority, "Urgent"))))
+      .orderBy(desc(maintenanceRequests.requestedAt))
+      .limit(100);
+    const [openRow] = await db.select({ total: count() }).from(maintenanceRequests).where(open);
+
+    return Response.json({
+      states: exposeStates(rows),
+      candidates: candidates.map((row) => exposeRequest(row)),
+      openJobs: Number(openRow?.total ?? 0),
+    });
   } catch (error) {
     // A session that has ended is not an outage. See `anonymousRefusal`.
     const refusal = anonymousRefusal(error);
