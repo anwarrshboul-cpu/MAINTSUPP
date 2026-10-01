@@ -40,3 +40,20 @@ test("the Overview's bell and Jobs badge do not depend on the job list", async (
   assert.match(app, /jobListLoaded \? notificationCandidates\(requests\) : serverNotificationCandidates/);
   assert.match(app, /: \(serverOpenJobs \?\? 0\);/);
 });
+
+/* QA 2026-10-01, second pass: Sites, Assets, Settings and Team. Verified in the
+   browser: client sees none of these, manager sees Add site/asset only, owner all. */
+test("register, settings and team controls follow their capability", async () => {
+  const sites = await read("app/(app)/portal/sites/sites-manager.tsx");
+  assert.match(sites, /const canEditSites = useCapability\("sites\.edit"\) !== false;/);
+  assert.match(sites, /const canImportSites = useCapability\("data\.import"\) !== false;/);
+  assert.match(sites, /onAddSite=\{canEditSites \?/);
+  const list = await read("app/(app)/portal/ops/sites-list.tsx");
+  assert.match(list, /onAddSite\?: \(\) => void;/);
+  const assets = await read("app/(app)/portal/assets/assets-manager.tsx");
+  assert.match(assets, /onAddAsset=\{!canEdit \? undefined :/);
+  const app = await read("app/(app)/portal/portal-app.tsx");
+  assert.match(app, /canEditSettings=\{runtimeContext\?\.capabilities\?\.\["settings\.edit"\] !== false\}/);
+  assert.match(app, /canManage=\{runtimeContext\?\.capabilities\?\.\["users\.edit"\] !== false\}/);
+  assert.doesNotMatch(app, /role: "Super Admin", active: true, lastActive: "Now"/, "the fallback row shows the reader's own role");
+});

@@ -84,7 +84,8 @@ export function AssetsList({
   loading: boolean;
   onRetry: () => void;
   onOpenAsset: (assetId: string) => void;
-  onAddAsset: () => void;
+  /** Absent for a role that cannot add one; every add control is then hidden. */
+  onAddAsset?: () => void;
   fixedSiteId?: string | null;
 }) {
   /*
@@ -379,9 +380,11 @@ export function AssetsList({
             <a className="secondary-button" href={exportHref} download>
               <Icon name="download" size={15} /> Export CSV
             </a>
-            <button type="button" className="primary-button" onClick={onAddAsset}>
-              Add asset
-            </button>
+            {onAddAsset ? (
+              <button type="button" className="primary-button" onClick={onAddAsset}>
+                Add asset
+              </button>
+            ) : null}
           </div>
         </header>
       ) : null}
@@ -395,9 +398,11 @@ export function AssetsList({
               <a className="secondary-button" href={exportHref} download>
                 Export CSV
               </a>
-              <button type="button" className="primary-button" onClick={onAddAsset}>
-                Add asset
-              </button>
+              {onAddAsset ? (
+                <button type="button" className="primary-button" onClick={onAddAsset}>
+                  Add asset
+                </button>
+              ) : null}
             </div>
           ) : undefined
         }
@@ -488,9 +493,11 @@ export function AssetsList({
           (data?.assets.length ?? 0) === 0 ? (
             <EmptyState>
               No assets added for this site yet.{" "}
-              <button type="button" className="ops-link" onClick={onAddAsset}>
-                Add the first one
-              </button>
+              {onAddAsset ? (
+                <button type="button" className="ops-link" onClick={onAddAsset}>
+                  Add the first one
+                </button>
+              ) : null}
             </EmptyState>
           ) : (
             <>

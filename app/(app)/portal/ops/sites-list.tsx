@@ -180,7 +180,8 @@ export function SitesList({
   onOpenSite: (id: string) => void;
   onEditSite: (site: SiteListRow) => void;
   onCloseSite: (site: SiteListRow) => void;
-  onAddSite: () => void;
+  /** Absent for a role that cannot add one; every add control is then hidden. */
+  onAddSite?: () => void;
   headerActions?: React.ReactNode;
   /**
    * Whether the configurable register is the view rather than the row list.
@@ -486,9 +487,11 @@ export function SitesList({
         </div>
         <div className="ops-actions">
           {headerActions}
-          <button type="button" className="primary-button" onClick={onAddSite}>
-            Add site
-          </button>
+          {onAddSite ? (
+            <button type="button" className="primary-button" onClick={onAddSite}>
+              Add site
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -692,9 +695,11 @@ export function SitesList({
           {sites.length === 0 ? (
             <EmptyState>
               No sites yet.{" "}
-              <button type="button" className="ops-link" onClick={onAddSite}>
-                Add the first one
-              </button>
+              {onAddSite ? (
+                <button type="button" className="ops-link" onClick={onAddSite}>
+                  Add the first one
+                </button>
+              ) : null}
             </EmptyState>
           ) : (
             <>

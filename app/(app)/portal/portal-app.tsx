@@ -4106,6 +4106,8 @@ export default function PortalApp({
             <TeamView
               userName={displayUserName}
               userEmail={displayUserEmail}
+              userRole={roleLabel(runtimeContext?.actor.role)}
+              canManage={runtimeContext?.capabilities?.["users.edit"] !== false}
               team={currentTeam}
               onManage={(id) => openWorkspaceManager("member", id)}
             />
@@ -4140,6 +4142,7 @@ export default function PortalApp({
             <SettingsView
               navCatalogue={navCatalogue}
               canEditModules={isSuperAdmin}
+              canEditSettings={runtimeContext?.capabilities?.["settings.edit"] !== false}
               settings={currentSettings}
               /*
                * The categories actually in use, counted from the jobs on
@@ -6860,17 +6863,25 @@ function ReportsView({
 function TeamView({
   userName,
   userEmail,
+  userRole,
+  canManage,
   team,
   onManage,
 }: {
   userName: string;
   userEmail: string;
+  /** The signed-in person's own role, for the one-row fallback below. */
+  userRole: string;
+  /** `users.edit`: a client was offered "Add team member" and per-row manage. */
+  canManage: boolean;
   team: WorkspaceMember[];
   onManage: (id?: string | null) => void;
 }) {
+  /* With no team rows yet, the page shows the person reading it - under their
+     OWN role. It said "Super Admin" for everyone, client included. */
   const members = team.length
     ? team
-    : [{ id: "current-user", name: userName, email: userEmail, role: "Super Admin", active: true, lastActive: "Now" }];
+    : [{ id: "current-user", name: userName, email: userEmail, role: userRole, active: true, lastActive: "Now" }];
 
   return (
     <div className="section-stack">
@@ -6886,14 +6897,16 @@ function TeamView({
             portfolio.
           </p>
         </div>
-        <button
-          className="primary-button"
-          type="button"
-          onClick={() => onManage(null)}
-        >
-          <Icon name="plus" size={18} />
-          Add team member
-        </button>
+        {canManage ? (
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => onManage(null)}
+          >
+            <Icon name="plus" size={18} />
+            Add team member
+          </button>
+        ) : null}
       </section>
       <section className="panel team-panel">
         <div className="team-list">
@@ -6906,14 +6919,16 @@ function TeamView({
               </span>
               <span className="role-chip">{member.role}</span>
               <span className="last-active">{member.lastActive}</span>
-              <button
-                className="icon-button"
-                type="button"
-                aria-label={`Manage ${member.name}`}
-                onClick={() => onManage(member.id)}
-              >
-                <Icon name="more" size={18} />
-              </button>
+              {canManage ? (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={`Manage ${member.name}`}
+                  onClick={() => onManage(member.id)}
+                >
+                  <Icon name="more" size={18} />
+                </button>
+              ) : null}
             </div>
           ))}
         </div>
@@ -6928,6 +6943,7 @@ function SettingsView({
   busy,
   navCatalogue,
   canEditModules,
+  canEditSettings,
   onSave,
   onNotify,
 }: {
@@ -6951,6 +6967,8 @@ function SettingsView({
    * load resource" for a request that should never have been made.
    */
   canEditModules: boolean;
+  /** `settings.edit`; without it the workspace save is not offered. */
+  canEditSettings: boolean;
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
@@ -7010,10 +7028,13 @@ function SettingsView({
             this workspace emails.
           </p>
         </div>
-        <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
-          <Icon name="check" size={17} />
-          {busy ? "Saving…" : "Save settings"}
-        </button>
+        {/* Only for `settings.edit`; a client's Save was refused with a 403. */}
+        {canEditSettings ? (
+          <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
+            <Icon name="check" size={17} />
+            {busy ? "Saving…" : "Save settings"}
+          </button>
+        ) : null}
       </section>
 
       {/* Appearance is a per-person device setting, not part of the workspace
