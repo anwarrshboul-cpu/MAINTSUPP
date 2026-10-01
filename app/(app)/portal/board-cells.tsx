@@ -37,6 +37,7 @@ import {
   serializeBoardDateMetadata,
 } from "./board-format";
 import {
+  BoardEditContext,
   MobileBoardContext,
   MobileCellSheet,
   useRevealBoardPopover,
@@ -60,6 +61,7 @@ export function ItemNameEditor({
   onSave: (value: string) => void;
 }) {
   const mobile = useContext(MobileBoardContext);
+  const canEdit = useContext(BoardEditContext);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -112,6 +114,7 @@ export function ItemNameEditor({
         type="button"
         title="Click to rename item"
         onClick={() => {
+          if (!canEdit) return;
           setDraft(value);
           setEditing(true);
         }}
@@ -183,6 +186,7 @@ export function OptionCell({
   onDeleteOption?: (optionId: string) => Promise<void>;
 }) {
   const mobile = useContext(MobileBoardContext);
+  const canEdit = useContext(BoardEditContext);
   const [open, setOpen] = useState(false);
   const [editingLabels, setEditingLabels] = useState(false);
   const [search, setSearch] = useState("");
@@ -265,7 +269,7 @@ export function OptionCell({
           if (open) {
             setOpen(false);
             setEditingLabels(false);
-          } else {
+          } else if (canEdit) {
             setOpen(true);
             setSearch("");
           }
@@ -632,6 +636,7 @@ export function InlineTextCell({
   multiline?: boolean;
 }) {
   const mobile = useContext(MobileBoardContext);
+  const canEdit = useContext(BoardEditContext);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -678,6 +683,7 @@ export function InlineTextCell({
         className={`sheet-inline-value${value ? "" : " is-empty"}`}
         type="button"
         onClick={() => {
+          if (!canEdit) return;
           setDraft(value);
           setEditing(true);
         }}
@@ -778,6 +784,7 @@ export function DateCell({
   onSave: (value: string | null, metadataValue: string) => void;
 }) {
   const mobile = useContext(MobileBoardContext);
+  const canEdit = useContext(BoardEditContext);
   const currentDate = dateInputValue(value);
   const currentMetadata = parseBoardDateMetadata(
     metadataValue ?? value,
@@ -1029,7 +1036,7 @@ export function DateCell({
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`${title}: ${currentDate ? formatFullBoardDate(currentDate) : "no date"}`}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => canEdit && setOpen((current) => !current)}
       >
         <span>{currentDate ? formatDate(currentDate) : "—"}</span>
         {/* aria-hidden: the button already announces its own value, and a
@@ -1067,6 +1074,7 @@ export function TimelineCell({
   onSave: (start: string | null, end: string | null) => void;
 }) {
   const mobile = useContext(MobileBoardContext);
+  const canEdit = useContext(BoardEditContext);
   const [open, setOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(dateInputValue(start));
   const [draftEnd, setDraftEnd] = useState(dateInputValue(end));
@@ -1157,6 +1165,7 @@ export function TimelineCell({
         start={start}
         end={end}
         onOpenEditor={() => {
+          if (!canEdit) return;
           const nextStart = dateInputValue(start);
           const nextEnd = dateInputValue(end);
           setDraftStart(nextStart);

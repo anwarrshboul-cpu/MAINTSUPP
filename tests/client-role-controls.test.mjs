@@ -57,3 +57,19 @@ test("register, settings and team controls follow their capability", async () =>
   assert.match(app, /canManage=\{runtimeContext\?\.capabilities\?\.\["users\.edit"\] !== false\}/);
   assert.doesNotMatch(app, /role: "Super Admin", active: true, lastActive: "Now"/, "the fallback row shows the reader's own role");
 });
+
+/* QA 2026-10-01, Jobs board: a client could open every cell editor, New item and
+   the bulk bar, and each write was refused afterwards. live-board reads
+   `board.edit` once and hands it to the cells through BoardEditContext. */
+test("the Jobs board is read-only for a role without board.edit", async () => {
+  const board = await read("app/(app)/portal/live-board.tsx");
+  assert.match(board, /const canEditBoard = useCapability\("board\.edit"\) !== false;/);
+  assert.match(board, /<BoardEditContext\.Provider value=\{canEditBoard\}>/);
+  assert.match(board, /\{canEditBoard && selectedIds\.size > 0 && \(/);
+  assert.match(board, /data-board-popover hidden=\{!canEditBoard\}/);
+  const cells = await read("app/(app)/portal/board-cells.tsx");
+  assert.equal(cells.match(/const canEdit = useContext\(BoardEditContext\);/g)?.length, 5);
+  assert.equal(cells.match(/if \(!canEdit\) return;/g)?.length, 3);
+  assert.match(cells, /\} else if \(canEdit\) \{\s*setOpen\(true\);/);
+  assert.match(cells, /onClick=\{\(\) => canEdit && setOpen\(\(current\) => !current\)\}/);
+});

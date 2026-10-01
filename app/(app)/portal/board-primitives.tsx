@@ -17,6 +17,8 @@ import { createPortal } from "react-dom";
 import { Icon } from "../../components";
 
 export const MobileBoardContext = createContext(false);
+/** `board.edit`, provided once by live-board: a client could open every cell editor, then was refused on save. */
+export const BoardEditContext = createContext(true);
 export function MobileCellSheet({
   title,
   subtitle,
