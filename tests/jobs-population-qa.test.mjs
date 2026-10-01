@@ -19,3 +19,11 @@ test("the loading board shows the four stage lanes, not a customer's store lanes
   const model = await read("app/(app)/portal/board-model.ts");
   assert.match(model, /\.filter\(\(group\) => group\.key in FALLBACK_STAGE_BY_GROUP_KEY\)/);
 });
+
+test("the CSV Group column exports the group's name, not the stage key", async () => {
+  const csv = await read("app/lib/board-csv.ts");
+  assert.match(csv, /case "move":[\s\S]{0,400}return input\.groupNames\?\.\[request\.id\] \?\? request\.stage;/);
+  const route = await read("app/api/board/csv/route.ts");
+  assert.match(route, /innerJoin\(maintenanceGroups, eq\(maintenanceGroups\.id, maintenanceGroupItems\.groupId\)\)/);
+  assert.match(route, /groupNames,\s*boardId: board\.key,/);
+});

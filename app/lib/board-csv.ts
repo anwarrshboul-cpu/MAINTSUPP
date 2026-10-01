@@ -73,6 +73,8 @@ export type BoardCsvInput = {
    * caller does not know, which prints 0.
    */
   subitemCounts?: Record<string, number>;
+  /** requestId → the name of the group it is filed in on this board. */
+  groupNames?: Record<string, string>;
   /**
    * jobTypeId → the name to print under "Job type".
    *
@@ -185,7 +187,11 @@ function systemCsvValue(
     case "formView":
       return request.formUrl ?? "";
     case "move":
-      return request.stage;
+      /* The GROUP the row sits in, as the board shows it. `stage` is only the
+         lifecycle key, so On Hold and Access Requests rows exported as
+         "Attention" or "Booked" (QA, 2026-10-01). Stage stands when the caller
+         did not load placements. */
+      return input.groupNames?.[request.id] ?? request.stage;
     case "jobType":
       /* The type's NAME, never its id — a spreadsheet reader has no use for
          `jt_…`, and the name is what every screen shows. */

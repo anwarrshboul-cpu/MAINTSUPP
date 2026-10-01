@@ -38,6 +38,7 @@ import {
   maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
+  maintenanceGroups,
   maintenanceRequests,
 } from "../../../../db/schema";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
@@ -302,7 +303,22 @@ export async function POST(request: Request) {
       subitemCounts[row.parentId] = (subitemCounts[row.parentId] ?? 0) + 1;
     }
 
+    /* Each row's group NAME for the Group column: one read for the board. */
+    const placementRows = await db
+      .select({ requestId: maintenanceGroupItems.requestId, name: maintenanceGroups.name })
+      .from(maintenanceGroupItems)
+      .innerJoin(maintenanceGroups, eq(maintenanceGroups.id, maintenanceGroupItems.groupId))
+      .where(
+        and(
+          eq(maintenanceGroupItems.organisationId, orgId),
+          eq(maintenanceGroupItems.boardId, board.key),
+        ),
+      );
+    const groupNames: Record<string, string> = {};
+    for (const row of placementRows) groupNames[row.requestId] = row.name;
+
     const { headers, rows } = boardCsvTable({
+      groupNames,
       boardId: board.key,
       columns,
       requests,
