@@ -221,5 +221,41 @@ export const assetWidths: Record<string, AssetEntry> = {
     ],
     "width": 1586,
     "height": 992
+  },
+  "/assets/pages/case-brief-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/case-results-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/trade-cctv-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 1024
+  },
+  "/assets/pages/trade-refrigeration-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 1024
   }
 };

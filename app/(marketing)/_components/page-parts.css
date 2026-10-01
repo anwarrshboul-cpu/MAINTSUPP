@@ -1,0 +1,95 @@
+/*
+ * THE MENU'S OWN PAGES — /services, /how-it-works, /pricing, /case-study and
+ * /contact — built from `page-parts.tsx`, which links this file.
+ *
+ * Its own stylesheet rather than a block in `marketing.css`, because every
+ * marketing page loads that one and `tests/stage-thirteen-css-split.test.mjs`
+ * holds it under 80KB built; these rules were what took it to 83.6KB. Only the
+ * five pages that draw these classes download them.
+ *
+ * Tokens (`--teal-text`, `--r-lg`, `--fs-h3` …) come from `marketing.css`,
+ * which is always on the page first. Phone first; the grid opens at the 768
+ * and 1024 widths the rest of the site uses.
+ */
+.pagehero{background:linear-gradient(180deg,var(--cloud) 0%,#fff 100%);padding-block:clamp(28px,4vw,56px) clamp(40px,5vw,72px)}
+.pagehero__grid{display:grid;gap:clamp(24px,4vw,56px);align-items:center}
+.pagehero__text{min-width:0}
+.pagehero__title{font-size:clamp(2rem,1.25rem + 2.3vw,3.1rem);max-width:24ch;margin:0 0 1rem;text-wrap:balance}
+.pagehero__actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:1.6rem}
+.pagehero__media,.featurerow__media,.tradecard__photo{position:relative;overflow:hidden;border-radius:var(--r-lg);background:var(--ink)}
+.pagehero__media{aspect-ratio:16/10;box-shadow:0 18px 40px rgba(6,19,28,.16)}
+.pagehero__media .ph,.featurerow__media .ph{position:absolute;inset:0}
+.pagehero__media img,.featurerow__media img,.tradecard__photo img{width:100%;height:100%;object-fit:cover;display:block}
+.pagehero__media picture,.featurerow__media picture,.tradecard__photo picture{position:absolute;inset:0}
+
+.featurerows{display:grid;gap:clamp(28px,4vw,48px);margin-top:clamp(24px,3vw,40px)}
+.featurerow{display:grid;gap:clamp(18px,3vw,40px);align-items:center;background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:clamp(16px,2.4vw,28px)}
+.featurerow__media{aspect-ratio:16/10}
+.featurerow__title{font-size:var(--fs-h3);margin:0 0 .6rem}
+.featurerow__text p{color:#3B4C55;margin:0 0 1rem}
+.featurerow__note{font-size:.9rem;color:var(--slate)}
+
+.ticklist{list-style:none;padding:0;margin:0;display:grid;gap:.55rem}
+.ticklist li{position:relative;padding-left:1.7rem;color:var(--charcoal)}
+.ticklist li::before{content:"";position:absolute;left:0;top:.3em;width:1.05rem;height:1.05rem;border-radius:50%;background:var(--teal-text) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center/70% no-repeat}
+.ticklist--compact{gap:.35rem;font-size:.92rem}
+
+.tradecards{list-style:none;padding:0;margin:clamp(24px,3vw,40px) 0 0;display:grid;gap:18px}
+.tradecard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;display:flex;flex-direction:column}
+.tradecard__photo{aspect-ratio:3/2;border-radius:0}
+.tradecard__photo.ph{position:relative}
+.tradecard__body{padding:18px 18px 20px;display:grid;gap:.8rem}
+.tradecard__title{font-size:1.1rem;margin:0}
+.tradecard__note{font-size:.88rem;color:var(--slate);margin:0;padding-top:.7rem;border-top:1px solid var(--border)}
+
+.factgrid{list-style:none;padding:0;margin:clamp(24px,3vw,40px) 0 0;display:grid;gap:18px}
+.factcard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:22px;display:grid;gap:.5rem;align-content:start}
+.factcard p{margin:0;color:#3B4C55}
+.factcard__title{font-size:1.1rem;margin:0}
+.factcard__n{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:var(--teal-text);color:#fff;font-weight:700}
+
+.stagetable{margin-top:clamp(24px,3vw,40px);border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden;background:#fff}
+.stagetable table{width:100%;border-collapse:collapse}
+.stagetable thead{display:none}
+.stagetable tr{display:grid;gap:.5rem;padding:18px;border-top:1px solid var(--border)}
+.stagetable tbody tr:first-child{border-top:0}
+.stagetable th,.stagetable td{text-align:left;vertical-align:top;color:var(--charcoal)}
+.stagetable tbody th{display:flex;align-items:center;gap:10px;font-size:1.05rem;color:var(--navy)}
+.stagetable td[data-label]::before{content:attr(data-label);display:block;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#06757B;margin-bottom:2px}
+.stagetable__n{display:grid;place-items:center;width:30px;height:30px;flex:none;border-radius:50%;background:var(--teal-text);color:#fff;font-size:.9rem;font-weight:700}
+
+.pagefaq{margin-top:clamp(20px,3vw,32px);display:grid;gap:12px;max-width:var(--wrap-narrow)}
+.pagefaq details{background:#fff;border:1px solid var(--border);border-radius:var(--r-md);padding:4px 18px}
+.pagefaq summary{cursor:pointer;font-weight:600;color:var(--navy);min-height:44px;display:flex;align-items:center;padding:10px 0}
+.pagefaq p{margin:0 0 14px;color:#3B4C55}
+
+.contactcards{list-style:none;padding:0;margin:clamp(24px,3vw,40px) 0 0;display:grid;gap:18px}
+.contactcard{background:#fff;border:1px solid var(--border);border-radius:var(--r-lg);padding:22px;display:grid;gap:.6rem;align-content:start}
+.contactcard p{margin:0;color:#3B4C55}
+.contactcard__title{font-size:1.1rem;margin:0}
+.contactcard__links{display:flex;flex-wrap:wrap;gap:4px 18px}
+.contactcard__link{display:inline-flex;align-items:center;min-height:44px;font-weight:600;color:var(--teal-text);text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+
+.pagecta__inner{display:grid;gap:24px;align-items:center}
+.pagecta__actions{display:flex;flex-wrap:wrap;gap:12px}
+
+@media (min-width:768px){
+  .tradecards,.factgrid,.contactcards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .featurerow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .featurerow:nth-child(even) .featurerow__media{order:2}
+  .stagetable thead{display:table-header-group;background:var(--cloud)}
+  .stagetable tr{display:table-row;padding:0}
+  .stagetable th,.stagetable td{display:table-cell;padding:16px 18px;border-top:1px solid var(--border)}
+  .stagetable thead th{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--slate);border-top:0}
+  .stagetable td[data-label]::before{content:none}
+  .stagetable tbody th{display:table-cell;white-space:nowrap}
+  .stagetable__n{display:inline-grid;margin-right:10px;vertical-align:middle}
+}
+@media (min-width:1024px){
+  .pagehero__grid{grid-template-columns:minmax(0,1.05fr) minmax(0,1fr)}
+  .tradecards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .factgrid{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .factgrid--three{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .contactcards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .pagecta__inner{grid-template-columns:minmax(0,1.4fr) auto}
+}

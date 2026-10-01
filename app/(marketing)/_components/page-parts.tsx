@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Breadcrumbs } from "./breadcrumbs";
 import type { BreadcrumbItem } from "./structured-data";
 import { BOOKING_IS_EXTERNAL, BOOKING_URL } from "../_sections/content";
+import pagePartsCss from "./page-parts.css?url";
 
 /**
  * THE PIECES EVERY STANDALONE MARKETING PAGE IS BUILT FROM.
@@ -40,6 +41,9 @@ export function PageHero({
 }) {
   return (
     <section className="section pagehero">
+      {/* Every one of these pages opens with this banner, so the pages' own
+          stylesheet is linked here once — see the head of page-parts.css. */}
+      <link rel="stylesheet" href={pagePartsCss} />
       <div className="wrap pagehero__grid">
         <div className="pagehero__text">
           <Breadcrumbs items={crumbs} />
