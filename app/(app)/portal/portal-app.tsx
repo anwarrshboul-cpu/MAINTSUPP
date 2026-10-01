@@ -3526,22 +3526,29 @@ export default function PortalApp({
                 they come before the bell rather than after it; their order among
                 themselves is monday's still.
               */}
-              <Link
-                className="icon-button topbar-icon"
-                href="/dashboard/account/invite"
-                aria-label="Invite members"
-                title="Invite members"
-              >
-                <Icon name="users" size={19} />
-              </Link>
-              <Link
-                className="icon-button topbar-icon"
-                href="/dashboard/account/integrations"
-                aria-label="Integrations"
-                title="Integrations"
-              >
-                <Icon name="grid" size={19} />
-              </Link>
+              {/* Offered only to a role the destination will serve: a client
+                  holds neither `users.invite` nor `integrations.manage`, and both
+                  screens refused them after the click. */}
+              {runtimeContext?.capabilities?.["users.invite"] !== false ? (
+                <Link
+                  className="icon-button topbar-icon"
+                  href="/dashboard/account/invite"
+                  aria-label="Invite members"
+                  title="Invite members"
+                >
+                  <Icon name="users" size={19} />
+                </Link>
+              ) : null}
+              {runtimeContext?.capabilities?.["integrations.manage"] !== false ? (
+                <Link
+                  className="icon-button topbar-icon"
+                  href="/dashboard/account/integrations"
+                  aria-label="Integrations"
+                  title="Integrations"
+                >
+                  <Icon name="grid" size={19} />
+                </Link>
+              ) : null}
               <Link
                 className="icon-button topbar-icon"
                 href="/dashboard/account/help"
@@ -4202,6 +4209,8 @@ export default function PortalApp({
           initialTab={workspaceManager.tab}
           initialRecordId={workspaceManager.recordId}
           busy={workspaceBusy}
+          canEdit={runtimeContext?.capabilities?.["sites.edit"] !== false}
+          canImport={runtimeContext?.capabilities?.["data.import"] !== false}
           onClose={() => setWorkspaceManager(null)}
           onSave={saveWorkspaceRecord}
           onArchive={archiveWorkspaceRecord}
