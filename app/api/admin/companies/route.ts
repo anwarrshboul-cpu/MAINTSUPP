@@ -211,6 +211,46 @@ export async function POST(request: Request) {
       );
     }
 
+    /* A WORKSPACE could not be renamed at all - only its company - so a
+       workspace created with a working name kept it for ever. Same authority as
+       creating one: a Super Admin, or the Owner of the company it belongs to. */
+    if (action === "rename_workspace") {
+      const organisationId = text(body.organisationId, 100);
+      const name = cleanName(body.name);
+      if (!name) return Response.json({ error: "A workspace name is required." }, { status: 400 });
+      const [workspace] = await context.db
+        .select({ id: organisations.id, name: organisations.name })
+        .from(organisations)
+        .where(
+          and(
+            eq(organisations.id, organisationId),
+            eq(organisations.clientCompanyId, company.id),
+            eq(organisations.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!workspace) {
+        return Response.json({ error: "That workspace is not one of this company's." }, { status: 404 });
+      }
+      if (name === workspace.name) return Response.json({ ok: true, name });
+      await context.db
+        .update(organisations)
+        .set({ name, updatedAt: new Date().toISOString() })
+        .where(eq(organisations.id, workspace.id));
+      await recordAudit({
+        db: context.db,
+        organisationId: workspace.id,
+        actor,
+        action: "workspace.renamed",
+        entityType: "organisation",
+        entityId: workspace.id,
+        summary: `Renamed the workspace ${workspace.name} to ${name}.`,
+        detail: { from: workspace.name, to: name },
+        request,
+      });
+      return Response.json({ ok: true, name });
+    }
+
     if (action === "set_default_workspace") {
       const organisationId = text(body.organisationId, 100);
       const [workspace] = await context.db

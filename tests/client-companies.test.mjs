@@ -1117,3 +1117,14 @@ test("a new workspace's Jobs board has the product's lanes, not a customer's sto
   const keys = template.slice(template.indexOf("JOBS_TEMPLATE_GROUP_KEYS"));
   assert.doesNotMatch(keys.slice(0, keys.indexOf("];")), /done-/);
 });
+
+/* A workspace could not be renamed at all - only its company. rename_workspace
+   has the same authority as create_workspace and is audited (2026-10-01). */
+test("a workspace can be renamed by whoever may create one, and it is audited", async () => {
+  const route = await read("app/api/admin/companies/route.ts");
+  const block = route.slice(route.indexOf('if (action === "rename_workspace")'));
+  assert.match(block.slice(0, 2400), /eq\(organisations\.clientCompanyId, company\.id\)/);
+  assert.match(block.slice(0, 2400), /action: "workspace\.renamed"/);
+  const ui = await read("app/(app)/portal/views/admin-clients.tsx");
+  assert.match(ui, /action: "rename_workspace", clientCompanyId: company\.id, organisationId: target\.id, name/);
+});
