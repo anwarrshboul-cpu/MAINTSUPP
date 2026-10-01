@@ -417,6 +417,8 @@ type RuntimeWorkspaceContext = {
    */
   requestConfiguration?: {
     engineers?: Array<{ value: string; label: string; isDefault?: boolean }>;
+    priorities?: Array<{ value: string; label: string; isDefault?: boolean }>;
+    categories?: Array<{ value: string; label: string; isDefault?: boolean }>;
   };
   /**
    * The portal modules this workspace has switched on AND this actor may reach
@@ -4214,6 +4216,11 @@ export default function PortalApp({
           locations={currentStores.filter((store) => store.lifecycle === "Current").map((store) => store.name)}
           /* Decision O — this workspace's own trades, not a list written here. */
           trades={runtimeContext?.requestConfiguration?.engineers ?? []}
+          /* The same for Priority and Category: hard-coded lists offered "High"
+             and "Glass", which a workspace without them snapped to its
+             fallback on save - "High" became Medium, "Plumbing" became Other. */
+          priorities={runtimeContext?.requestConfiguration?.priorities ?? []}
+          categories={runtimeContext?.requestConfiguration?.categories ?? []}
           onClose={() => setShowCreateRequest(false)}
           onCreate={createRequest}
         />
@@ -10277,15 +10284,38 @@ function defaultTrade(trades: readonly TradeChoice[]): string {
   return (choices.find((choice) => choice.isDefault) ?? choices[0])?.value ?? "";
 }
 
+/* What the modal offers when the workspace has no configured list yet. */
+const BUILT_IN_PRIORITIES = ["Urgent", "Medium", "Low"];
+const BUILT_IN_CATEGORIES = ["Lighting", "Electrical", "Joinery", "Glass", "HVAC", "Plumbing", "CCTV", "Digital display", "Other"];
+
+function configuredChoices(configured: readonly TradeChoice[], builtIn: readonly string[]): TradeChoice[] {
+  if (configured.length) return [...configured];
+  return builtIn.map((value) => ({ value, label: value }));
+}
+
+function defaultChoice(choices: readonly TradeChoice[], preferred?: string): string {
+  return (
+    choices.find((choice) => choice.isDefault)?.value ??
+    choices.find((choice) => choice.value === preferred)?.value ??
+    choices[0]?.value ??
+    ""
+  );
+}
+
 function CreateRequestModal({
   locations: siteLocations,
   trades,
+  priorities: configuredPriorities = [],
+  categories: configuredCategories = [],
   onClose,
   onCreate,
 }: {
   locations: string[];
   /** This workspace's active trades, from `/api/context`. Empty until it answers. */
   trades: TradeChoice[];
+  /** Its priorities and labels, the same way. Empty means the built-in lists. */
+  priorities?: TradeChoice[];
+  categories?: TradeChoice[];
   onClose: () => void;
   onCreate: (draft: CreateRequestDraft, files: File[]) => Promise<void>;
 }) {
@@ -10293,14 +10323,16 @@ function CreateRequestModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const priorityChoices = configuredChoices(configuredPriorities, BUILT_IN_PRIORITIES);
+  const categoryChoices = configuredChoices(configuredCategories, BUILT_IN_CATEGORIES);
   const [draft, setDraft] = useState<CreateRequestDraft>({
     location: "",
     requester: "",
     contact: "",
     description: "",
-    category: "Lighting",
+    category: defaultChoice(categoryChoices, "Lighting"),
     engineer: defaultTrade(trades),
-    priority: "Medium",
+    priority: defaultChoice(priorityChoices, "Medium"),
     /* Unclassified until somebody says otherwise — never guessed. */
     jobTypeId: "",
   });
@@ -10454,10 +10486,11 @@ function CreateRequestModal({
                       update("priority", event.target.value)
                     }
                   >
-                    <option>Urgent</option>
-                    <option>High</option>
-                    <option>Medium</option>
-                    <option>Low</option>
+                    {priorityChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="form-field">
@@ -10468,15 +10501,11 @@ function CreateRequestModal({
                       update("category", event.target.value)
                     }
                   >
-                    <option>Lighting</option>
-                    <option>Electrical</option>
-                    <option>Joinery</option>
-                    <option>Glass</option>
-                    <option>HVAC</option>
-                    <option>Plumbing</option>
-                    <option>CCTV</option>
-                    <option>Digital display</option>
-                    <option>Other</option>
+                    {categoryChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
               </div>
