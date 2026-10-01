@@ -3019,6 +3019,19 @@ export async function PATCH(request: Request) {
         changes: [{ requestId, before: null, after: null }],
         request,
       });
+      /*
+       * ONE NAME FOR A JOB (owner decision, 2026-10-01). The grid draws the name
+       * cell, while the drawer header, the recycle bin, the mobile cards, alerts
+       * and search read `title` - so a rename here used to show on the grid only.
+       * The cell and the title now move together; clearing the cell leaves the
+       * title as it was rather than blanking the job.
+       */
+      if (column.system && column.key === "name" && after && after.trim()) {
+        await db
+          .update(maintenanceRequests)
+          .set({ title: after.trim().slice(0, 200), updatedAt: sql`CURRENT_TIMESTAMP` })
+          .where(and(eq(maintenanceRequests.organisationId, orgId), eq(maintenanceRequests.id, requestId)));
+      }
       let ran = 0;
       if (!column.system) {
         const event = cellChangedEvent(
