@@ -3,8 +3,6 @@ import { FeatureRow, HeroActions, PageCta, PageHero, PageSection } from "../_com
 import { ApprovedPhoto } from "../_sections/approved-photo";
 import { CaseStudy } from "../_sections/case-study";
 import { Founder } from "../_sections/founder";
-import { PhotoSlot } from "../_sections/photo";
-import { photoAlt } from "../_sections/photo-slot";
 import { Portal } from "../_sections/portal";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
 import { pageSocial } from "../../lib/page-social";
@@ -45,9 +43,9 @@ export default async function CaseStudyPage() {
         lede="Stores on the high street and kiosks in shopping centres, each with its own access rules, contractors and compliance dates — now run through one accountable coordinator and one monthly report."
         media={
           <ApprovedPhoto
-            src="/assets/audience/who-we-help-shopping-centre-kiosks.png"
-            alt="A dark green retail kiosk with lit glass display counters in a bright shopping centre"
-            sizes={SIZES}
+            src="/assets/pages/page-case-study-hero-v1.jpg"
+            alt="A Maintsupp engineer adjusting a spotlight on a dark green and gold fragrance kiosk in a shopping centre"
+            sizes="(min-width: 1024px) 600px, 100vw"
             loading="eager"
             className="pagehero__photo"
           />
@@ -70,8 +68,8 @@ export default async function CaseStudyPage() {
             ]}
             media={
               <ApprovedPhoto
-                src="/assets/audience/who-we-help-retail-chains.png"
-                alt="Two maintenance workers in a clothing store, one vacuuming the floor and one fixing a wall panel from a stepladder"
+                src="/assets/pages/case-brief-v1.jpg"
+                alt="A woman in a Maintsupp jacket photographing a water-stained ceiling tile in a fragrance shop with her phone"
                 sizes={SIZES}
                 className="featurerow__photo"
               />
@@ -87,12 +85,9 @@ export default async function CaseStudyPage() {
               "Completion verified with photo evidence",
             ]}
             media={
-              <PhotoSlot
-                slot="evidence-closeout"
-                w={1040}
-                h={650}
-                art="tool"
-                alt={photoAlt["evidence-closeout"]}
+              <ApprovedPhoto
+                src="/assets/pages/case-work-v1.jpg"
+                alt="A Maintsupp contractor in a hi-vis vest carrying a toolbag into a shopping centre while checking the job on his phone"
                 sizes={SIZES}
                 className="featurerow__photo"
               />
@@ -107,12 +102,9 @@ export default async function CaseStudyPage() {
               "Photographs and certificates kept against each job",
             ]}
             media={
-              <PhotoSlot
-                slot="dashboard-overview-v2"
-                w={1672}
-                h={941}
-                art="room"
-                alt={photoAlt["dashboard-overview-v2"]}
+              <ApprovedPhoto
+                src="/assets/pages/case-results-v1.jpg"
+                alt="Two managers reviewing a printed Maintsupp monthly report with charts beside a laptop dashboard"
                 sizes={SIZES}
                 className="featurerow__photo"
               />

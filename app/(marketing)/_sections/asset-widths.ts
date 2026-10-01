@@ -131,5 +131,131 @@ export const assetWidths: Record<string, AssetEntry> = {
     ],
     "width": 1672,
     "height": 941
+  },
+  "/assets/pages/page-services-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-how-it-works-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-pricing-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-case-study-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/page-contact-hero-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-reactive-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-planned-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-compliance-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/service-projects-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/case-work-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/case-brief-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/case-results-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1586,
+    "height": 992
+  },
+  "/assets/pages/trade-cctv-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 1024
+  },
+  "/assets/pages/trade-refrigeration-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 1024
   }
 };

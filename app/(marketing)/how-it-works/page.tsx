@@ -59,9 +59,9 @@ export default async function HowItWorksPage() {
         lede="Seven stages, one coordinator. The site tells us what is wrong; we triage it, get spend approved, brief a vetted contractor, follow attendance and check the evidence before the job is closed and reported."
         media={
           <ApprovedPhoto
-            src="/assets/workflow/how-it-works-02-triage-v3.png"
-            alt="A coordinator in a headset reviewing incoming jobs across two monitors"
-            sizes="(min-width: 1024px) 560px, 100vw"
+            src="/assets/pages/page-how-it-works-hero-v1.jpg"
+            alt="A Maintsupp coordinator in a headset working at two monitors that show a job board with coloured status columns"
+            sizes="(min-width: 1024px) 600px, 100vw"
             loading="eager"
             className="pagehero__photo"
           />
