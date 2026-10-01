@@ -10381,6 +10381,16 @@ function CreateRequestModal({
     firstField.current?.focus();
   }, []);
 
+  /* Escape closes it, as it closes every other drawer and menu here; on a
+     phone it was the one dialog with no way out but its close button. */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const update = (key: keyof CreateRequestDraft, value: string) =>
     setDraft((current) => ({ ...current, [key]: value }));
 

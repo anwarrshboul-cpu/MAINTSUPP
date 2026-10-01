@@ -740,6 +740,13 @@ body[data-theme] .ov-dash .ov-dash__control--select > select:not([type="checkbox
     position: relative;
   }
 
+  /* 16px on a phone: iOS zooms the page into any control under 16px the
+     moment it is tapped (the portfolio picker and the date inputs were 12px).
+     Scoped to the header so it outweighs `.ov-dash__control`'s 12px. */
+  body[data-theme] .ov-dash :is(.ov-dash__head, .ov-dash__range-panel) :is(select, input) {
+    font-size: 16px;
+  }
+
   body[data-theme] .ov-dash .ov-dash__head .ov-dash__range {
     position: static;
   }
