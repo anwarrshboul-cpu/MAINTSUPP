@@ -34,7 +34,7 @@ export default function TermsPage() {
           <Breadcrumbs items={[{ name: "Home", path: "/" }, { name: "Terms of use", path: "/terms" }]} />
         <h1>Terms of use</h1>
         <p className="m-note">
-          <strong>Draft for review.</strong> These cover use of the website and
+          These cover use of the website and
           portal. They are not a services agreement — commercial terms are set out
           separately in each client contract.
         </p>
