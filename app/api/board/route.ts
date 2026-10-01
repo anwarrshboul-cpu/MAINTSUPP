@@ -802,13 +802,15 @@ function requestIdsFrom(payload: Record<string, unknown>) {
 // and this route read one map. See the note there.
 
 async function seedRequestsIfEmpty(db: BoardDb, orgId: string) {
+  /* The two free checks first: every board call used to pay a count(*) of the
+     whole organisation's jobs only to discard it here. */
+  if (orgId !== PRIMARY_ORGANISATION_ID) return;
+  if (!sampleSeedingAllowed()) return;
   const [result] = await db
     .select({ value: count() })
     .from(maintenanceRequests)
     .where(eq(maintenanceRequests.organisationId, orgId));
   if (result.value > 0) return;
-  if (orgId !== PRIMARY_ORGANISATION_ID) return;
-  if (!sampleSeedingAllowed()) return;
   for (const request of sampleRequests) {
     await db
       .insert(maintenanceRequests)

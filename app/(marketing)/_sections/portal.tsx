@@ -192,6 +192,10 @@ export function Portal({ copy = HOME_COPY.portal }: { copy?: HomeCopy["portal"] 
                 slot={tab.slot}
                 w={1672}
                 h={941}
+                /* The fallback behind a screenshot. "room" is a few hundred bytes;
+                   the default "city" was ~23KB of SVG per tab, four tabs mounted —
+                   a third of the homepage's HTML for art nobody sees once it loads. */
+                art="room"
                 alt={tab.alt}
                 desc={tab.desc}
                 sizes="(min-width: 1320px) 1240px, (min-width: 1000px) calc(100vw - 80px), 92vw"

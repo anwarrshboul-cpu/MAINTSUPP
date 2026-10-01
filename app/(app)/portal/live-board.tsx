@@ -1326,11 +1326,12 @@ export function LiveMaintenanceBoard({
     drawnGroupId(placement.get(request.id)?.groupId, request.stage, groups);
 
   const visible = (key: string) => !hiddenColumns.has(key);
-  const visibleBoardColumns = allBoardColumns
+  /* Memoised so `stickyOffsets` and every row see one stable array per change. */
+  const visibleBoardColumns = useMemo(() => allBoardColumns
     .filter((entry) =>
       entry.kind === "system"
-        ? visible(entry.key)
-        : visible(`custom:${entry.column.id}`),
+        ? !hiddenColumns.has(entry.key)
+        : !hiddenColumns.has(`custom:${entry.column.id}`),
     )
     // A collapsed column keeps its place in the header and narrows to a strip.
     // Overriding the width here rather than at each render site means the
@@ -1340,7 +1341,7 @@ export function LiveMaintenanceBoard({
       collapsedColumns.has(entry.column.id)
         ? { ...entry, column: { ...entry.column, width: COLLAPSED_COLUMN_WIDTH } }
         : entry,
-    );
+    ), [allBoardColumns, hiddenColumns, collapsedColumns]);
 
   useEffect(() => {
     if (!onBoardSnapshotChange) return;
@@ -1681,6 +1682,11 @@ export function LiveMaintenanceBoard({
   /* Saved chips first, the shared fallback otherwise — see board-model.ts. */
   const optionsFor = (columnKey: BoardOptionColumn): Option[] =>
     boardColumnOptions(boardOptions, columnKey);
+  /* One option-set object for every row and summary, not five sorts per row. */
+  const rowOptionSets = useMemo(() => ({
+    tier: optionsFor("tier"), engineer: optionsFor("engineer"), priority: optionsFor("priority"),
+    label: optionsFor("label"), status: optionsFor("status"),
+  }), [boardOptions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* The site register, plus the areas this board files jobs under that the
      register does not name — see board-store-location.ts for why both. */
@@ -4237,11 +4243,7 @@ export function LiveMaintenanceBoard({
                             onSave={(fields) => saveFields(request, fields)}
                             onMove={(groupId) => moveItem(request, groupId)}
                             optionSets={{
-                              tier: optionsFor("tier"),
-                              engineer: optionsFor("engineer"),
-                              priority: optionsFor("priority"),
-                              label: optionsFor("label"),
-                              status: optionsFor("status"),
+                              ...rowOptionSets,
                               storeLocation: storeLocationOptions,
                             }}
                             onCreateOption={createOption}
@@ -4388,11 +4390,7 @@ export function LiveMaintenanceBoard({
                                 entry={entry}
                                 rows={rows}
                                 optionSets={{
-                                  tier: optionsFor("tier"),
-                                  engineer: optionsFor("engineer"),
-                                  priority: optionsFor("priority"),
-                                  label: optionsFor("label"),
-                                  status: optionsFor("status"),
+                                  ...rowOptionSets,
                                   storeLocation: storeLocationOptions,
                                 }}
                                 assigneeOptions={assigneeOptions}

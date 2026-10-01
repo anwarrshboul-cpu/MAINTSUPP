@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     const { actor, db, orgId, siteScope } = await scopedDb(request);
-    const rows = await db
+    const rowsRead = db
       .select()
       .from(activityLog)
       .where(
@@ -72,13 +72,17 @@ export async function GET(request: Request) {
       memberSiteCondition(maintenanceRequests.siteId, siteScope),
       sql`not ${closedJobSql}`,
     );
-    const candidates = await db
-      .select()
-      .from(maintenanceRequests)
-      .where(and(open, or(eq(maintenanceRequests.stage, "Attention"), eq(maintenanceRequests.priority, "Urgent"))))
-      .orderBy(desc(maintenanceRequests.requestedAt))
-      .limit(100);
-    const [openRow] = await db.select({ total: count() }).from(maintenanceRequests).where(open);
+    /* Three independent reads, started together: one round trip, not three. */
+    const [rows, candidates, [openRow]] = await Promise.all([
+      rowsRead,
+      db
+        .select()
+        .from(maintenanceRequests)
+        .where(and(open, or(eq(maintenanceRequests.stage, "Attention"), eq(maintenanceRequests.priority, "Urgent"))))
+        .orderBy(desc(maintenanceRequests.requestedAt))
+        .limit(100),
+      db.select({ total: count() }).from(maintenanceRequests).where(open),
+    ]);
 
     return Response.json({
       states: exposeStates(rows),
