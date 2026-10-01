@@ -4876,6 +4876,7 @@ function BoardRow({
               <ItemNameEditor
                 value={itemName}
                 onSave={(value) => onSaveCustom(column, value)}
+                onOpen={onOpen}
               />
               <button
                 className="sheet-open-item"
