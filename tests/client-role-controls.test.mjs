@@ -73,3 +73,10 @@ test("the Jobs board is read-only for a role without board.edit", async () => {
   assert.match(cells, /\} else if \(canEdit\) \{\s*setOpen\(true\);/);
   assert.match(cells, /onClick=\{\(\) => canEdit && setOpen\(\(current\) => !current\)\}/);
 });
+
+/* New request writes through POST /api/maintenance, which needs board.edit; a
+   client was offered it and refused after filling the form. */
+test("New request is offered only to a role that may create a job", async () => {
+  const app = await read("app/(app)/portal/portal-app.tsx");
+  assert.match(app, /capabilities\?\.\["board\.edit"\] !== false \? \(\s*<button\s+className="primary-button topbar-create"/);
+});

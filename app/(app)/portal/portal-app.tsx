@@ -3625,15 +3625,19 @@ export default function PortalApp({
                 />
               </AnchoredPopover>
             </div>
-            <button
-              className="primary-button topbar-create"
-              type="button"
-              aria-label="New request"
-              onClick={() => setShowCreateRequest(true)}
-            >
-              <Icon name="plus" size={18} />
-              <span>New request</span>
-            </button>
+            {/* Only for a role the job route will serve (`board.edit`): a client
+                was offered New request, filled it in and was refused with a 403. */}
+            {runtimeContext?.capabilities?.["board.edit"] !== false ? (
+              <button
+                className="primary-button topbar-create"
+                type="button"
+                aria-label="New request"
+                onClick={() => setShowCreateRequest(true)}
+              >
+                <Icon name="plus" size={18} />
+                <span>New request</span>
+              </button>
+            ) : null}
             {/*
               The avatar was decorative. It is now monday's avatar menu: the
               two-column Account / Explore panel, the workspace + plan pill
