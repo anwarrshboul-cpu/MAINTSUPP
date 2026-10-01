@@ -14,7 +14,7 @@ import inviteCss from "./invite.css?url";
 // working invitations, and a referrer would leak them to whatever the page
 // links to.
 export const metadata: Metadata = {
-  title: "Join a workspace | MAINTSUPP",
+  title: "Join a workspace", // the root template adds " | MAINTSUPP"
   robots: { index: false, follow: false, nocache: true },
   referrer: "no-referrer",
 };

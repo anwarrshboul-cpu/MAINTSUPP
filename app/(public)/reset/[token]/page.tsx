@@ -21,7 +21,7 @@ import inviteCss from "../reset.css?url";
 // working reset links, and a referrer would leak them to whatever the page
 // links to.
 export const metadata: Metadata = {
-  title: "Set a new password | MAINTSUPP",
+  title: "Set a new password", // the root template adds " | MAINTSUPP"
   robots: { index: false, follow: false, nocache: true },
   referrer: "no-referrer",
 };

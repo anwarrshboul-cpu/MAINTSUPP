@@ -196,6 +196,7 @@
 
 .unscheduled-tray__row {
   display: flex;
+  flex-wrap: wrap;
   min-height: 44px;
   align-items: center;
   gap: 8px;
@@ -269,18 +270,28 @@
 
 .unscheduled-tray__text {
   display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
+  /* A floor, so the pill and the SLA figure cannot squeeze the title to one
+     letter; the row wraps the SLA figure underneath instead. */
+  min-width: 120px;
+  flex: 1 1 120px;
   flex-direction: column;
   gap: 2px;
 }
 
+/*
+ * The title WRAPS, up to two lines. In a 300px rail the grip, the status pill
+ * and the SLA figure left the title so little room that QA read "D…" at 1440px
+ * — a tray of jobs nobody could tell apart. Two lines, then an ellipsis.
+ */
 .unscheduled-tray__title {
+  display: -webkit-box;
   overflow: hidden;
   font-size: 12px;
   line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .unscheduled-tray__meta {
@@ -423,6 +434,33 @@
   place-items: center;
   border-color: var(--line) !important;
   color: var(--muted) !important;
+}
+
+/*
+ * ── Tablet and small laptop: the tray goes UNDER the grid ─────────────────
+ *
+ * Between 641 and 1024px a 300px rail beside the grid left the month view so
+ * narrow that every event chip shrank to a single character (QA). Stacked, the
+ * grid gets the full width and the tray the full width below it. It stops being
+ * sticky here: beside the grid that kept it in reach of the drop target, below
+ * the grid it would only slide over the calendar. The phone sheet (640px, next)
+ * overrides this with its own fixed position.
+ */
+@media (max-width: 1024px) {
+  .calendar-with-tray {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .calendar-aside {
+    width: 100%;
+  }
+
+  .unscheduled-tray {
+    position: static;
+    /* Still bounded, so a long list scrolls inside the tray. */
+    max-height: 60vh;
+  }
 }
 
 /*

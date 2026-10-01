@@ -41,7 +41,7 @@ export default function NotFound() {
             <Link className="btn btn--primary" href="/">
               Go to the home page
             </Link>{" "}
-            <Link href="/dashboard">Open the portal</Link>
+            <Link href="/portal">Open the portal</Link>
           </p>
         </div>
       </main>

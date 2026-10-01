@@ -9,6 +9,17 @@ import {
   THEME_COLOR_LIGHT_MEDIA,
   themeBootScript,
 } from "./portal/theme-boot";
+import type { Metadata } from "next";
+
+/*
+ * The portal, the platform console, sign-in and every other signed-in screen
+ * are never search results. robots.txt already disallows them, but a disallowed
+ * page linked from elsewhere can still be indexed by URL; the meta tag is what
+ * keeps it out (QA, 2026-10-01: /admin and /dashboard carried none).
+ */
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
 
 /**
  * Application layout — B2.

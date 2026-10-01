@@ -36,6 +36,7 @@ import type {
   WorkspaceSnapshot,
 } from "../../lib/workspace-data";
 import { PLANNED_FREQUENCIES, STOPPED_STATUSES } from "../../lib/planned-recurrence";
+import { plannedUnitOptions } from "./planned-unit-options";
 
 type ManagerTab = Exclude<WorkspaceEntity, "settings"> | "activity" | "import";
 /**
@@ -204,9 +205,12 @@ function fieldsFor(
    */
   contractorTrades: Array<{ value: string; label: string }> = [],
   contractorPaymentTerms: Array<{ value: string; label: string }> = [],
+  /** The open form's site and unit: "Linked unit" offers that site's units. */
+  formSiteId?: string | null,
+  formUnitId?: string | null,
 ): FieldDefinition[] {
   const siteOptions = workspace.stores.map((site) => ({ value: site.id, label: site.name }));
-  const unitOptions = [{ value: "", label: "No linked unit" }, ...workspace.units.map((unit) => ({ value: unit.id, label: unit.name }))];
+  const unitOptions = plannedUnitOptions(workspace.units, formSiteId, formUnitId);
   /*
    * WHO MAY BE ASSIGNED, plus WHOEVER IS ALREADY ASSIGNED.
    *
@@ -1170,6 +1174,8 @@ export function WorkspaceDataManager({
           && !paymentTerms.some((option) => option.value === form.paymentTerms)
           ? [...paymentTerms, { value: form.paymentTerms, label: `${form.paymentTerms} (not configured)` }]
           : paymentTerms,
+        typeof form?.siteId === "string" ? form.siteId : null,
+        typeof form?.unitId === "string" ? form.unitId : null,
       );
   const activeTabLabel = tabs.find((item) => item.key === tab)?.label ?? "records";
 
@@ -1893,7 +1899,7 @@ export function WorkspaceDataManager({
                 */}
                 {editorId && <button className="secondary-button workspace-archive-button" type="button" disabled={busy || scopedBusy} onClick={async () => { setScopedProblem(null); const named = (fallback: string) => String(form.name ?? fallback ?? ""); const agreed = tab === "site" ? confirmSiteClosure(named(storedRecordFor("site")?.name ?? "")) : tab === "contractor" ? confirmContractorRosterExit(named(storedRecordFor("contractor")?.name ?? "")) : window.confirm("Archive this record? It will remain in the activity history."); if (agreed && editorRegister) { setScopedBusy(true); try { await scopedWrite(tab, editorRegister, "DELETE", editorId); setForm(null); setEditorId(null); setEditorRegister(null); } catch (error) { setScopedProblem(error instanceof Error ? error.message : "The record could not be archived."); } finally { setScopedBusy(false); } return; } if (agreed) { try { await onArchive(tab, editorId); setForm(null); setEditorId(null); } catch { /* The dashboard toast reports the API error. */ } } }}>Archive</button>}
                 <button className="secondary-button" type="button" onClick={() => setForm(null)}>Cancel</button>
-                <button className="primary-button" type="submit" disabled={busy || scopedBusy}>{busy || scopedBusy ? "Saving…" : "Save changes"}</button>
+                <button className="primary-button" type="submit" disabled={busy || scopedBusy}>{busy || scopedBusy ? "Saving…" : editorId ? "Save changes" : tab === "planned" ? "Create task" : `Create ${tabs.find((item) => item.key === tab)?.singular ?? "record"}`}</button>
               </footer>
             </form>
           )}

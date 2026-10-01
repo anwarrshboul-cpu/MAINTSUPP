@@ -39,7 +39,7 @@ import {
   compareBoardValues,
   systemColumnSortValue,
 } from "./board-ordering";
-import { customCellKey, customCellSortValue } from "./board-format";
+import { customCellDisplay, customCellKey, customCellSortValue } from "./board-format";
 import type { BoardOptionColumn } from "../../lib/types";
 
 export type SortDirection = "asc" | "desc";
@@ -205,6 +205,17 @@ export function boardSortValue(
   return systemColumnSortValue(request, entry.key);
 }
 
+/** Every value outside an option list shares one rank, so a sort did nothing
+ * for them (QA). Equal ranks tie-break on the value's own text instead. */
+export function boardSortTieText(entry: BoardDisplayColumn, request: MaintenanceRequest, context: BoardSortContext) {
+  if (entry.kind === "custom") {
+    if (!["status", "dropdown", "people"].includes(entry.column.type)) return null;
+    return customCellDisplay(entry.column, context.cells[customCellKey(request.id, entry.column.id)] ?? "");
+  }
+  if (entry.key === "name" || !context.optionOrderFor(entry.key)) return null;
+  return String(systemColumnSortValue(request, entry.key) ?? "");
+}
+
 function isEmptyValue(value: string | number) {
   // Custom columns spell "no value" as "" (board-format.ts customCellSortValue),
   // but the system date and cost columns spell it as NEGATIVE_INFINITY
@@ -244,7 +255,8 @@ export function compareBoardRows(
     // Empty last in BOTH directions — see the header.
     if (leftEmpty !== rightEmpty) return leftEmpty ? 1 : -1;
     if (leftEmpty && rightEmpty) continue;
-    const compared = compareBoardValues(leftValue, rightValue);
+    const compared = compareBoardValues(leftValue, rightValue) ||
+      compareBoardValues(boardSortTieText(entry, left, context) ?? "", boardSortTieText(entry, right, context) ?? "");
     if (compared) return compared * (rule.direction === "desc" ? -1 : 1);
   }
   return context.positionOf(left.id) - context.positionOf(right.id);

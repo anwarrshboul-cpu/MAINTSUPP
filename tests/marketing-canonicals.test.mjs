@@ -98,10 +98,14 @@ test("the root declares a canonical, which is why every page must too", async ()
    * noticed and the rest reconsidered.
    */
   const layout = await read("app/layout.tsx");
-  assert.match(
+  /* NOTICED HERE, as this comment asks (2026-10-01): the root no longer
+     declares one, because /login and the 404 page inherited it and claimed to
+     be the homepage. Every marketing page still declares its own address -
+     the rest of this file keeps holding that - so nothing falls back to "/". */
+  assert.doesNotMatch(
     layout,
     /alternates: \{\s*\n\s*canonical: "\/",/,
-    "the root canonical is what a page with no alternates inherits",
+    "the root must not hand every page the homepage's canonical",
   );
   assert.match(layout, new RegExp(`metadataBase: new URL\\("${ORIGIN}"\\)`));
   assert.match(

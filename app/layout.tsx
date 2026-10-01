@@ -59,9 +59,12 @@ export const metadata: Metadata = {
    * card.
    */
   metadataBase: new URL("https://maintsupp.com"),
-  alternates: {
-    canonical: "/",
-  },
+  /*
+   * NO ROOT CANONICAL (removed 2026-10-01). A page that declares none inherited
+   * `canonical: "/"` and told crawlers it was the homepage - /login and the 404
+   * page did exactly that live. Every public page declares its own through
+   * `pageSocial` (app/lib/page-social.ts) and /p/[slug] through its override.
+   */
   openGraph: {
     type: "website",
     siteName: "MAINTSUPP",

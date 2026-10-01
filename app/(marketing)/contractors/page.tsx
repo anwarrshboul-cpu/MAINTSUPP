@@ -2,6 +2,7 @@ import { Breadcrumbs } from "../_components/breadcrumbs";
 import type { Metadata } from "next";
 import { ContractorApply } from "./apply-form";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
+import { pageSocial } from "../../lib/page-social";
 
 /**
  * The title and the description staff have saved, or the shipped ones
@@ -20,6 +21,7 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { absolute: contractors.seo.title },
     description: contractors.seo.description,
     alternates: { canonical: "https://maintsupp.com/contractors" },
+    ...pageSocial("/contractors", contractors.seo.title, contractors.seo.description),
   };
 }
 

@@ -32,7 +32,7 @@ export type OiSlice = {
   labels: string[];
 };
 
-/** Priority as the board's filter speaks it: `urgent` is shown as "High". */
+/** Priority as the board's filter speaks it: `urgent` is shown as "Urgent". */
 export type OiPriorityKey = "urgent" | "medium" | "low" | "not_recorded";
 
 export type OiPriority = OiSlice & { key: OiPriorityKey };

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ORGANIZATION_ID, WEBSITE_ID } from "../_components/structured-data";
 import { faq as SHIPPED_QUESTIONS } from "../_sections/content";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
+import { pageSocial } from "../../lib/page-social";
 
 /**
  * The title and the description staff have saved, or the shipped ones
@@ -33,6 +34,7 @@ export async function generateMetadata(): Promise<Metadata> {
      * declares none. It is CODE, not content: no console may change it.
      */
     alternates: { canonical: "https://maintsupp.com/faqs" },
+    ...pageSocial("/faqs", faqs.seo.title, faqs.seo.description),
   };
 }
 

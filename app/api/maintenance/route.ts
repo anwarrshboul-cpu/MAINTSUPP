@@ -52,6 +52,7 @@ import {
   resolveSubmissionSite,
 } from "../../lib/submission-service";
 import { unassignedSiteId } from "../../lib/site-reference";
+import { hashToken } from "../../lib/auth-session";
 import { PRIMARY_ORGANISATION_ID, anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { invalidRequestFields, requestFieldValues } from "../../lib/request-fields";
 import { resolveJobTypeWrite } from "../../lib/job-types";
@@ -419,8 +420,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "board.edit");
+    /*
+     * RAISING A JOB is `board.edit` OR `requests.create` (the grant a client
+     * holds - owner decision, 2026-10-01). A requester without `board.edit`
+     * cannot attach photos through the board's own rule, so they get what the
+     * website form gives its reporter: a 30-minute upload token bound to THIS
+     * job (`api/files/upload-authority.ts`, rule 2).
+     */
+    let guard = await scopedDbWithCapability(request, "board.edit");
+    const boardEditor = !guard.denied;
+    if (guard.denied) guard = await scopedDbWithCapability(request, "requests.create");
     if (guard.denied) return guard.denied;
+    const uploadToken = boardEditor ? null : crypto.randomUUID().replace(/-/g, "");
     const { actor, db, orgId, siteScope } = guard.scope;
     const payload = (await request.json()) as Record<string, unknown>;
     const location = trimString(payload.location, 120);
@@ -524,6 +535,12 @@ export async function POST(request: Request) {
          so the Activity tab says what the job was filed as. */
       overrides: { jobTypeId: jobType.id },
       activityDetail: { jobTypeId: jobType.id },
+      ...(uploadToken
+        ? {
+            publicUploadTokenHash: await hashToken(uploadToken),
+            publicUploadTokenExpiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+          }
+        : {}),
     });
     const created = submission.request;
     const priority = submission.priority;
@@ -583,7 +600,11 @@ export async function POST(request: Request) {
     ]);
 
     return Response.json(
-      { request: exposeRequest(created), notified: alertResult.ok },
+      {
+        request: exposeRequest(created),
+        notified: alertResult.ok,
+        ...(uploadToken ? { uploadToken } : {}),
+      },
       { status: 201 },
     );
   } catch (error) {

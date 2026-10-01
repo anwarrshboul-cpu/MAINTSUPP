@@ -36,3 +36,15 @@ test("the ledger and the invoice panel name the site", async () => {
   const panel = await read("app/(app)/portal/finance/finance-invoice-panel.tsx");
   assert.match(panel, /\["Site", invoice\.siteName \?\? invoice\.siteId\]/);
 });
+
+/* Owner decision 2026-10-01: a payable is paid only once approved, and a
+   payment moves the invoice to part_paid / paid (both keys existed in the
+   ladder and nothing wrote them). Verified live: refused while under review;
+   approved, half paid -> part_paid, rest paid -> paid. */
+test("a payment needs an approved payable and moves the status to part paid or paid", async () => {
+  const repo = await read("app/lib/finance/repository.ts");
+  assert.match(repo, /const PAYABLE_PAYMENT_STATUSES: ReadonlySet<string> = new Set\(\["approved", "scheduled", "part_paid"\]\);/);
+  assert.match(repo, /Approve it before recording a payment against it\./);
+  assert.match(repo, /const next = balance\.balancePence <= 0 \? "paid" : "part_paid";/);
+  assert.match(repo, /await recordStatusChange\(db, organisationId, \{\s*invoiceId: row\.invoiceId,/);
+});

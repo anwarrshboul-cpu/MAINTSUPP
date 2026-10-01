@@ -27,3 +27,12 @@ test("the CSV Group column exports the group's name, not the stage key", async (
   assert.match(route, /innerJoin\(maintenanceGroups, eq\(maintenanceGroups\.id, maintenanceGroupItems\.groupId\)\)/);
   assert.match(route, /groupNames,\s*boardId: board\.key,/);
 });
+
+/* Owner decision 2026-10-01: one name per job. Verified live: a grid rename
+   sets title, and a later description edit leaves it alone. */
+test("a job has one name: a rename sets the title, a description edit never does", async () => {
+  const board = await read("app/api/board/route.ts");
+  assert.match(board, /if \(column\.system && column\.key === "name" && after && after\.trim\(\)\) \{\s*await db\s*\.update\(maintenanceRequests\)\s*\.set\(\{ title: after\.trim\(\)\.slice\(0, 200\)/);
+  const fields = await read("app/lib/request-fields.ts");
+  assert.doesNotMatch(fields, /values\.title = requestTitle\(description/);
+});

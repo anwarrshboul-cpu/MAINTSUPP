@@ -125,6 +125,13 @@ export const CAPABILITY_CATALOGUE = [
     description: "Create, update and move rows, columns and groups on a board.",
   },
   {
+    key: "requests.create",
+    label: "Raise maintenance requests",
+    group: "Operational data",
+    description:
+      "Report a new job through New request, with photos. Changing a job afterwards still needs Edit board rows.",
+  },
+  {
     key: "sites.edit",
     label: "Edit sites and assets",
     group: "Operational data",
@@ -447,6 +454,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
   admin: [
     "board.view",
     "board.edit",
+    "requests.create",
     "sites.edit",
     "data.import",
     "data.export",
@@ -473,6 +481,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
   owner: [
     "board.view",
     "board.edit",
+    "requests.create",
     "sites.edit",
     "data.import",
     "data.export",
@@ -486,14 +495,19 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "integrations.manage",
     "navigation.personalise",
   ],
-  manager: ["board.view", "board.edit", "sites.edit", "data.export", "navigation.personalise"],
+  manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
   /*
    * `navigation.personalise` for clients too: arranging your OWN sidebar was
    * open to every signed-in person before the roles-and-access batch, it is
    * self-scoped and lock-bound, and the owner's decision keeps an existing safe
    * personal-preference path. A Super Admin can close it per workspace.
    */
-  client: ["board.view", "data.export", "navigation.personalise"],
+  /*
+   * `requests.create` — owner decision, 2026-10-01: a client reporting a fault
+   * at their own store is the product's first job. They may RAISE a job;
+   * changing one is still `board.edit`.
+   */
+  client: ["board.view", "requests.create", "data.export", "navigation.personalise"],
 };
 
 const DEFAULT_SETS: Record<WorkspaceRole, ReadonlySet<Capability>> = {

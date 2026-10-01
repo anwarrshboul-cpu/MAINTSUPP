@@ -15,6 +15,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import BoardChrome, { type BoardView } from "./board-chrome";
+import { BoardSearchEmpty } from "./board-search-empty";
 import { viewReplacesGrid, type BoardCalendarWiring } from "./board-view-pane";
 import BoardColumnSummary from "./board-column-summary";
 import { sectionIdentity } from "./board-identity";
@@ -3838,6 +3839,7 @@ export function LiveMaintenanceBoard({
           hidden={(isMobile && mobileLayout === "cards") || gridReplaced}
         >
           <div className="live-board-canvas">
+            <BoardSearchEmpty query={query} matches={visibleRows.length} noun={isMaintenanceBoard ? "jobs" : identity.itemNoun} onClear={() => setQuery("")} />
             {/* The phone's one column-header row. Draws nothing on a desktop. */}
             <MobileBoardStickyHeader
               active={isMobile}
@@ -4788,6 +4790,7 @@ function BoardRow({
   const suppressRowClickRef = useRef(false);
   // The "…" the portalled row menu is anchored to.
   const moreRef = useRef<HTMLButtonElement | null>(null);
+  const rowName = boardItemName(request); // QA: labels named "demo-job-od2", not the job.
   // Move column: 38 groups x 744 rows = 28,272 <option>s. Build them on focus.
   const [moveListOpen, setMoveListOpen] = useState(false);
   /* Both live in board-pinning.ts, which owns the sticky offsets they read. */
@@ -5424,7 +5427,7 @@ function BoardRow({
            * anything, which is what keeps this a button you can click.
            */
           data-board-row-handle
-          aria-label={"Actions for " + request.id}
+          aria-label={"Actions for " + rowName}
           aria-expanded={menuOpen}
           title="Click for item actions"
           onClick={onMenuToggle}
@@ -5434,7 +5437,7 @@ function BoardRow({
         )}
         <input
           type="checkbox"
-          aria-label={"Select " + request.id}
+          aria-label={"Select " + rowName}
           checked={selected}
           /* Out of the grip's way; the phone gutter is 42px and holds both. */
           style={mobile ? { marginLeft: 10 } : undefined}
@@ -5444,7 +5447,7 @@ function BoardRow({
           open={menuOpen}
           anchorRef={moreRef}
           onClose={onMenuClose}
-          label={"Actions for " + request.id}
+          label={"Actions for " + rowName}
         >
           <div className="sheet-row-menu" data-board-drag-ignore>
             <button type="button" onClick={onOpen}>

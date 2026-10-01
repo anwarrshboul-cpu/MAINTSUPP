@@ -45,9 +45,19 @@
    * hard against the left of the screen. The gutter is given back to the prose
    * only, and only on the tab that causes it: 14px is where `.section-header
    * h1` sits on every other register at this width.
+   *
+   * QA at 390px: the "Raise a ticket" row and the tab strip below the heading
+   * had the same problem — flush against both edges — and the heading's 14px
+   * sat 2px off the 16px gutter the board's own bars use on a phone. All three
+   * now take the same 16px.
    */
   .store-documentation:has(.live-board-page) .store-documentation__title {
-    padding-inline: 14px;
+    padding-inline: 16px;
+  }
+
+  .store-documentation:has(.live-board-page) .store-documentation__actions,
+  .store-documentation:has(.live-board-page) .store-documentation__tabs {
+    margin-inline: 16px;
   }
 }
 

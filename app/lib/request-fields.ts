@@ -136,9 +136,13 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
     const description = trimString(fields.description, 1200);
     if (description) {
       values.description = description;
-      /* An explicit title, when the caller sent one, outranks the derivation —
-         see `requestTitle`. Without one this is what it always was. */
-      values.title = requestTitle(description, trimString(fields.title, 200) || null);
+      /*
+       * An EDIT never renames the job (owner decision, 2026-10-01): this is the
+       * update path (PATCH and the automation engine), and re-deriving the title
+       * from the new description silently renamed a job its board still showed
+       * under the old name. A job's name is set when it is created and changed
+       * by renaming it; the explicit `title` below still lands.
+       */
     }
   }
   /* A title sent WITHOUT a description still lands: renaming a job is its own

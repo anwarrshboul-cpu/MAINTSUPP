@@ -55,6 +55,8 @@ import {
  */
 import { isActiveSiteStatus } from "../../lib/site-state";
 import { csvCell } from "../../lib/finance/exports";
+import { fieldsChangedSentence } from "../../lib/activity-fields";
+import { toastToneFor, type ToastTone } from "../../lib/toast-tone";
 /*
  * One definition of the compliance score, and one answer to "may this row be
  * edited here". Both screens below read them, so the Overview tile and the
@@ -173,6 +175,7 @@ import { RaiseTicketButton } from "./raise-ticket";
 // The Updates panel, built against monday's — see update-thread.tsx.
 import { UpdateThread, type ComposerHandle } from "./update-thread";
 import "./update-thread.css";
+import "./toast-tone.css";
 import { useBodyScrollLock } from "./overlay/scroll-lock";
 import { AnchoredPopover } from "./overlay/anchored";
 import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
@@ -275,6 +278,7 @@ import { useGeneratorDocument } from "./reports/invoice-generator";
 import { ReportTab } from "./reports/report-tab";
 import { InvoiceTab } from "./reports/invoice-tab";
 import { GeneratedDocuments } from "./reports/generated-documents";
+import { OptionsAdmin } from "./admin/options-admin";
 
 export type Section =
   | "overview"
@@ -958,7 +962,10 @@ function activityActor(email: string | null, detail?: Record<string, unknown>) {
     .join(" ");
 }
 
-function activityDescription(entry: RequestActivityEntry) {
+function activityDescription(
+  entry: RequestActivityEntry,
+  columnTitle?: (columnKey: string) => string | null | undefined,
+) {
   /*
    * A per-cell change, from `item_activity` — the one store in this system
    * that records WHICH COLUMN moved and what it held on either side.
@@ -987,7 +994,8 @@ function activityDescription(entry: RequestActivityEntry) {
     return `moved the request to ${stage}.`;
   }
   if (entry.action === "request.fields_changed") {
-    return "updated the request details.";
+    // Names the fields `detail.fields` holds (QA: "updated Priority and Due date.").
+    return fieldsChangedSentence(entry.detail.fields, columnTitle);
   }
   if (entry.action.includes("file") || entry.action.includes("attachment")) {
     return "updated the request files.";
@@ -1281,7 +1289,14 @@ export default function PortalApp({
      the job list (the Overview above all). See that route. */
   const [serverNotificationCandidates, setServerNotificationCandidates] = useState<MaintenanceRequest[]>([]);
   const [serverOpenJobs, setServerOpenJobs] = useState<number | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /* The toast carries a TONE (QA: refusals showed the green success check).
+     One-argument callers — every child's `onNotify` — are classified from the
+     wording; the failure paths below say "error" outright. */
+  const [toastState, setToastState] = useState<{ message: string; tone: ToastTone } | null>(null);
+  const setToast = useCallback((message: string | null, tone?: ToastTone) => {
+    setToastState(message ? { message, tone: toastToneFor(message, tone) } : null);
+  }, []);
+  const toast = toastState?.message ?? null;
   /*
    * "loading" is the honest starting state, and it used to be "sample" — which
    * was accurate only because sample data was on screen.
@@ -1371,11 +1386,11 @@ export default function PortalApp({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadRuntimeContext().catch((error: unknown) => {
-        setToast(error instanceof Error ? error.message : "The client workspace could not be loaded.");
+        setToast(error instanceof Error ? error.message : "The client workspace could not be loaded.", "error");
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadRuntimeContext]);
+  }, [loadRuntimeContext, setToast]);
 
   /* A new or removed workspace logo redraws the sidebar mark without a reload:
      the logo panel announces the change and the context is read again. */
@@ -1399,7 +1414,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The test role could not be changed.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The test role could not be changed.");
+      setToast(error instanceof Error ? error.message : "The test role could not be changed.", "error");
       setContextBusy(false);
     }
   };
@@ -1463,7 +1478,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The client workspace could not be selected.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The client workspace could not be selected.");
+      setToast(error instanceof Error ? error.message : "The client workspace could not be selected.", "error");
       setContextBusy(false);
     }
   };
@@ -1494,7 +1509,7 @@ export default function PortalApp({
       if (!response.ok) throw new Error(payload.error || "The client workspace could not be created.");
       window.location.reload();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The client workspace could not be created.");
+      setToast(error instanceof Error ? error.message : "The client workspace could not be created.", "error");
       setContextBusy(false);
     }
   };
@@ -1923,7 +1938,7 @@ export default function PortalApp({
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 4200);
     return () => window.clearTimeout(timer);
-  }, [toast]);
+  }, [toast, setToast]);
 
   /*
    * WHICH CONTRACTOR REGISTER THIS SCREEN IS ON — W2.
@@ -1981,7 +1996,7 @@ export default function PortalApp({
       setContractorReloadToken((token) => token + 1);
       setToast("Shared workspace updated. Dashboard totals have been refreshed.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The shared record could not be saved.");
+      setToast(error instanceof Error ? error.message : "The shared record could not be saved.", "error");
       throw error;
     } finally {
       setWorkspaceBusy(false);
@@ -2005,7 +2020,7 @@ export default function PortalApp({
       setContractorReloadToken((token) => token + 1);
       setToast("Record archived. Its history remains available.");
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "The record could not be archived.");
+      setToast(error instanceof Error ? error.message : "The record could not be archived.", "error");
       throw error;
     } finally {
       setWorkspaceBusy(false);
@@ -2672,6 +2687,9 @@ export default function PortalApp({
 
     const payload = (await response.json()) as {
       request: MaintenanceRequest;
+      /* Present when the raiser holds `requests.create` but not `board.edit`
+         (a client): the job's own short-lived upload grant. */
+      uploadToken?: string;
     };
     let created = payload.request;
     const failedUploads: string[] = [];
@@ -2683,6 +2701,7 @@ export default function PortalApp({
             file,
             requestId: created.id,
             kind: "issue",
+            ...(payload.uploadToken ? { uploadToken: payload.uploadToken } : {}),
           });
           if (uploadPayload.request) {
             created = uploadPayload.request;
@@ -2906,6 +2925,7 @@ export default function PortalApp({
         caught instanceof Error
           ? caught.message
           : "The workflow update could not be saved.",
+        "error",
       );
     }
   };
@@ -2998,11 +3018,12 @@ export default function PortalApp({
           caught instanceof Error
             ? caught.message
             : "The notification could not be updated.",
+          "error",
         );
         throw caught;
       }
     },
-    [],
+    [setToast],
   );
 
   /*
@@ -3380,7 +3401,7 @@ export default function PortalApp({
                   if (!response.ok || !body.request) throw new Error(body.error || "That job could not be opened.");
                   openRequest(body.request);
                 })
-                .catch((error: unknown) => setToast(error instanceof Error ? error.message : "That job could not be opened."));
+                .catch((error: unknown) => setToast(error instanceof Error ? error.message : "That job could not be opened.", "error"));
             }}
           />
 
@@ -3625,15 +3646,20 @@ export default function PortalApp({
                 />
               </AnchoredPopover>
             </div>
-            <button
-              className="primary-button topbar-create"
-              type="button"
-              aria-label="New request"
-              onClick={() => setShowCreateRequest(true)}
-            >
-              <Icon name="plus" size={18} />
-              <span>New request</span>
-            </button>
+            {/* Only for a role the job route will serve (`board.edit`): a client
+                was offered New request, filled it in and was refused with a 403. */}
+            {runtimeContext?.capabilities?.["board.edit"] !== false ||
+            runtimeContext?.capabilities?.["requests.create"] === true ? (
+              <button
+                className="primary-button topbar-create"
+                type="button"
+                aria-label="New request"
+                onClick={() => setShowCreateRequest(true)}
+              >
+                <Icon name="plus" size={18} />
+                <span>New request</span>
+              </button>
+            ) : null}
             {/*
               The avatar was decorative. It is now monday's avatar menu: the
               two-column Account / Explore panel, the workspace + plan pill
@@ -4262,12 +4288,15 @@ export default function PortalApp({
         }}
       />
 
-      {toast && (
-        <div className="toast" role="status">
+      {toastState && (
+        <div
+          className={`toast${toastState.tone === "error" ? " toast--error" : ""}`}
+          role={toastState.tone === "error" ? "alert" : "status"}
+        >
           <span>
-            <Icon name="check" size={17} />
+            <Icon name={toastState.tone === "error" ? "alert" : "check"} size={17} />
           </span>
-          {toast}
+          {toastState.message}
         </div>
       )}
     </div>
@@ -7076,6 +7105,13 @@ function SettingsView({
           declaration by source position, so it is read from here and never moved. */}
       <NavIconsPanel catalogue={navCatalogue} />
 
+      {/* The workspace's dropdown lists - site types and statuses, asset
+          categories, trades, labels. Every "is not a configured site type. Add
+          it in Settings first." refusal pointed here, and the editor existed
+          but was mounted nowhere. Writes need board.edit; shown with the rest of
+          the workspace settings. */}
+      {canEditSettings ? <OptionsAdmin onNotify={onNotify} /> : null}
+
       {/* §33 — what this workspace emails and to whom, in place of three
           switches nothing read. See views/workspace-email-panel.tsx for why they
           were removed rather than wired; a person's own switches are in
@@ -9084,7 +9120,8 @@ function RequestDrawer({
                     />
                     <p>
                       <strong>{activityActor(entry.actorEmail, entry.detail)}</strong>{" "}
-                      {activityDescription(entry)}
+                      {activityDescription(entry, (key) =>
+                        boardSnapshot?.columns.find((col) => col.key === key)?.column.title)}
                     </p>
                     <small>{formatDate(entry.createdAt, true)}</small>
                   </div>

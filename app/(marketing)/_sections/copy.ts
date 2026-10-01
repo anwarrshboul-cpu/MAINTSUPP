@@ -195,7 +195,8 @@ export type PageCopy = typeof PAGE_COPY;
 export const SEO_COPY = {
   home: {
     title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
-    description: "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio. Vetted UK contractor network, verified close-outs, per-store pricing.",
+    /* 160 characters: the 191-character line was cut off in search results. */
+    description: "One point of contact for reactive repairs, planned maintenance and compliance across UK retail and commercial portfolios. Vetted contractors, per-store pricing.",
     socialDescription: "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio.",
   },
   contractors: {

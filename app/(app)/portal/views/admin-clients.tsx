@@ -332,6 +332,8 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
   const [ownerEmail, setOwnerEmail] = useState<Record<string, string>>({});
   const [newWorkspace, setNewWorkspace] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState<Record<string, string>>({});
+  /* Workspace renames, keyed by company: which workspace, and its new name. */
+  const [workspaceRename, setWorkspaceRename] = useState<Record<string, { id: string; name: string }>>({});
 
   if (denied || !data?.actor.platformAdmin) return null;
 
@@ -564,6 +566,66 @@ function CompaniesPanel({ onChanged }: { onChanged: () => void | Promise<void> }
                   disabled={busy === `rename-${company.id}` || !(renaming[company.id] ?? "").trim()}
                 >
                   Rename
+                </button>
+              </form>
+            ) : null}
+            {company.canRename && company.workspaces.length ? (
+              <form
+                onSubmit={async (event) => {
+                  event.preventDefault();
+                  const pick = workspaceRename[company.id];
+                  const target = company.workspaces.find((workspace) => workspace.id === (pick?.id || company.workspaces[0].id));
+                  const name = (pick?.name ?? "").trim();
+                  if (!target || !name || name === target.name) return;
+                  const ok = await companyAction(
+                    `rename-workspace-${company.id}`,
+                    { action: "rename_workspace", clientCompanyId: company.id, organisationId: target.id, name },
+                    `${target.name} is now called ${name}.`,
+                  );
+                  if (ok) setWorkspaceRename((current) => ({ ...current, [company.id]: { id: target.id, name: "" } }));
+                }}
+              >
+                {company.workspaces.length > 1 ? (
+                  <label className="admin-field">
+                    <span>Workspace</span>
+                    <select
+                      value={workspaceRename[company.id]?.id || company.workspaces[0].id}
+                      onChange={(event) =>
+                        setWorkspaceRename((current) => ({
+                          ...current,
+                          [company.id]: { id: event.target.value, name: current[company.id]?.name ?? "" },
+                        }))
+                      }
+                    >
+                      {company.workspaces.map((workspace) => (
+                        <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <label className="admin-field admin-field--grow">
+                  <span>{company.workspaces.length > 1 ? "New workspace name" : "Workspace name"}</span>
+                  <input
+                    value={workspaceRename[company.id]?.name ?? ""}
+                    maxLength={120}
+                    placeholder={
+                      company.workspaces.find((workspace) => workspace.id === workspaceRename[company.id]?.id)?.name ??
+                      company.workspaces[0].name
+                    }
+                    onChange={(event) =>
+                      setWorkspaceRename((current) => ({
+                        ...current,
+                        [company.id]: { id: current[company.id]?.id || company.workspaces[0].id, name: event.target.value },
+                      }))
+                    }
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="secondary-button"
+                  disabled={busy === `rename-workspace-${company.id}` || !(workspaceRename[company.id]?.name ?? "").trim()}
+                >
+                  Rename workspace
                 </button>
               </form>
             ) : null}
