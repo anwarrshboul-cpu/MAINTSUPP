@@ -4116,6 +4116,7 @@ export default function PortalApp({
           {activeSurface === "settings" && (
             <SettingsView
               navCatalogue={navCatalogue}
+              canEditModules={isSuperAdmin}
               settings={currentSettings}
               /*
                * The categories actually in use, counted from the jobs on
@@ -6901,6 +6902,7 @@ function SettingsView({
   categories,
   busy,
   navCatalogue,
+  canEditModules,
   onSave,
   onNotify,
 }: {
@@ -6917,6 +6919,13 @@ function SettingsView({
    * from here instead.
    */
   navCatalogue: SidebarNavEntry[];
+  /*
+   * Whether this person holds `navigation.edit` (Super Admin only). The panel
+   * already renders nothing on its 403, but the browser still logs every 403 as a
+   * console error, so a client or manager opening Settings saw a red "Failed to
+   * load resource" for a request that should never have been made.
+   */
+  canEditModules: boolean;
   onSave: (settings: WorkspaceSettings) => Promise<void>;
   onNotify: (message: string) => void;
 }) {
@@ -7003,8 +7012,9 @@ function SettingsView({
           Super Admin (`navigation.edit`), so the panel renders nothing for every
           other role rather than showing a refusal; see
           views/portal-modules-panel.tsx for why a 403 is an answer here and a
-          read-only card next door. */}
-      <PortalModulesPanel />
+          read-only card next door. Not mounted at all for other roles, so the
+          refused request is never sent. */}
+      {canEditModules ? <PortalModulesPanel /> : null}
 
       {/* And which glyph each sidebar entry wears — the third workspace-wide
           presentation decision, beside the palette and the module switches. It takes
