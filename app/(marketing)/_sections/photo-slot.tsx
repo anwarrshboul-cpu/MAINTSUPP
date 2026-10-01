@@ -33,8 +33,10 @@ export const photoAlt: Record<string, string> = {
      covers both; this entry is the guarantee that stands if a caller forgets. */
   "hero-maintenance-mobile-v5":
     "Two maintenance engineers in hi-vis jackets and hard hats at an open plant panel on a London rooftop at dusk, a boom lift raised beside them with a worker in its basket and the lit City skyline between",
+  /* Described from the file itself: it was registered as "an engineer working on
+     a shopfront", which is not what the photograph shows. */
   "hero-london-maintenance":
-    "A maintenance engineer working on a shopfront in a London high street",
+    "Two engineers in hi-vis jackets and hard hats reviewing a tablet on a London rooftop at dusk, with the City skyline behind them",
   "evidence-closeout":
     "An engineer photographing completed work on a phone as close-out evidence",
 

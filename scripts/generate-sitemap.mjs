@@ -50,6 +50,13 @@ const ORIGIN = "https://maintsupp.com";
  */
 const ROUTES = [
   { path: "/",            changefreq: "weekly",  priority: "1.0", sources: ["app/(marketing)/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components/structured-data.ts"] },
+  /* The menu's pages. Each is a page of its own AND the homepage section it
+     opens with, so `_sections` is part of what each one is made of. */
+  { path: "/services",     changefreq: "monthly", priority: "0.9", sources: ["app/(marketing)/services/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components"] },
+  { path: "/how-it-works", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/how-it-works/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components"] },
+  { path: "/pricing",      changefreq: "monthly", priority: "0.9", sources: ["app/(marketing)/pricing/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components"] },
+  { path: "/case-study",   changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/case-study/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components"] },
+  { path: "/contact",      changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/contact/page.tsx", "app/(marketing)/_sections", "app/(marketing)/_components"] },
   { path: "/contractors", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/contractors/page.tsx", "app/(marketing)/_components"] },
   { path: "/faqs",        changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/faqs/page.tsx", "app/(marketing)/_components"] },
   { path: "/privacy",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/privacy/page.tsx", "app/(marketing)/_components"] },

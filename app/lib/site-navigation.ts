@@ -52,16 +52,20 @@ import { claimViolation, cleanSlug } from "./cms-blocks.ts";
  * THE HEADER MENU AS SHIPPED — also the fallback when nothing is stored or the
  * database cannot answer.
  *
- * Six links, and every one of them lands on a section that exists.
+ * Six links, and every one of them is a PAGE.
  *
- * FIVE OF THESE SIX ARE ANCHORS ON THE HOMEPAGE; "Contractors" is a ROUTE.
- * `/contractors` is a real page — the application form for the contractor
- * network — and until it joined this list the only way to it was a single line
- * in the footer, which is where links go to not be found. "Contact Us" sits
- * last so that contacting stays the last thing in the row, which is where the
- * footer and the utility bar also put it. "Contact Us" points at `#contact`, the
- * same section the footer's "Contact" link goes to — the page's only form that
- * asks who you are and how to reach you.
+ * They were five homepage anchors and one route. On a phone that made the menu
+ * a scroll control: tap "Pricing" and the drawer closed onto the middle of the
+ * homepage, with no address of its own to share or bookmark. Each is now a page
+ * of its own (`app/(marketing)/<path>/page.tsx`) that opens with the homepage's
+ * section and carries the detail the homepage had no room for. The homepage
+ * still draws every section, and the anchors in HOMEPAGE_ANCHORS still work for
+ * any link that wants one.
+ *
+ * `/contractors` is the application form for the contractor network. "Contact
+ * Us" sits last so that contacting stays the last thing in the row, which is
+ * where the footer and the utility bar also put it; it opens `/contact`, the
+ * page built around the enquiry form the footer's "Contact" link also opens.
  *
  * MOVED HERE FROM `app/(marketing)/_sections/chrome.tsx` (decision J). That file
  * is a client component, and a server module importing a value from a
@@ -72,12 +76,12 @@ import { claimViolation, cleanSlug } from "./cms-blocks.ts";
  * read this list read the same text they always did.
  */
 export const NAV = [
-  ["#services", "Services"],
-  ["#how", "How It Works"],
-  ["#pricing", "Pricing"],
-  ["#case-study", "Case Study"],
+  ["/services", "Services"],
+  ["/how-it-works", "How It Works"],
+  ["/pricing", "Pricing"],
+  ["/case-study", "Case Study"],
   ["/contractors", "Contractors"],
-  ["#contact", "Contact Us"],
+  ["/contact", "Contact Us"],
 ] as const;
 
 /* ------------------------------------------------------------------ */
@@ -127,24 +131,24 @@ export const FOOTER_DEFAULTS: ReadonlyArray<{
     id: "services",
     heading: "Services",
     links: [
-      { id: "ftr-reactive", href: "#services", label: "Reactive Maintenance" },
-      { id: "ftr-planned", href: "#services", label: "Planned Maintenance" },
-      { id: "ftr-compliance", href: "#services", label: "Compliance Coordination" },
-      { id: "ftr-projects", href: "#services", label: "Projects & Store Works" },
+      { id: "ftr-reactive", href: "/services", label: "Reactive Maintenance" },
+      { id: "ftr-planned", href: "/services", label: "Planned Maintenance" },
+      { id: "ftr-compliance", href: "/services", label: "Compliance Coordination" },
+      { id: "ftr-projects", href: "/services", label: "Projects & Store Works" },
     ],
   },
   {
     id: "company",
     heading: "Company",
     links: [
-      { id: "ftr-how", href: "#how", label: "How It Works" },
-      { id: "ftr-pricing", href: "#pricing", label: "Pricing" },
-      { id: "ftr-case-study", href: "#case-study", label: "Case Study" },
+      { id: "ftr-how", href: "/how-it-works", label: "How It Works" },
+      { id: "ftr-pricing", href: "/pricing", label: "Pricing" },
+      { id: "ftr-case-study", href: "/case-study", label: "Case Study" },
       { id: "ftr-sectors", href: "#sectors", label: "Who We Help" },
       { id: "ftr-replaces", href: "#replaces", label: "What This Replaces" },
       { id: "ftr-your-contractors", href: "#your-contractors", label: "Your Contractors or Ours" },
       { id: "ftr-join", href: "/contractors", label: "Join our contractor network" },
-      { id: "ftr-contact", href: "#contact", label: "Contact" },
+      { id: "ftr-contact", href: "/contact", label: "Contact" },
     ],
   },
   {
@@ -249,6 +253,11 @@ export const HOMEPAGE_ANCHORS: ReadonlyArray<{ id: string; label: string }> = [
 /** The site's own pages a link may name directly. */
 export const SITE_ROUTES: ReadonlyArray<{ path: string; label: string }> = [
   { path: "/", label: "Home page" },
+  { path: "/services", label: "Services" },
+  { path: "/how-it-works", label: "How It Works" },
+  { path: "/pricing", label: "Pricing" },
+  { path: "/case-study", label: "Case Study" },
+  { path: "/contact", label: "Contact us" },
   { path: "/contractors", label: "Contractor network" },
   { path: "/faqs", label: "All FAQs" },
   { path: "/privacy", label: "Privacy notice" },

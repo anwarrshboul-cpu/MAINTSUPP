@@ -14,6 +14,11 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 test("every marketing page shares as itself, with an image", async () => {
   for (const [file, path] of [
     ["app/(marketing)/page.tsx", "/"],
+    ["app/(marketing)/services/page.tsx", "/services"],
+    ["app/(marketing)/how-it-works/page.tsx", "/how-it-works"],
+    ["app/(marketing)/pricing/page.tsx", "/pricing"],
+    ["app/(marketing)/case-study/page.tsx", "/case-study"],
+    ["app/(marketing)/contact/page.tsx", "/contact"],
     ["app/(marketing)/contractors/page.tsx", "/contractors"],
     ["app/(marketing)/faqs/page.tsx", "/faqs"],
     ["app/(marketing)/privacy/page.tsx", "/privacy"],

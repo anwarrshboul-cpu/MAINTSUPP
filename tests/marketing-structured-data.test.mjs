@@ -60,6 +60,15 @@ test("every existing non-homepage marketing route has visible breadcrumbs", asyn
     assert.match(page, /<Breadcrumbs items=/, route);
     assert.ok(page.includes(`path: "/${route}"`), route);
   }
+  /* The menu's pages draw their breadcrumbs through the shared banner, which
+     hands `crumbs` to the same component. */
+  const parts = await readFile(new URL("../app/(marketing)/_components/page-parts.tsx", import.meta.url), "utf8");
+  assert.match(parts, /<Breadcrumbs items=\{crumbs\} \/>/);
+  for (const route of ["services", "how-it-works", "pricing", "case-study", "contact"]) {
+    const page = await readFile(new URL(`../app/(marketing)/${route}/page.tsx`, import.meta.url), "utf8");
+    assert.match(page, /crumbs=\{\[\{ name: "Home", path: "\/" \}/, route);
+    assert.ok(page.includes(`path: "/${route}"`), route);
+  }
   const cms = await readFile(new URL("../app/(marketing)/p/[slug]/page.tsx", import.meta.url), "utf8");
   assert.match(cms, /<Breadcrumbs items=/);
   assert.ok(cms.includes("path: `/p/${page.slug}`"));
