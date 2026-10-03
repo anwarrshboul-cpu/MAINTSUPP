@@ -424,7 +424,21 @@ test("each form goes where the brief sends it, with the subject it asks for", as
      a test that the code equals itself. */
   const notifications = await read("app/lib/notifications.ts");
   assert.match(notifications, /source\.NOTIFY_OPS \?\? "operations@maintsupp\.com"/);
-  assert.match(notifications, /source\.NOTIFY_SALES \?\? "anwar@maintsupp\.com"/);
+  /* Re-pointed 2026-10-03 (owner's decision): the contact inbox is the address
+     the website prints, info@, where it was anwar@. Still three inboxes, still
+     no shared fallback — the assertions below are unchanged. */
+  assert.match(notifications, /source\.NOTIFY_SALES \?\? "info@maintsupp\.com"/);
+  assert.match(notifications, /source\.NOTIFY_FROM \?\? "MAINTSUPP <admin@maintsupp\.com>"/);
+  /* And an inbox may name several people, comma-separated. */
+  assert.match(notifications, /to: splitRecipients\(to\),/);
+  const { splitRecipients } = await import("../app/lib/notifications.ts").catch(() => ({}));
+  if (splitRecipients) {
+    assert.deepEqual(splitRecipients("info@maintsupp.com, anwar@maintsupp.com;"), [
+      "info@maintsupp.com",
+      "anwar@maintsupp.com",
+    ]);
+    assert.deepEqual(splitRecipients("info@maintsupp.com"), ["info@maintsupp.com"]);
+  }
   assert.match(notifications, /source\.NOTIFY_CONTRACTORS \?\? "admin@maintsupp\.com"/);
   /*
    * NO SHARED FALLBACK. `opsInbox` used to fall back to `salesInbox`, so a

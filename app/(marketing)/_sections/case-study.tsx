@@ -31,11 +31,12 @@ import { HOME_COPY, type HomeCopy } from "./copy";
  * work is closed, and is true without arithmetic.
  */
 const STATS = [
-  /* 21, not "+20". Homepage V3 states the real count instead of the "at
-     least" notation the section shipped with; the hero's trust chip carries
+  /* 27 (owner, 2026-10-03; it was 21 from Homepage V3, and "+20" before that).
+     The page states the real count instead of the "at least" notation the
+     section shipped with; the hero's trust chip carries
      the same figure, and the heading and the lede below carry it twice more.
      All four move together or the page claims two portfolio sizes. */
-  { value: "21", label: "stores coordinated" },
+  { value: "27", label: "stores coordinated" },
   { value: "One", label: "monthly report" },
   { value: "Photo-verified", label: "close-outs" },
 ] as const;

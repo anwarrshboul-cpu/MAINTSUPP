@@ -21,7 +21,7 @@ import { pageSocial } from "../../lib/page-social";
 
 const TITLE = "Case Study";
 const DESCRIPTION =
-  "How Maintsupp coordinates maintenance for a UK fragrance retailer with 21 stores and kiosks: one point of contact, vetted contractors and photo-verified close-outs.";
+  "How Maintsupp coordinates maintenance for a UK fragrance retailer with 27 stores and kiosks: one point of contact, vetted contractors and photo-verified close-outs.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -39,7 +39,7 @@ export default async function CaseStudyPage() {
       <PageHero
         crumbs={[{ name: "Home", path: "/" }, { name: "Case Study", path: "/case-study" }]}
         eyebrow="Case study"
-        title="A UK fragrance retailer: 21 stores and kiosks, one point of contact"
+        title="A UK fragrance retailer: 27 stores and kiosks, one point of contact"
         lede="Stores on the high street and kiosks in shopping centres, each with its own access rules, contractors and compliance dates — now run through one accountable coordinator and one monthly report."
         media={
           <ApprovedPhoto
@@ -60,7 +60,7 @@ export default async function CaseStudyPage() {
         <div className="featurerows">
           <FeatureRow
             title="The brief"
-            body="A portfolio of 21 stores and kiosks needed one accountable contact for every repair, every compliance date and every store project — instead of store managers each finding and chasing their own contractors."
+            body="A portfolio of 27 stores and kiosks needed one accountable contact for every repair, every compliance date and every store project — instead of store managers each finding and chasing their own contractors."
             points={[
               "High-street stores and shopping-centre kiosks",
               "Centre permits and access windows to respect",
