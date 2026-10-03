@@ -13293,7 +13293,9 @@ th.sheet-column--name {
     height: calc(100dvh - var(--mobile-topbar-height) - 128px);
     min-height: 390px;
     overflow: auto;
-    overscroll-behavior: contain;
+    /* The block axis hands on to the page here too - see the base rule. A
+       finger dragging down at the grid's own top must move the page. */
+    overscroll-behavior: contain auto;
     scroll-padding: 0;
     touch-action: pan-x pan-y;
   }

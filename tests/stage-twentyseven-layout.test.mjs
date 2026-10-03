@@ -53,6 +53,19 @@
  * same height in both states. `documentElement.scrollHeight` identical
  * collapsed and expanded is the whole proof, and it is measured below in a real
  * browser at both widths.
+ *
+ * SUPERSEDED AS A MECHANISM, 2026-10-03 — AND KEPT AS THE REASON.
+ *
+ * The owner asked for the meters to stay the strip's size at every scroll
+ * position: the page visibly re-arranging itself part-way through a scroll,
+ * together with a grid that swallowed the wheel at its own top, read as a
+ * fault ("can't scroll to the top"). So the strip is now the resting state and
+ * the full cards are opened by the reader's own "Show meter detail", until
+ * they close them. Nothing about the section's size follows the scroll any
+ * more, which is a stronger form of the invariant above rather than a
+ * retreat from it: there is no scroll-driven change left for anchoring to
+ * react to. Every pin below that described the old collapse-on-pin has been
+ * re-pointed at that contract, with the reason beside it.
  */
 
 import assert from "node:assert/strict";
@@ -269,18 +282,45 @@ test("the meters stick under the top bar and pass beneath it", async () => {
   );
 });
 
-test("collapsing costs the document no height — the anti-oscillation invariant", async () => {
+test("the strip's size never follows the scroll — the anti-oscillation invariant", async () => {
+  /*
+   * RE-POINTED 2026-10-03. This test used to pin `height` plus a bottom margin
+   * of `--jobs-rail-natural` less the strip, which made a scroll-driven
+   * collapse cost the document no height. The collapse is no longer driven by
+   * scroll at all, so the invariant moved to where it now lives: the size is
+   * the reader's click and nothing else, and no rule may make the section's
+   * outer height depend on `is-stuck`, the one class a scroll still changes.
+   */
+  const source = await read(STRIP);
+  assert.match(source, /const \[expanded, setExpanded\] = useState\(false\);\s+const collapsed = !expanded;/);
+  assert.match(source, /setStuck\(!entry\.isIntersecting\);/);
+  const observer = source.slice(
+    source.indexOf("observer = new IntersectionObserver("),
+    source.indexOf("observer.observe(trigger)"),
+  );
+  assert.doesNotMatch(observer, /setExpanded/, "a scroll must never open or close the cards");
+
   const rules = declarationRules(await read(BRAND));
   const rule = ruleFor(rules, ".live-job-metrics.is-collapsed", "margin-bottom");
-
-  // Height and a bottom margin of exactly what the cards gave up. Losing either
-  // half puts the oscillation back — see the header of this file.
   assert.match(rule.body, /height:\s*var\(--jobs-rail-h\)/);
   assert.match(
     rule.body,
-    /margin-bottom:\s*calc\(var\(--jobs-rail-natural[^)]*\)\s*-\s*var\(--jobs-rail-h\)\)/,
-    "the collapsed section must give back, as margin, exactly the height it stopped occupying",
+    /margin-bottom:\s*0;/,
+    "the strip reserves no band under itself: there is no scroll-driven collapse left to compensate",
   );
+
+  // Expanded, the room for the out-of-flow control is reserved pinned or not.
+  // (The phone restates it as 0: there the control sits inside the scroller.)
+  const reserve = ruleFor(rules, ".live-job-metrics:not(.is-collapsed)", "margin-bottom: 48px");
+  assert.match(reserve.body, /margin-bottom:\s*48px/);
+  for (const sized of rules) {
+    if (!sized.selectors.some((selector) => /\.live-job-metrics\.is-stuck(?![\w-])[^ ]*$/.test(selector))) continue;
+    assert.doesNotMatch(
+      sized.body,
+      /(^|[;\s])(height|min-height|max-height|margin|margin-bottom|margin-top|padding|padding-top|padding-bottom|border|border-width)\s*:/,
+      `is-stuck changes while the page scrolls, so it must not size the section:\n${sized.selectors.join(", ")} {${sized.body}}`,
+    );
+  }
 });
 
 test("the natural height is measured, and never measured while collapsed", async () => {
@@ -352,16 +392,32 @@ test("the strip removes nothing: six cards, and one control that is new", async 
    * "not pinned" drew the cards straight over the board's identity bar.
    */
   const strip = await read(STRIP);
-  assert.match(strip, /railState: stuck \? \(collapsed \? "on" : "open"\) : "off"/);
+  /* Re-pointed 2026-10-03: still three values, but "off" now means "no meters
+     on this board" rather than "not pinned" — the strip is the resting state
+     at every scroll position, so its height token must be defined before the
+     first scroll, and the offsets "on" drives are sticky `top`s that do
+     nothing until their bar pins. */
+  assert.match(strip, /railState: enabled \? \(collapsed \? "on" : "open"\) : "off"/);
   assert.match(
     strip,
     /sectionClassName: `analytics-metric-grid analytics-metric-grid--six live-job-metrics\$\{\s*stuck \? " is-stuck" : ""\s*\}\$\{collapsed \? " is-collapsed" : ""\}`/,
   );
 
-  // The toggle exists only while the section is stuck: a seventh child at the
-  // top of the page would be a seventh cell in a six-column grid.
-  assert.match(section, /<JobsMeterToggle stuck=\{meters\.stuck\}/);
-  assert.match(strip, /if \(!stuck\) return null;/);
+  /*
+   * Re-pointed 2026-10-03. The toggle used to exist only while the section was
+   * stuck, so that it was never a seventh cell in a six-column grid. It is now
+   * the only way to the detail at every scroll position, so it always renders —
+   * and the seventh-cell contract is kept by the CSS instead, which takes it
+   * out of flow whenever the cards are open.
+   */
+  assert.match(section, /<JobsMeterToggle collapsed=\{meters\.collapsed\} onToggle=\{meters\.toggle\} \/>/);
+  assert.doesNotMatch(strip, /if \(!stuck\) return null;/);
+  const outOfFlow = ruleFor(
+    declarationRules(await read(BRAND)),
+    ".live-job-metrics:not(.is-collapsed) .live-job-metrics__toggle",
+    "position: absolute",
+  );
+  assert.match(outOfFlow.body, /top:\s*100%/);
   assert.match(strip, /aria-expanded=\{!collapsed\}/);
   assert.match(strip, /const label = collapsed \? "Show meter detail" : "Collapse meters";/);
   assert.match(strip, /aria-label=\{label\}/);
@@ -713,7 +769,8 @@ test("1440: the meters stay on screen all the way down, and the page never chang
   await browser.go(JOBS, JOBS_READY);
 
   const top = await browser.evaluate(JOBS_PROBE);
-  assert.equal(top.collapsed, false, "the cards are drawn in full at the top of the page");
+  // Re-pointed 2026-10-03: the strip is the resting state from the first paint.
+  assert.equal(top.collapsed, true, "the meters are the strip at the top of the page too");
   assert.equal(top.figures.length, 6, "six meters");
   const expandedFigures = top.figures.map((figure) => `${figure.label}=${figure.value}`);
 
@@ -725,15 +782,18 @@ test("1440: the meters stay on screen all the way down, and the page never chang
   );
   const bottom = await browser.evaluate(JOBS_PROBE);
 
-  assert.equal(bottom.collapsed, true, "the strip collapses once the cards reach the top bar");
+  assert.equal(bottom.collapsed, true, "and still the strip at the bottom");
   assert.equal(
     bottom.meters.top,
     bottom.topbar.height,
     "the strip pins flush under the top bar",
   );
-  assert.ok(
-    bottom.meters.height < top.meters.height,
-    `the strip must be shorter than the cards: ${bottom.meters.height} vs ${top.meters.height}`,
+  // Re-pointed 2026-10-03: this compared a strip against the taller cards. The
+  // contract now is that scrolling does not change the section's size at all.
+  assert.equal(
+    bottom.meters.height,
+    top.meters.height,
+    `scrolling must not resize the meters: ${bottom.meters.height} vs ${top.meters.height}`,
   );
 
   // Every figure still on screen, and still the same figure.
@@ -754,7 +814,7 @@ test("1440: the meters stay on screen all the way down, and the page never chang
   assert.equal(
     bottom.pageHeight,
     top.pageHeight,
-    "collapsing must cost the document no height, or the strip oscillates",
+    "scrolling must cost the document no height, or the strip oscillates",
   );
   assert.equal(bottom.overflowX, 0, "no horizontal scrollbar");
 });
@@ -768,7 +828,9 @@ test("1440: parking anywhere in the scroll range settles, and stays settled", as
   const readings = [];
   // 200 is in here on purpose: it is the position at which the first version of
   // this feature alternated 200/78 for as long as it was left alone.
-  for (const y of [0, 60, 90, 100, 150, 200, 250, 300, 480]) {
+  // The range ended at 480 while the full cards sat in the flow; with the strip
+  // as the resting state the page at 1440x900 scrolls 358px, so 350 is the end.
+  for (const y of [0, 60, 90, 100, 150, 200, 250, 300, 350]) {
     await browser.scrollTo(y, "true");
     await new Promise((resolve) => setTimeout(resolve, 400));
     const first = await browser.evaluate(JOBS_PROBE);
@@ -795,12 +857,13 @@ test("1440: parking anywhere in the scroll range settles, and stays settled", as
     );
   }
 
-  // And the collapse follows the scroll rather than the clock.
-  assert.equal(readings[0].first.collapsed, false, "expanded at the top");
-  assert.equal(readings.at(-1).first.collapsed, true, "collapsed at the bottom");
+  // Re-pointed 2026-10-03: the collapse used to follow the scroll. It follows
+  // nothing now — the strip at the top, the strip at the bottom.
+  assert.equal(readings[0].first.collapsed, true, "the strip at the top");
+  assert.equal(readings.at(-1).first.collapsed, true, "the strip at the bottom");
 });
 
-test("the reader can put the full cards back, and that costs no height either", async (t) => {
+test("the reader can open the full cards, and closing them puts the page back exactly", async (t) => {
   if (!browser) return t.skip(browserReason);
 
   const CLICK = `(() => {
@@ -838,12 +901,19 @@ test("the reader can put the full cards back, and that costs no height either", 
     assert.ok(opened.height > strip.meters.height, `${width}: and they are taller than the strip`);
     assert.equal(opened.sparklines, 6, `${width}: with all six sparklines back in the DOM`);
     assert.equal(opened.sparklineDrawn, true, `${width}: and actually drawn`);
-    assert.equal(
-      opened.pageHeight,
-      strip.pageHeight,
-      `${width}: expanding must cost the document no height either`,
+    /*
+     * Re-pointed 2026-10-03. Expanding used to cost the document no height,
+     * because the strip carried a margin standing in for the cards. That band
+     * is gone, so opening the cards now really adds their height — by the
+     * reader's own click, which is the one moment a layout change is expected
+     * — and the contract is that it is exactly reversible (asserted below) and
+     * that it settles (measured at 1440 and 390: parked a second, nothing
+     * moves).
+     */
+    assert.ok(
+      opened.pageHeight > strip.pageHeight,
+      `${width}: the open cards take real room: ${opened.pageHeight} vs ${strip.pageHeight}`,
     );
-    assert.equal(opened.scrollY, strip.scrollY, `${width}: and must not move the reader`);
 
     /*
      * The three-valued attribute. Treating "pinned but expanded" as "not
@@ -894,7 +964,8 @@ test("390: four sticky bars, in sequence, none of them overlapping", async (t) =
   await browser.go(JOBS, JOBS_READY);
 
   const top = await browser.evaluate(JOBS_PROBE);
-  assert.equal(top.collapsed, false);
+  // Re-pointed 2026-10-03: the strip is the resting state at the top as well.
+  assert.equal(top.collapsed, true);
   const before = top.pageHeight;
 
   await browser.scrollTo(

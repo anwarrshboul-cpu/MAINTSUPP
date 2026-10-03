@@ -24,6 +24,12 @@ test("the grid passes a finished vertical scroll up to the page", () => {
   assert.match(baseRule(), /overscroll-behavior:\s*contain auto;/);
 });
 
-test("the grid is not contained on the block axis by a later desktop rule", () => {
-  assert.doesNotMatch(baseRule(), /overscroll-behavior(-y)?:\s*contain;/);
+test("no rule anywhere contains the grid on the block axis again", () => {
+  /* The phone's 760px rule restated `contain` and trapped a finger the same
+     way the base rule trapped the wheel. */
+  const rules = [...css.matchAll(/\.live-board-scroll \{\n([^}]*)\}/g)].map((match) => match[1]);
+  assert.ok(rules.length >= 2, "the base rule and the phone's are both found");
+  for (const body of rules) {
+    assert.doesNotMatch(body, /overscroll-behavior(-y)?:\s*contain;/);
+  }
 });
