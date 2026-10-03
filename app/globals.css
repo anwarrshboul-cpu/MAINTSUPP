@@ -5242,6 +5242,20 @@ label.live-board-tool {
   font-size: 9px;
 }
 
+/*
+ * SIDEWAYS IS CONTAINED, UP AND DOWN IS HANDED ON.
+ *
+ * This used to be `contain` on both axes, and that trapped the reader. The
+ * page scrolls ~480px above this grid and the meters collapse on the way; with
+ * the pointer over the grid every wheel tick went to the grid, and once the
+ * grid was at its own top the tick was swallowed instead of passed up. Measured
+ * at 1440x900: page parked at y=420, grid at scrollTop 0, sixteen wheel-ups,
+ * page still at y=420 - the cards unreachable until the pointer was moved off
+ * the grid onto the top bar. `auto` on the block axis lets the grid finish and
+ * then hand the scroll to the page, which is what every nested scroller does.
+ * The inline axis stays contained: a sideways fling at the grid's edge must
+ * not become the browser's back gesture.
+ */
 .live-board-scroll {
   position: relative;
   z-index: 1;
@@ -5249,7 +5263,7 @@ label.live-board-tool {
   min-height: 520px;
   padding-bottom: 170px;
   overflow: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: contain auto;
   background: var(--surface-card-lo);
 }
 
