@@ -108,7 +108,7 @@ test("no file the marketing site renders carries + VAT, or a synonym for it", as
 
 /* ── 3. Twenty-one stores ────────────────────────────────────────────────── */
 
-test("the portfolio is 21 stores, and the old +20 notation is gone from the tree", async () => {
+test("the portfolio is 27 stores, and the old +20 notation is gone from the tree", async () => {
   /*
    * `landing-positioning-v2` pins the four places the count is claimed. This is
    * the sweep that catches a fifth: a section written later, or a sentence in
@@ -129,7 +129,7 @@ test("the portfolio is 21 stores, and the old +20 notation is gone from the tree
      is inside `app/(marketing)`. */
   const hero = await read(`${SECTIONS_DIR}/hero.tsx`);
   const shippedCopy = await read(`${SECTIONS_DIR}/copy.ts`);
-  assert.match(rendered(shippedCopy), /21 stores currently coordinated/, "the hero states the count");
+  assert.match(rendered(shippedCopy), /27 stores currently coordinated/, "the hero states the count");
   assert.match(rendered(hero), /<span>\{copy\.pills\[2\]\}<\/span>/, "and the hero draws it");
 });
 

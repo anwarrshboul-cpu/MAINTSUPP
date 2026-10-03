@@ -155,7 +155,13 @@ function providerConfig() {
     | undefined;
   const source = env?.env ?? {};
   const apiKey = source.RESEND_API_KEY;
-  const from = source.NOTIFY_FROM ?? "MAINTSUPP <notifications@maintsupp.com>";
+  /*
+   * `admin@maintsupp.com`, by the owner's decision of 2026-10-03: notifications
+   * and invitations both come from the address a client recognises and can
+   * reply to. It was `notifications@maintsupp.com`, a send-only address that
+   * was never a real inbox. `NOTIFY_FROM` still overrides.
+   */
+  const from = source.NOTIFY_FROM ?? "MAINTSUPP <admin@maintsupp.com>";
   /*
    * THREE INBOXES, NOT ONE, AND THE DEFAULTS ARE THE REAL ADDRESSES.
    *
@@ -172,7 +178,18 @@ function providerConfig() {
    * with nothing to notice it. The environment overrides; it is not required
    * to be correct for the routing to be.
    */
-  const salesInbox = source.NOTIFY_SALES ?? "anwar@maintsupp.com";
+  /*
+   * The contact inbox is `info@maintsupp.com` — the address printed on every
+   * page of the website — by the owner's decision of 2026-10-03. It was
+   * `anwar@maintsupp.com`. The three inboxes stay three: operations and
+   * contractor applications still go to their own addresses, so the urgent one
+   * does not wait behind the other two.
+   *
+   * EACH INBOX MAY BE SEVERAL ADDRESSES. A value is a comma-separated list
+   * ("info@maintsupp.com, anwar@maintsupp.com"), so another person is added by
+   * editing the variable, with no change to the code — see `splitRecipients`.
+   */
+  const salesInbox = source.NOTIFY_SALES ?? "info@maintsupp.com";
   const opsInbox = source.NOTIFY_OPS ?? "operations@maintsupp.com";
   const contractorInbox = source.NOTIFY_CONTRACTORS ?? "admin@maintsupp.com";
   const smsFrom = source.SMS_FROM;
@@ -263,6 +280,23 @@ export function emailDeliveryStatus(): { deliverable: boolean; mode: EmailMode; 
   return { deliverable: true, mode, reason: null };
 }
 
+/**
+ * One inbox, as the list of addresses it stands for.
+ *
+ * "a@x.com, b@x.com" (or with semicolons) is two recipients of one message. A
+ * single address is a list of one, so every existing value means what it
+ * always did. Blank entries are dropped; an empty result falls back to the
+ * value as given, so a malformed setting fails at the provider — where it is
+ * logged — rather than silently sending to nobody.
+ */
+export function splitRecipients(value: string): string[] {
+  const list = value
+    .split(/[,;]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return list.length ? list : [value];
+}
+
 export function notificationTargets() {
   const { salesInbox, opsInbox, contractorInbox } = providerConfig();
   return { salesInbox, opsInbox, contractorInbox };
@@ -334,7 +368,7 @@ async function deliverEmail(
       },
       body: JSON.stringify({
         from: request.from ?? config.from,
-        to: [to],
+        to: splitRecipients(to),
         subject,
         html: body,
         text: request.text ?? stripTags(body),

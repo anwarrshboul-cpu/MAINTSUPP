@@ -36,7 +36,7 @@ export const HOME_COPY = {
     pills: [
       "Vetted UK contractor network",
       "Evidence-based close-out",
-      "21 stores currently coordinated"
+      "27 stores currently coordinated"
     ],
     bookLabel: "Book a Portfolio Review",
     reportLabel: "Report a Job",
@@ -93,8 +93,8 @@ export const HOME_COPY = {
   /* Case study */
   caseStudy: {
     eyebrow: "Case study",
-    heading: "21 stores. One point of contact.",
-    lede: "A UK fragrance retailer with 21 stores and kiosks needed one accountable contact for every repair, compliance date and store project. Maintsupp runs intake and triage, assigns vetted contractors, chases attendance, verifies completion with photo evidence, and reports monthly on jobs, spend and compliance status.",
+    heading: "27 stores. One point of contact.",
+    lede: "A UK fragrance retailer with 27 stores and kiosks needed one accountable contact for every repair, compliance date and store project. Maintsupp runs intake and triage, assigns vetted contractors, chases attendance, verifies completion with photo evidence, and reports monthly on jobs, spend and compliance status.",
   },
 
   /* Who runs Maintsupp */

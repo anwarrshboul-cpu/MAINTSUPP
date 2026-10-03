@@ -474,6 +474,11 @@ test("five cards never leave a row with a hole in it", async () => {
 
 test("the store count is one number, and it is not the certificate deadline", async () => {
   /*
+   * THE COUNT IS 27 SINCE 2026-10-03 (owner's figure). The history below was
+   * written when it became 21; every "27 stores" in this test was "21 stores"
+   * then, and the trap it describes is unchanged — the deadline is still 21
+   * days, so the two numbers no longer even coincide.
+   *
    * RE-POINTED FROM "+20" TO "21", AND THE TRAP IT CLOSES IS NOW SHARPER.
    *
    * The portfolio is claimed in four places across two sections. Until
@@ -489,7 +494,7 @@ test("the store count is one number, and it is not the certificate deadline", as
    * days". Under "+20" the two numbers merely sat in the same file; under 21
    * they are the SAME DIGITS in the same file, one careless
    * search-and-replace from being changed together. So both directions stay
-   * pinned, and the deadline is now asserted with its unit attached: 21 stores
+   * pinned, and the deadline is now asserted with its unit attached: 27 stores
    * is a portfolio, 21 days is a deadline, and neither may take the other's
    * wording.
    */
@@ -502,25 +507,25 @@ test("the store count is one number, and it is not the certificate deadline", as
      and the count is now pinned in the one file that owns it. */
   assert.match(
     await read("app/(marketing)/_sections/copy.ts"),
-    /"21 stores currently coordinated"/,
+    /"27 stores currently coordinated"/,
     "the hero trust line",
   );
   assert.match(hero, /<span>\{copy\.pills\[2\]\}<\/span>/, "drawn by the hero");
-  assert.match(caseStudy, /\{ value: "21", label: "stores coordinated" \}/, "the case-study stat tile");
+  assert.match(caseStudy, /\{ value: "27", label: "stores coordinated" \}/, "the case-study stat tile");
   /* RE-POINTED (decision L): `HOME_COPY.caseStudy.heading`. The 21/21 trap this
      test is about is unaffected — the heading still says the portfolio count and
      the deadline still says its unit — and the count is now pinned where it lives,
      with the section checked to draw it. */
   assert.match(
     await read("app/(marketing)/_sections/copy.ts"),
-    /heading: "21 stores\. One point of contact\."/,
+    /heading: "27 stores\. One point of contact\."/,
     "the case-study heading",
   );
   assert.match(caseStudy, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "drawn by the section");
   /* RE-POINTED (decision L): the lede is `HOME_COPY.caseStudy.lede`. */
   assert.match(
     await read("app/(marketing)/_sections/copy.ts"),
-    /A UK fragrance retailer with 21 stores and kiosks/,
+    /A UK fragrance retailer with 27 stores and kiosks/,
     "the case-study lede",
   );
   assert.match(caseStudy, /<p className="lede">\{copy\.lede\}<\/p>/, "drawn by the section");
@@ -562,7 +567,7 @@ test("the store count is one number, and it is not the certificate deadline", as
   const heroCopy = (await read("app/(marketing)/_sections/copy.ts"))
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/^\s*\/\/.*$/gm, "");
-  assert.equal([...heroRendered.matchAll(/21 stores/g)].length, 0, "the hero holds no count of its own any more");
+  assert.equal([...heroRendered.matchAll(/27 stores/g)].length, 0, "the hero holds no count of its own any more");
   /*
    * ONE PHRASING EACH, which is what the trap is really about. `copy.ts` holds two
    * sentences carrying the count — the hero's trust chip and the case study's
@@ -572,12 +577,12 @@ test("the store count is one number, and it is not the certificate deadline", as
    * of the four assertions below.
    */
   assert.equal(
-    [...heroCopy.matchAll(/21 stores currently coordinated/g)].length,
+    [...heroCopy.matchAll(/27 stores currently coordinated/g)].length,
     1,
     "and one store count, in the trust chip, so the two can never be confused for each other",
   );
   assert.equal(
-    [...heroCopy.matchAll(/21 stores\. One point of contact\./g)].length,
+    [...heroCopy.matchAll(/27 stores\. One point of contact\./g)].length,
     1,
     "and one in the case study's heading",
   );
@@ -586,10 +591,10 @@ test("the store count is one number, and it is not the certificate deadline", as
    * check is about the PHRASING rather than about a total that moves whenever a
    * sentence is moved into this file. Three: the hero's chip, the case study's
    * heading, and the case study's opening line. A fourth would have to be added
-   * here deliberately, which is the moment to ask whether it says 21 stores or 21
+   * here deliberately, which is the moment to ask whether it says 27 stores or 21
    * days.
    */
-  const counted = [...heroCopy.matchAll(/[^"\n]*21 stores[^"\n]*/g)].map((match) => match[0].trim());
+  const counted = [...heroCopy.matchAll(/[^"\n]*27 stores[^"\n]*/g)].map((match) => match[0].trim());
   assert.equal(counted.length, 3, `the shipped copy carries the count ${counted.length} times: ${counted.join(" | ")}`);
   for (const sentence of counted) {
     assert.doesNotMatch(sentence, /21 days/, "no sentence may carry both numbers");
