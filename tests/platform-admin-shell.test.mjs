@@ -559,7 +559,20 @@ test("the avatar menu offers the console on platformAdmin, never on a capability
   /* And the WORKSPACE administration entry is untouched: it opens
      `/dashboard/admin` on `users.view`, which is right for an Owner or an Admin. */
   assert.match(menu, /item\.key !== "admin" \|\| canAdminister === true/);
-  assert.match(menu, /href: "\/dashboard\/admin",/);
+  /* Re-pointed 2026-10-03. It was a bare `href`, and inside the portal that link
+     changed the address bar and left the previous screen drawn — the portal's
+     screen state did not hear a router navigation between two /dashboard
+     addresses. Inside the portal the item now opens the section the way the
+     sidebar does; everywhere else (account screens, this console) it is still
+     the link, to the same address. */
+  assert.match(
+    menu,
+    /\.\.\.\(onOpenAdministration\s+\? \{ onSelect: onOpenAdministration \}\s+: \{ href: "\/dashboard\/admin" \}\),/,
+  );
+  assert.match(
+    await read("app/(app)/portal/portal-app.tsx"),
+    /onOpenAdministration=\{\(\) => setSection\("admin-users"\)\}/,
+  );
 });
 
 test("the platform signal shares the one context read", async () => {

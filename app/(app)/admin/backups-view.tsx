@@ -71,13 +71,9 @@ export function BackupsView() {
           migrations.storedFingerprint ?? "no completed migration run"
         }${migrations.appliedAt ? ` (${migrations.appliedAt})` : ""}.`}
       </AdminNotice>
-      <AdminNotice tone="info" icon="alert" title="What this screen does not do">
-        <ul>
-          {data.omissions.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </AdminNotice>
+      {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+          "what this does not do" lists. The server still sends `omissions`,
+          which remains the record of the limits. */}
     </div>
   );
 }

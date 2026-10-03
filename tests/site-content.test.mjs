@@ -508,7 +508,13 @@ test("the editor: platform console only, every rule the server's, history and th
   assert.match(view, /<VersionHistory\s+subject="site_content"\s+subjectKey="public"/);
   assert.match(view, /expectedRevision: data\.revision/);
   assert.match(view, /useUnsavedChanges\(dirty\)/);
-  assert.match(view, /data\.omissions\.map/, "what the screen does not do is listed, not hunted for");
+  /* RE-POINTED 2026-10-03 (owner's decision): the console no longer prints its
+     "what this does not do" lists on working screens. The contract this pin
+     protected — ONE list, the server's, never a second copy on the screen — still
+     holds and is still asserted: the server sends it, and the view must neither
+     print it nor restate it. */
+  assert.doesNotMatch(view, /data\.omissions\.map/, "the limits list is the server's record, not a panel on the editor");
+  assert.match(await read("app/api/site-content/route.ts"), /omissions: CONTENT_OMISSIONS/);
   assert.match(view, /<MediaField/, "the hero photograph is chosen from the library, not typed");
   assert.match(view, /disabled=\{Boolean\(needed\) && !isHidden\}/, "and Hide is refused before it is pressed, with the reason");
   assert.match(view, /Use the shipped words/, "every changed field says so, with a way back");

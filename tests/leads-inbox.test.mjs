@@ -533,16 +533,29 @@ test("the inbox states its own gaps, and the screen prints them", async () => {
   const route = await read("app/api/leads/route.ts");
 
   assert.match(route, /omissions: LEAD_OMISSIONS/);
-  assert.match(view, /data\.omissions\.map/);
-  assert.ok(LEAD_OMISSIONS.length >= 5, "every known gap is named");
+  /* RE-POINTED 2026-10-03 (owner's decision): the console no longer prints its
+     "what this does not do" lists on working screens. The contract this pin
+     protected — ONE list, the server's, never a second copy on the screen — still
+     holds and is still asserted: the server sends it, and the view must neither
+     print it nor restate it. */
+  assert.doesNotMatch(view, /data\.omissions\.map/);
+  /* Was `>= 5`. One of the five was "There is no CSV export", which stopped
+     being true when Export CSV shipped and was contradicting the toolbar above
+     it; it was removed because it is no longer a gap, not to shorten the list. */
+  assert.ok(LEAD_OMISSIONS.length >= 4, "every known gap is named");
+  assert.ok(!LEAD_OMISSIONS.some((line) => /no CSV export/.test(line)), "and none that has been closed");
+  assert.match(view, /Export CSV/);
+  assert.doesNotMatch(view, /There is no\s+export/, "the screen must not deny the export it offers");
   /* Printed, never restated — a second copy is how one of them becomes stale and
      starts claiming something untrue. */
   for (const omission of LEAD_OMISSIONS) {
     assert.doesNotMatch(view, new RegExp(omission.slice(0, 28).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  /* The two that are decisions rather than backlog, named explicitly so a later
-     change to either is deliberate. */
-  assert.ok(LEAD_OMISSIONS.some((entry) => /export/i.test(entry)));
+  /* The one that is a decision rather than backlog, named explicitly so a later
+     change to it is deliberate. There were two: "no export" was the other, and
+     it was re-decided on 2026-09-22 when the CSV export shipped (see the next
+     test) — the list kept claiming it until 2026-10-03, which is the stale
+     second-truth this test exists to prevent. */
   assert.ok(LEAD_OMISSIONS.some((entry) => /delet/i.test(entry)));
 });
 

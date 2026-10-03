@@ -37,6 +37,7 @@
  * claims more than it does.
  */
 
+import { BUILT_IN_SITE_PAGES } from "../../lib/site-built-in-pages";
 import { useMemo, useState } from "react";
 
 import { Icon } from "../../components";
@@ -370,10 +371,50 @@ export function SitePagesView() {
             </button>
           </div>
 
+          {/* The pages that ship with the site, listed from the site's own route
+              list. This screen used to open on "No pages yet" and a count of
+              the website's pages that was not the number of pages; the website
+              has pages, and here they are. */}
+          <div className="cms-admin__builtin-scroll">
+          <table className="admin-table cms-admin__builtin" aria-label="Built-in pages">
+            <thead>
+              <tr>
+                <th>Built-in page</th>
+                <th>Address</th>
+                <th>State</th>
+                <th>Words</th>
+              </tr>
+            </thead>
+            <tbody>
+              {BUILT_IN_SITE_PAGES.map((page) => (
+                <tr key={page.key}>
+                  <td>
+                    <strong>{page.label}</strong>
+                  </td>
+                  <td>
+                    <a href={page.path} target="_blank" rel="noreferrer">
+                      <code>{page.path}</code>
+                    </a>
+                  </td>
+                  <td>Live</td>
+                  <td>
+                    {page.words === "fixed" ? (
+                      "Legal notice"
+                    ) : (
+                      <a href="/admin/copy">
+                        {page.words === "copy" ? "Website copy" : "Website copy · Home page"}
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+
           {data.pages.length === 0 ? (
-            <AdminNotice tone="empty" icon="document" title="No pages yet">
-              The six pages the website has today are built into the code and are not edited here. A page
-              created on this screen is published at <code>/p/&lt;slug&gt;</code>.
+            <AdminNotice tone="empty" icon="document" title="Add a page">
+              New page creates one and publishes it at <code>/p/&lt;slug&gt;</code>.
             </AdminNotice>
           ) : (
             <table className="admin-table cms-admin__list">
@@ -462,15 +503,10 @@ export function SitePagesView() {
             }}
           />
 
-          {/* The server's own list of what this slice does not do. Printed rather
-              than restated, so it cannot drift from the code that means it. */}
-          <AdminNotice tone="info" icon="alert" title="What this editor does not do yet">
-            <ul className="cms-admin__omissions">
-              {data.omissions.map((omission) => (
-                <li key={omission}>{omission}</li>
-              ))}
-            </ul>
-          </AdminNotice>
+          {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+              "what this does not do yet" lists. The list is still the server's
+              (`CMS_OMISSIONS`, sent as `omissions`) and still the record of the
+              limits; it is simply not a panel on a working screen any more. */}
         </>
       ) : null}
     </div>

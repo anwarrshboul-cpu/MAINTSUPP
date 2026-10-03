@@ -41,6 +41,7 @@ import {
   websitePageRows,
   type PageState,
 } from "../../lib/platform-overview-model";
+import { BUILT_IN_SITE_PAGES, BUILT_IN_WORDS_LABEL } from "../../lib/site-built-in-pages";
 
 /* ------------------------------------------------------------------ */
 /* Read state, shared with the screen                                  */
@@ -303,6 +304,9 @@ function when(stamp: string | null | undefined): string {
 /* Page management                                                     */
 /* ------------------------------------------------------------------ */
 
+/* The card shows the first eight; the full list is on Website pages. */
+const PAGE_ROWS_SHOWN = 8;
+
 export function PagesPanel({
   copy,
   pages,
@@ -318,7 +322,7 @@ export function PagesPanel({
   const counts = pageStateCounts(cms);
   const rows =
     copyData || pagesData
-      ? websitePageRows(copyData?.pages ?? [], copyData?.stored ? copyData.updatedAt : null, cms)
+      ? websitePageRows(BUILT_IN_SITE_PAGES, copyData?.stored ? copyData.updatedAt : null, cms)
       : [];
   const redirects = pagesData?.redirects?.length ?? 0;
 
@@ -331,7 +335,7 @@ export function PagesPanel({
       className="platform-card--pages"
       meta={
         pagesData
-          ? `${(copyData?.pages.length ?? 0) + cms.length} pages · ${counts.live} CMS live · ${counts.draft} draft`
+          ? `${BUILT_IN_SITE_PAGES.length + cms.length} pages · ${counts.live} CMS live · ${counts.draft} draft`
           : null
       }
     >
@@ -349,11 +353,11 @@ export function PagesPanel({
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 7).map((row) => (
+              {rows.slice(0, PAGE_ROWS_SHOWN).map((row) => (
                 <tr key={row.key}>
                   <th scope="row">
                     <a href={row.href}>{row.title}</a>
-                    <small>{row.kind === "built-in" ? "Built-in · words in Website copy" : "Written in the CMS"}</small>
+                    <small>{row.kind === "built-in" ? BUILT_IN_WORDS_LABEL[row.words ?? "copy"] : "Written in the CMS"}</small>
                   </th>
                   <td>
                     <code>{row.address}</code>
@@ -374,7 +378,7 @@ export function PagesPanel({
         <dl className="platform-mini-stats">
           <div>
             <dt>Built-in</dt>
-            <dd>{copyData?.pages.length ?? "…"}</dd>
+            <dd>{BUILT_IN_SITE_PAGES.length}</dd>
           </div>
           <div>
             <dt>CMS live</dt>
@@ -395,7 +399,11 @@ export function PagesPanel({
         </dl>
       ) : null}
       <p className="platform-card__footnote">
-        {rows.length > 7 ? `${rows.length - 7} more on Website pages. ` : ""}
+        {rows.length > PAGE_ROWS_SHOWN ? (
+          <>
+            {rows.length - PAGE_ROWS_SHOWN} more on <a href="/admin/pages">Website pages</a>.{" "}
+          </>
+        ) : null}
         Built-in pages are always live; their words are edited under <a href="/admin/copy">Website copy</a>.
       </p>
     </Card>
@@ -469,7 +477,7 @@ export function HeroPanel({
               <span className="platform-hero__badge">Snapshot</span>
               Calls to action: {[hero.bookLabel, hero.reportLabel].filter(Boolean).join(" · ") || "none"}
               {sections !== null ? ` · ${sections} sections on the page` : ""}
-              {imageId ? (imageUrl ? " · library image" : " · image not in the library") : " · no library image chosen"}
+              {imageId ? (imageUrl ? " · library image" : " · image not in the library") : " · the site's own hero photographs"}
             </figcaption>
           </figure>
           <p className="platform-card__links">
@@ -569,7 +577,9 @@ export function BrandPanel({
                 {logoData?.logo ? (
                   <img className="platform-logo" src={logoData.logo.url} alt={`${workspace ?? "Workspace"} logo`} />
                 ) : logoData ? (
-                  "None uploaded"
+                  /* With no upload the portal draws the MAINTSUPP mark, so that
+                     is what this says — "None uploaded" read as a fault. */
+                  "MAINTSUPP logo (default)"
                 ) : (
                   "…"
                 )}

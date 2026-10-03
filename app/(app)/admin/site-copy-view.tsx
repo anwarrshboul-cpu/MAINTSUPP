@@ -632,16 +632,9 @@ export function SiteCopyView() {
         );
       })}
 
-      <section className="admin-panel site-copy__panel" aria-labelledby="site-copy-omissions">
-        <h2 id="site-copy-omissions" className="site-copy__heading">
-          What this screen does not do
-        </h2>
-        <ul className="site-copy__omissions">
-          {data.omissions.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </section>
+      {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+          "what this does not do" lists. The server still sends `omissions`,
+          which remains the record of the limits. */}
 
       {/* §38 — every saved version of the copy, and a way back to any of them. A
           restore goes through the same save, the same rules and the same media

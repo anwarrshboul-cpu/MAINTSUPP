@@ -275,16 +275,9 @@ export function ConsoleSearchView() {
       {/* The kit's notice puts its children in a <p>, and this is a list — so it
           is its own block, built from the same tokens, rather than invalid markup
           inside a shared component. The lines come from the server. */}
-      {data ? (
-        <section className="console-search__omissions">
-          <h2>What this search does not cover</h2>
-          <ul>
-            {data.omissions.map((line) => (
-              <li key={line}>{line}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+          "what this does not do" lists. The server still sends `omissions`,
+          which remains the record of the limits. */}
     </div>
   );
 }

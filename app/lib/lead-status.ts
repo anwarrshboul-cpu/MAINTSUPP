@@ -108,7 +108,9 @@ export function leadStatus(value: string | null | undefined): LeadStatus {
 export const LEAD_OMISSIONS: readonly string[] = [
   "There is no notes field. A lead has no column for one, and adding it would move the schema fingerprint; the reason given when a status changes is recorded in the audit trail instead, and shown in the history beside each enquiry.",
   "A lead cannot be assigned to a person. Same reason — there is no column for it, and one inbox worked by a handful of staff does not yet need one.",
-  "There is no CSV export. Reading the inbox is what was missing; exporting it is a separate decision about where customer contact details are allowed to go.",
+  /* "There is no CSV export" stood here after the export shipped (Export CSV in
+     the inbox toolbar, `/api/leads/csv`), so the list contradicted the screen
+     it was printed on. Removed rather than reworded: it is no longer a limit. */
   "Deleting a lead is not offered. Spam is a status rather than a deletion, so the count of real enquiries stays honest and nothing that arrived is silently gone.",
   "Nothing is emailed when a status changes. The submitter already got a confirmation on arrival; a second message every time staff move a card is not something they asked for.",
 ];

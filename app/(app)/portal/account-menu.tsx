@@ -132,6 +132,7 @@ export function AccountMenu({
   snapshot: providedSnapshot,
   onSnapshotChange,
   onImportData,
+  onOpenAdministration,
   onNotify,
 }: {
   userName: string;
@@ -152,6 +153,19 @@ export function AccountMenu({
    * screens there is no importer to open, so the item navigates instead.
    */
   onImportData?: () => void;
+  /**
+   * "Administration" is a SECTION of the portal, not a page of its own. Inside
+   * the portal the host passes the callback that opens it the way the sidebar
+   * does; on the account screens and in the platform console — different
+   * shells, so a real navigation — the item stays a link.
+   *
+   * It was a link everywhere, and inside the portal that changed the address
+   * bar and nothing else: the portal's own screen state is moved by its
+   * sidebar and by Back/Forward, and it did not hear a router navigation
+   * between two /dashboard addresses. Measured: from Sites or Compliance,
+   * "Administration" left that screen drawn under /dashboard/admin.
+   */
+  onOpenAdministration?: () => void;
   onNotify?: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -585,7 +599,9 @@ export function AccountMenu({
         monday: "Administration",
         label: "Administration",
         icon: "shield",
-        href: "/dashboard/admin",
+        ...(onOpenAdministration
+          ? { onSelect: onOpenAdministration }
+          : { href: "/dashboard/admin" }),
       },
       {
         /*
@@ -614,7 +630,9 @@ export function AccountMenu({
         onSelect: logOut,
       },
     ],
-    // `logOut` and `onImportData` are stable enough for a menu rebuilt on open.
+    // `logOut`, `onImportData` and `onOpenAdministration` are stable enough for a
+    // menu rebuilt on open: the host passes `onImportData` as a fresh arrow on
+    // every render, so this memo is recomputed with the other two current.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onImportData],
   );
