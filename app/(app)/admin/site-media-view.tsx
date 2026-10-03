@@ -435,14 +435,9 @@ export function SiteMediaView() {
         )}
       </div>
 
-      <details className="site-media__omissions">
-        <summary>What the media library does not do</summary>
-        <ul className="cms-admin__omissions">
-          {data.omissions.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      </details>
+      {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+          "what this does not do" lists. The server still sends `omissions`,
+          which remains the record of the limits. */}
     </div>
   );
 }

@@ -132,7 +132,13 @@ test("what the search cannot answer is stated from the server's list, not the sc
   /* Documents and finance are the two deliberate absences, and each says why. */
   assert.match(route, /Documents are not searched here\./);
   assert.match(route, /Finance is not searched here\./);
-  assert.match(view, /data\.omissions\.map/, "the screen prints the server's list rather than its own copy");
+  /* RE-POINTED 2026-10-03 (owner's decision): the console no longer prints its
+     "what this does not do" lists on working screens. The contract this pin
+     protected — ONE list, the server's, never a second copy on the screen — still
+     holds and is still asserted: the server sends it, and the view must neither
+     print it nor restate it. */
+  assert.doesNotMatch(view, /data\.omissions\.map/, "the limits list is the server's record, not a panel on the screen");
+  assert.match(route, /omissions: CONSOLE_SEARCH_OMISSIONS/);
   assert.doesNotMatch(code(view), /Documents are not searched/, "a second copy of that sentence would drift");
 });
 

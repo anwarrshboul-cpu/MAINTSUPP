@@ -145,3 +145,39 @@
   margin-top: 4px;
   color: var(--muted-2);
 }
+
+/*
+ * THE BUILT-IN PAGES TABLE. `.admin-table` sets only vertical alignment and the
+ * rest of a table's look comes from portal classes this console screen does
+ * not carry (the same gap leads.css records for the inbox), so without these
+ * the list rendered as bare text with the columns pressed together.
+ */
+.cms-admin__builtin-scroll {
+  margin-bottom: 14px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+.cms-admin__builtin {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cms-admin__builtin th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+.cms-admin__builtin td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-wrap: anywhere;
+}
+.cms-admin__builtin tr:last-child td {
+  border-bottom: 0;
+}

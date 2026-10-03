@@ -90,6 +90,7 @@ import {
   type PagesPayload,
   type ReadState,
 } from "./platform-overview-panels";
+import { BUILT_IN_SITE_PAGES } from "../../lib/site-built-in-pages";
 import "./platform-overview.css";
 
 type ClientRow = {
@@ -280,7 +281,9 @@ export function PlatformOverview() {
   const pages = ready<PagesPayload>(reads.pages);
   const media = ready<MediaPayload>(reads.media);
   const leads = ready<LeadsPayload>(reads.leads);
-  const builtIn = copy?.pages.length ?? 0;
+  /* The site's own pages, not the copy editor's three tabs — see
+     `site-built-in-pages.ts` for why those two numbers were once confused. */
+  const builtIn = BUILT_IN_SITE_PAGES.length;
   const cmsPages = pages?.pages.length ?? 0;
 
   return (

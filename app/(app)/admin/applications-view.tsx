@@ -308,17 +308,12 @@ export function ApplicationsInboxView() {
           })()
         : null}
 
-      <AdminNotice tone="info" icon="alert" title="What this inbox does not do yet">
-        <ul className="leads-admin__omissions">
-          {data.omissions.map((omission) => (
-            <li key={omission}>{omission}</li>
-          ))}
-        </ul>
-      </AdminNotice>
+      {/* OWNER'S DECISION, 2026-10-03: the console no longer prints its own
+          "what this does not do" lists. The server still sends `omissions`,
+          which remains the record of the limits. */}
 
       <p className="leads-admin__foot">
-        <Icon name="shield" size={14} /> These carry other companies&rsquo; contact details. There is no
-        export, deliberately.
+        <Icon name="shield" size={14} /> These carry other companies&rsquo; contact details.
       </p>
     </div>
   );

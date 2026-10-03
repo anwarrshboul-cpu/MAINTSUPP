@@ -1201,6 +1201,30 @@ export default function PortalApp({
   initialSection?: Section | string;
 }) {
   const [activeSection, setActiveSection] = useState<string>(initialSection);
+  /*
+   * A LINK TO ANOTHER /dashboard ADDRESS MUST CHANGE THE SCREEN, NOT ONLY THE URL.
+   *
+   * `activeSection` is seeded from `initialSection` once. The sidebar moves it
+   * through `setSection` and Back/Forward through the popstate handler below —
+   * but the account menu's items are `<Link>`s, and a client-side navigation
+   * from one /dashboard address to another re-renders this component with a new
+   * `initialSection` and no popstate. The seed was never read again, so pressing
+   * "Administration" from any portal screen put /dashboard/admin in the address
+   * bar and left the previous screen drawn: it looked as though the item did
+   * nothing. Measured before this: /dashboard → Administration landed on
+   * "Operations overview"; from the platform console, a different shell and so a
+   * fresh mount, the same link worked.
+   *
+   * Adjusted during render rather than in an effect — the documented way to
+   * follow a prop — so the stale screen is never painted. No module check is
+   * needed here: the server's page guard has already answered for this address
+   * before it handed down the new `initialSection`.
+   */
+  const [seededSection, setSeededSection] = useState<string>(initialSection);
+  if (seededSection !== initialSection) {
+    setSeededSection(initialSection);
+    setActiveSection(initialSection);
+  }
   const [workspaceSections, setWorkspaceSections] = useState<
     WorkspaceSectionEntry[]
   >([]);
@@ -3670,6 +3694,7 @@ export default function PortalApp({
               userName={displayUserName}
               userEmail={displayUserEmail}
               onImportData={() => openWorkspaceManager("import")}
+              onOpenAdministration={() => setSection("admin-users")}
               onNotify={setToast}
             />
           </div>

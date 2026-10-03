@@ -733,8 +733,13 @@ test("the console prints the server's own list of gaps", async () => {
   const route = await read("app/api/site-pages/route.ts");
 
   assert.match(route, /omissions: CMS_OMISSIONS/);
-  assert.match(view, /data\.omissions\.map/);
-  /* Printed, never restated. A second copy of this list is how one of them becomes
+  /* RE-POINTED 2026-10-03 (owner's decision): the console no longer prints its
+     "what this does not do" lists on working screens. The contract this pin
+     protected — ONE list, the server's, never a second copy on the screen — still
+     holds and is still asserted: the server sends it, and the view must neither
+     print it nor restate it. */
+  assert.doesNotMatch(view, /data\.omissions\.map/);
+  /* Never restated. A second copy of this list is how one of them becomes
      stale and starts claiming something untrue. */
   for (const omission of CMS_OMISSIONS) {
     assert.doesNotMatch(view, new RegExp(omission.slice(0, 30).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
