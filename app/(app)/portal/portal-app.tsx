@@ -181,6 +181,7 @@ import { AnchoredPopover } from "./overlay/anchored";
 import { ItemActionsMenu, type BoardItemActions } from "./overlay/item-actions";
 import { installSessionGuard } from "./session-guard";
 import { useGreeting } from "./use-greeting";
+import { useNotificationChime } from "./use-notification-chime";
 import { fetchRuntimeContext } from "../../lib/runtime-context";
 import { governingModule } from "../../lib/portal-modules";
 import { fetchNavigation } from "./navigation-store";
@@ -1288,6 +1289,8 @@ export default function PortalApp({
      the job list (the Overview above all). See that route. */
   const [serverNotificationCandidates, setServerNotificationCandidates] = useState<MaintenanceRequest[]>([]);
   const [serverOpenJobs, setServerOpenJobs] = useState<number | null>(null);
+  /* The chime waits for this: until the read states load, everything looks unread. */
+  const [notificationStatesLoaded, setNotificationStatesLoaded] = useState(false);
   /* The toast carries a TONE (QA: refusals showed the green success check).
      One-argument callers — every child's `onNotify` — are classified from the
      wording; the failure paths below say "error" outright. */
@@ -1922,6 +1925,7 @@ export default function PortalApp({
             ]),
           ),
         );
+        setNotificationStatesLoaded(true);
       } catch {
         // The notification panel remains usable if preferences cannot load.
       }
@@ -3076,9 +3080,14 @@ export default function PortalApp({
       ),
     [jobListLoaded, notificationStates, requests, serverNotificationCandidates],
   );
-  const unreadNotificationCount = notificationItems.filter(
-    (request) => notificationStates[request.id] !== "read",
-  ).length;
+  const unreadNotificationIds = notificationItems
+    .filter((request) => notificationStates[request.id] !== "read")
+    .map((request) => request.id);
+  const unreadNotificationCount = unreadNotificationIds.length;
+  const notificationChime = useNotificationChime(
+    unreadNotificationIds,
+    notificationStatesLoaded,
+  );
 
   return (
     <div className="portal-shell">
@@ -3626,6 +3635,8 @@ export default function PortalApp({
                   items={notificationItems}
                   states={notificationStates}
                   unreadCount={unreadNotificationCount}
+                  soundMuted={notificationChime.muted}
+                  onToggleSound={notificationChime.toggleMuted}
                   onMarkRead={(requestIds) =>
                     persistNotificationState(requestIds, "read")
                   }
@@ -4306,6 +4317,8 @@ function NotificationPanel({
   items,
   states,
   unreadCount,
+  soundMuted,
+  onToggleSound,
   onOpen,
   onMarkRead,
   onDismiss,
@@ -4313,6 +4326,8 @@ function NotificationPanel({
   items: MaintenanceRequest[];
   states: Record<string, NotificationState>;
   unreadCount: number;
+  soundMuted: boolean;
+  onToggleSound: () => void;
   onOpen: (request: MaintenanceRequest) => void;
   onMarkRead: (requestIds: string[]) => Promise<void>;
   onDismiss: (requestIds: string[]) => Promise<void>;
@@ -4340,9 +4355,18 @@ function NotificationPanel({
           <strong>Notifications</strong>
           <span>{unreadCount ? `${unreadCount} unread` : "All caught up"}</span>
         </div>
+        <button
+          type="button"
+          aria-pressed={!soundMuted}
+          title={soundMuted ? "Turn the notification sound on" : "Turn the notification sound off"}
+          onClick={onToggleSound}
+        >
+          {soundMuted ? "Sound off" : "Sound on"}
+        </button>
         {unreadIds.length > 0 && (
           <button
             type="button"
+            style={{ marginLeft: 0 }}
             disabled={busyAction !== null}
             onClick={() =>
               void runAction("all", () => onMarkRead(unreadIds))
