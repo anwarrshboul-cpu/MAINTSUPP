@@ -18,13 +18,25 @@
  * Shrinking or dropping a heading was not an option either; nothing on this
  * page may be removed.
  *
- * WHAT THIS DOES. The meters section is `position: sticky` under the page's top
- * bar. Scrolling brings it to that line, where it stays, and the moment it gets
- * there it collapses — one row of label-and-figure chips, no sparklines, no
- * captions — from 168px to 46px. The same six cards, the same six numbers, the
- * same DOM: the collapsed state is CSS on elements that were already on the
- * page, so the strip cannot come to disagree with the cards it stands in for.
- * The grid keeps every pixel of its height and the figures are never lost.
+ * WHAT THIS DOES NOW (owner's decision, 2026-10-03). The meters are the STRIP
+ * at every scroll position — one row of label-and-figure chips, 46px — and the
+ * full cards are a thing the reader asks for with "Show meter detail" and gets
+ * until they put them away again. Nothing about the section's size depends on
+ * where the page is scrolled to. The section is still `position: sticky` under
+ * the page's top bar, so the six figures ride down the page with the reader.
+ * The same six cards, the same six numbers, the same DOM: the strip is CSS on
+ * elements that were already on the page, so it cannot come to disagree with
+ * the cards it stands in for.
+ *
+ * WHAT IT REPLACED, AND WHY. Until then the cards were drawn in full at the top
+ * of the page and collapsed into the strip the moment they pinned. That worked
+ * as measured — see the two notes below — but the page visibly re-arranged
+ * itself part-way through a scroll, and together with a grid that swallowed the
+ * wheel at its own top (globals.css, `.live-board-scroll`) it read as a fault:
+ * the cards went away and would not come back. A size that never changes with
+ * scroll cannot be mistaken for one. The two notes are kept because `stuck`
+ * still comes from the same trigger, and because they are the reason the size
+ * must never be tied to scroll position again.
  *
  * WHY THE TRIGGER IS THE HEADING ABOVE, NOT THE SECTION ITSELF. A stuck element
  * reports the same rectangle at every scroll position, so it cannot tell you
@@ -33,7 +45,7 @@
  * changes size when the meters collapse, so its position in the document is
  * invariant under the very effect it triggers.
  *
- * WHY THE COLLAPSE COSTS THE PAGE NO HEIGHT.
+ * WHY THE SIZE MUST NOT FOLLOW THE SCROLL (history; superseded as a mechanism).
  *
  * The first version simply let the section shrink from 168px to 46px, and it
  * oscillated. Chrome's scroll anchoring watches for content above the reader
@@ -44,15 +56,12 @@
  * trigger up again. Measured on the real page: parked at y=200 the strip
  * flipped on and off and the scroll position alternated 200/78 indefinitely.
  *
- * So the collapse is a pure repaint. The section keeps exactly the outer height
- * it had — `height` becomes the strip's and a bottom margin of the difference
- * stands in for what the cards no longer occupy — and the document is the same
- * height in both states. Scroll anchoring has nothing to correct, and the
- * trigger cannot be moved by the thing it triggers. The band the margin leaves
- * behind is empty and scrolls away under the pinned strip, which is what a
- * sticky header does. `documentElement.scrollHeight` identical in both states
- * is the whole proof, and stage-twentyseven-layout.test.mjs measures it in a
- * real browser at 1440 and at 390.
+ * The second version made the collapse a pure repaint — the strip's height
+ * plus a bottom margin of the difference — so the document was the same height
+ * in both states. That held, at the price of an empty 122px band under the
+ * strip. Both are gone: with the size decided by the reader's click and by
+ * nothing else, scrolling changes only `is-stuck`, which is a background and a
+ * shadow and not one pixel of layout, so there is no loop to break.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -64,12 +73,17 @@ export type CollapsingMeters = {
   /**
    * Read by the CSS, and three-valued on purpose.
    *
-   * "off" — not pinned; the phone's bars sit where they always did.
-   * "on"  — pinned and collapsed; they step down by the strip's height.
-   * "open"— pinned but expanded back to the full cards by the reader, which is
-   *         taller than the strip. Treating this as "off" was a real bug: the
-   *         board's identity bar snapped back under the top bar and the cards,
-   *         still pinned and still 141px tall, drew straight over it.
+   * "off" — no meters on this board; the phone's bars sit where they always did.
+   * "on"  — the strip; they step down by the strip's height.
+   * "open"— expanded to the full cards by the reader, which is taller than the
+   *         strip. Treating this as "off" was a real bug: the board's identity
+   *         bar snapped back under the top bar and the cards, still pinned and
+   *         still 141px tall, drew straight over it.
+   *
+   * It no longer follows `stuck`. The offsets it drives are sticky `top`s,
+   * which do nothing until their bar pins — and by then the strip above has
+   * pinned too — so "on" at the top of the page costs nothing and keeps the
+   * strip's own height (`--jobs-rail-h`) defined before the first scroll.
    */
   railState: "on" | "off" | "open";
   /** Goes on the heading ABOVE the meters — the trigger. See above. */
@@ -87,8 +101,9 @@ export function useCollapsingMeters(enabled: boolean): CollapsingMeters {
   const anchor = useRef<HTMLElement | null>(null);
   const section = useRef<HTMLElement | null>(null);
   const [stuck, setStuck] = useState(false);
-  const [reopened, setReopened] = useState(false);
-  const collapsed = stuck && !reopened;
+  /* The reader's choice, and the ONLY thing that decides the size. */
+  const [expanded, setExpanded] = useState(false);
+  const collapsed = !expanded;
 
   /*
    * Callback refs rather than object refs, because both observers below have to
@@ -141,14 +156,10 @@ export function useCollapsingMeters(enabled: boolean): CollapsingMeters {
       page.current?.style.setProperty("--jobs-rail-top", `${line}px`);
       observer = new IntersectionObserver(
         ([entry]) => {
-          const isStuck = !entry.isIntersecting;
-          setStuck(isStuck);
-          /* Scrolling back up to the cards IS the expanded state, so a manual
-             re-open has no meaning up there and must not survive to the next
-             descent. Reset here rather than in an effect keyed on `stuck`: the
-             two change together, in one event, and splitting them across a
-             render would be a cascade for no gain. */
-          if (!isStuck) setReopened(false);
+          /* Pinned or not, and nothing else. This used to put the cards back
+             on the way up; the size is the reader's now, so a scroll in either
+             direction leaves it exactly as they set it. */
+          setStuck(!entry.isIntersecting);
         },
         { rootMargin: `-${line + 1}px 0px 0px 0px`, threshold: 0 },
       );
@@ -198,7 +209,7 @@ export function useCollapsingMeters(enabled: boolean): CollapsingMeters {
 
   return {
     pageRef,
-    railState: stuck ? (collapsed ? "on" : "open") : "off",
+    railState: enabled ? (collapsed ? "on" : "open") : "off",
     anchorRef,
     sectionRef,
     /*
@@ -213,16 +224,16 @@ export function useCollapsingMeters(enabled: boolean): CollapsingMeters {
     }${collapsed ? " is-collapsed" : ""}`,
     collapsed,
     stuck,
-    toggle: () => setReopened((current) => !current),
+    toggle: () => setExpanded((current) => !current),
   };
 }
 
 /**
  * The one control the strip adds.
  *
- * Rendered only while the section is stuck: at the top of the page the full
- * cards already say everything it offers, and a seventh child there would be a
- * seventh cell in a six-column grid.
+ * Always rendered, because the strip is now the resting state at every scroll
+ * position and this is the only way to the detail. Expanded, it is taken out of
+ * flow by the CSS, so it is never a seventh cell in a six-column grid.
  *
  * It restores the cards IN PLACE rather than scrolling to them. On a phone the
  * top of this page is eighty-nine thousand pixels away, and a control that
@@ -230,15 +241,12 @@ export function useCollapsingMeters(enabled: boolean): CollapsingMeters {
  * 745-card list has not answered it.
  */
 export function JobsMeterToggle({
-  stuck,
   collapsed,
   onToggle,
 }: {
-  stuck: boolean;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  if (!stuck) return null;
   const label = collapsed ? "Show meter detail" : "Collapse meters";
   return (
     <button

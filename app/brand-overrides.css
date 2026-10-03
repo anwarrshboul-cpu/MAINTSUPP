@@ -1282,6 +1282,8 @@ button.analytics-metric:hover {
   --jobs-stack-offset: 0px;
 }
 
+/* "on" is the strip, which is now the resting state at every scroll position
+   — so this is defined from the first paint, not from the first scroll. */
 .live-board-page[data-jobs-rail="on"] {
   --jobs-rail-h: 46px;
 }
@@ -1309,25 +1311,24 @@ button.analytics-metric:hover {
 }
 
 /*
- * `height` plus a bottom margin of exactly what the cards gave up.
+ * THE STRIP IS THE RESTING STATE, AT EVERY SCROLL POSITION.
  *
- * The section's OUTER height is identical in both states, so collapsing costs
- * the document not one pixel and Chrome's scroll anchoring has nothing to
- * correct. Letting it simply shrink was tried and measured: anchoring moved
- * the scroll position by the 122px that disappeared, which took the trigger
- * back across its own line, and the strip flipped on and off forever. See the
- * note above `metersCollapsed` in live-board.tsx.
+ * `is-collapsed` used to arrive when the section pinned, and to stop that
+ * moving the page it carried a bottom margin of exactly what the cards gave up
+ * (`--jobs-rail-natural` less the strip) — an empty band under the strip.
+ * The class now follows the reader's own "Show meter detail" and nothing else
+ * (jobs-meter-strip.tsx), so no scroll ever changes this box's size and there
+ * is nothing to compensate: the strip is the strip's height and no more.
+ * `margin-bottom: 0` is written out, not left to the cascade, because putting
+ * the band back is the one edit here that looks harmless and is not.
  *
- * `--jobs-rail-natural` is written by that file from the expanded section's own
- * measured height, because the expanded height is 168px at 1440, two rows
- * under 1380 and a scrolling strip under 760 — three numbers, and a fourth the
- * next time the grid changes. The fallback is only ever used for the frames
- * before the measurement lands.
+ * `--jobs-rail-natural` is still measured from the expanded cards; the phone's
+ * sticky bars use it to step down while the cards are open.
  */
 .live-job-metrics.is-collapsed {
   display: flex;
   height: var(--jobs-rail-h);
-  margin-bottom: calc(var(--jobs-rail-natural, 168px) - var(--jobs-rail-h));
+  margin-bottom: 0;
   align-items: stretch;
   gap: 4px;
   padding: 4px 6px;
@@ -1428,16 +1429,21 @@ button.analytics-metric:hover {
 }
 
 /*
- * Pinned but expanded: the reader has asked for the full cards back.
+ * Expanded: the reader has asked for the full cards.
  *
- * The control goes OUT OF FLOW, just under them, for the same reason the
- * collapse compensates its own height — a seventh grid row would make the
- * section 48px taller than its unpinned self, which is a layout change at the
- * one moment this mechanism cannot afford one. It draws over the board that is
- * scrolling beneath the cards, which is where a pinned header's shadow already
- * falls.
+ * The control goes OUT OF FLOW, just under them, so it is never a seventh cell
+ * in a six-column grid — and the section reserves the room for it as a bottom
+ * margin, pinned or not. The reservation must NOT depend on `is-stuck`: that
+ * class changes while the page scrolls, and a box whose outer height changed
+ * with it is the scroll-anchoring loop described in jobs-meter-strip.tsx.
+ * Pinned, the reserved band scrolls away under the cards and the control draws
+ * over the board beneath them, where a pinned header's shadow already falls.
  */
-.live-job-metrics.is-stuck:not(.is-collapsed) .live-job-metrics__toggle {
+.live-job-metrics:not(.is-collapsed) {
+  margin-bottom: 48px;
+}
+
+.live-job-metrics:not(.is-collapsed) .live-job-metrics__toggle {
   position: absolute;
   top: 100%;
   right: 0;
@@ -2341,7 +2347,12 @@ button.analytics-score-panel {
    * out-of-flow bar would scroll away with the cards, and `grid-column: 1 / -1`
    * in a column-flow grid laid a 132px-tall button straight over them.
    */
-  .live-job-metrics.is-stuck:not(.is-collapsed) .live-job-metrics__toggle {
+  /* And so it reserves nothing under the cards — the control is inside them. */
+  .live-job-metrics:not(.is-collapsed) {
+    margin-bottom: 0;
+  }
+
+  .live-job-metrics:not(.is-collapsed) .live-job-metrics__toggle {
     position: sticky;
     top: auto;
     right: 0;
@@ -2361,12 +2372,12 @@ button.analytics-score-panel {
   /* The words go, the control does not: 171px of button is most of the room
      the figures need on a 390px screen, and in both pinned states the cards
      scroll sideways underneath it. `aria-label` carries the name. */
-  .live-job-metrics.is-stuck .live-job-metrics__toggle {
+  .live-job-metrics .live-job-metrics__toggle {
     width: 46px;
     padding: 0;
   }
 
-  .live-job-metrics.is-stuck .live-job-metrics__toggle span {
+  .live-job-metrics .live-job-metrics__toggle span {
     display: none;
   }
 

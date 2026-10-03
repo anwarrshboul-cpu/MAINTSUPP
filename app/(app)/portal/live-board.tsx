@@ -3226,7 +3226,7 @@ export function LiveMaintenanceBoard({
             performance question instead; a dash when no closed job in view
             carries a due date, because that is not the same fact as 0%. */}
         <AnalyticsMetricCard label="SLA met" value={jobAnalytics.sla.metPercent === null ? "—" : `${jobAnalytics.sla.metPercent}%`} detail={jobAnalytics.sla.metSample ? `${jobAnalytics.sla.metSample} closed job${jobAnalytics.sla.metSample === 1 ? "" : "s"} with a due date` : "No closed job in view carries a due date"} icon="clock" tone="blue" trend={jobAnalytics.sla.trend} trendLabel={jobMeterTrendLabels.sla} />
-        <JobsMeterToggle stuck={meters.stuck} collapsed={meters.collapsed} onToggle={meters.toggle} />
+        <JobsMeterToggle collapsed={meters.collapsed} onToggle={meters.toggle} />
       </section>
       )}
 
