@@ -140,7 +140,11 @@ export async function verifyStoreDocumentation(db: Database) {
       const hereKeys = hereFiles.map((file) => `${file.name}|${file.size}`);
       for (const key of mondayFiles) {
         const index = hereKeys.indexOf(key);
-        if (index === -1) differences.push({ store: item.name, slot: slot.label, kind: "file_missing_here", monday: key.split("|")[0] });
+        if (index === -1) {
+          const [name, size] = key.split("|");
+          const megabytes = Number(size) > 0 ? ` (${(Number(size) / 1048576).toFixed(1)} MB)` : "";
+          differences.push({ store: item.name, slot: slot.label, kind: "file_missing_here", monday: `${name}${megabytes}` });
+        }
         else hereKeys.splice(index, 1);
       }
       for (const key of hereKeys) differences.push({ store: item.name, slot: slot.label, kind: "file_not_on_monday", here: key.split("|")[0] });
