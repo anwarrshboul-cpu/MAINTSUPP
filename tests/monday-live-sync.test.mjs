@@ -76,8 +76,26 @@ test("store rows are linked to monday by exact name on their own board, never a 
 test("files are copied once: the historical import's ledger key, on the column they sit in", async () => {
   const lib = await read("app/lib/monday-live-sync.ts");
   const files = lib.slice(lib.indexOf("async function copyMondayFiles"));
-  assert.match(files, /`\$\{row\.requestId\}\|\$\{row\.columnId\}\|\$\{row\.name\}\|\$\{row\.size\}`/);
-  assert.match(files, /const kind = kindForColumnKey\(entry\.columnKey\);/);
+  /* Re-pointed 2026-10-04 (owner): comment files joined column files, so the
+     ledger's middle term is the slot — the column, or the comment. */
+  assert.match(files, /`\$\{row\.requestId\}\|\$\{slotOf\(row\)\}\|\$\{row\.name\}\|\$\{row\.size\}`/);
+  assert.match(files, /row\.updateId \? `update:\$\{row\.updateId\}` : `column:\$\{row\.columnId\}`/);
+  assert.match(files, /const kind = entry\.columnKey \? kindForColumnKey\(entry\.columnKey\) : "general";/);
   assert.match(files, /for \(const requestId of touched\) await reconcileAttachmentCounts\(db, orgId, requestId\);/);
   assert.match(files, /if \(Date\.now\(\) > deadline\) \{\s*result\.filesPending \+= 1;/, "a long run stops in time and resumes later");
+});
+
+test("comment pictures are copied onto the comment that carried them", async () => {
+  const lib = await read("app/lib/monday-live-sync.ts");
+  assert.match(lib, /assets \{ id name file_size public_url \}\n    replies \{/);
+  assert.match(lib, /\[`monday-update-\$\{update\.id\}`, update\.assets \?\? \[\]\]/);
+  assert.match(lib, /if \(!body && !replies\.length && !\(update\.assets \?\? \[\]\)\.length\) continue;/);
+});
+
+test("each certificate file carries its row's expiry date; a blank date clears nothing", async () => {
+  const lib = await read("app/lib/monday-live-sync.ts");
+  const fn = lib.slice(lib.indexOf("async function applyCertificateExpiry"));
+  assert.match(fn, /const date = dateOnlyValue\(cellValue\.get\(`\$\{requestId\}\|\$\{expiryColumnId\}`\)\);/);
+  assert.match(fn, /if \(!\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(date\)\) continue;/);
+  assert.match(fn, /eq\(attachments\.boardColumnId, fileColumnId\),\s*isNull\(attachments\.archivedAt\),/);
 });
