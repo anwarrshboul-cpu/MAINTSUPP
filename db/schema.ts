@@ -2097,6 +2097,41 @@ export const notificationCooldowns = sqliteTable(
   (table) => [index("notification_cooldowns_last_idx").on(table.lastAt)],
 );
 
+/**
+ * PHONE NOTIFICATIONS — one row per (device, who it is for).
+ *
+ * A device is a Web Push subscription: the browser's `endpoint` plus the two
+ * keys a message is encrypted to. "Who it is for" is EITHER a signed-in person
+ * (`user_id`, in the workspace they subscribed from) OR one contractor job link
+ * (`job_token_id`, whose job is `request_id`) — a contractor has no account, so
+ * their phone is subscribed to the jobs whose links it has opened.
+ *
+ * `id` is a hash of endpoint + subject, so subscribing twice is the same row.
+ * A device the push service reports as gone (404/410) is deleted on the spot.
+ */
+export const pushSubscriptions = sqliteTable(
+  "push_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    organisationId: text("organisation_id").notNull(),
+    userId: text("user_id"),
+    jobTokenId: text("job_token_id"),
+    requestId: text("request_id"),
+    endpoint: text("endpoint").notNull(),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    userAgent: text("user_agent"),
+    failures: integer("failures").notNull().default(0),
+    lastSentAt: text("last_sent_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("push_subscriptions_org_user_idx").on(table.organisationId, table.userId),
+    index("push_subscriptions_request_idx").on(table.organisationId, table.requestId),
+    index("push_subscriptions_endpoint_idx").on(table.endpoint),
+  ],
+);
+
 
 /**
  * §35 — API tokens for a workspace. Only the SHA-256 of a token is stored; the

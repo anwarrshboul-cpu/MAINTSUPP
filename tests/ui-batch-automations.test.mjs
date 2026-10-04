@@ -50,13 +50,22 @@ const actionsUrl = asModule(`
   }
 `);
 const typesUrl = asModule(transpile(await read("app/lib/automations/types.ts")));
+/* The engine also hands each originating write's events to the phone
+   notifications (app/lib/push-notify.ts, 2026-10-04). Recorded, not sent:
+   these tests are about the rules, and the stub lets one assert the hand-off. */
+const pushUrl = asModule(`
+  export async function pushForEvents(ctx, events) {
+    (globalThis.__pushed ??= []).push(events.map((event) => event.type));
+  }
+`);
 const engineUrl = asModule(
   transpile(await read("app/lib/automations/engine.ts"))
     .replace(/from ["']drizzle-orm["']/g, `from "${drizzleUrl}"`)
     .replace(/from ["']\.\.\/\.\.\/\.\.\/db\/schema["']/g, `from "${schemaUrl}"`)
     .replace(/from ["']\.\.\/audit["']/g, `from "${auditUrl}"`)
     .replace(/from ["']\.\/actions["']/g, `from "${actionsUrl}"`)
-    .replace(/from ["']\.\/types["']/g, `from "${typesUrl}"`),
+    .replace(/from ["']\.\/types["']/g, `from "${typesUrl}"`)
+    .replace(/from ["']\.\.\/push-notify["']/g, `from "${pushUrl}"`),
 );
 
 const engine = await import(engineUrl);
@@ -342,4 +351,22 @@ test("a write that fires a rule answers with the row the rule left behind, not t
     /await dispatchAutomationEvents\([\s\S]{0,400}?\);\s*\}\s*return Response\.json\(\{ request: exposeRequest\(updated\) \}\)/,
     "the stale row must not be the answer",
   );
+});
+
+test("each originating write hands its events to the phone notifications once", async () => {
+  /*
+   * app/lib/push-notify.ts rides on the dispatcher (2026-10-04). It must see a
+   * write's events exactly once — at depth 0, after the rules — and never the
+   * follow-up events a rule raises, or one status change would notify twice.
+   */
+  const { ctx } = context([]);
+  globalThis.__pushed = [];
+  globalThis.__executeAction = async () => ({ summary: "noop" });
+  await engine.dispatchAutomationEvents(ctx, [
+    { type: "column_changed", boardId: "maintenance", requestId: "MN-1", column: "status", columnType: "status", from: "a", to: "b" },
+    { type: "update_created", boardId: "maintenance", requestId: "MN-1" },
+  ]);
+  assert.deepEqual(globalThis.__pushed, [["column_changed", "update_created"]]);
+  await engine.dispatchAutomationEvents(ctx, [{ type: "item_created", boardId: "maintenance", requestId: "MN-2" }], 1);
+  assert.equal(globalThis.__pushed.length, 1, "a nested dispatch does not notify again");
 });

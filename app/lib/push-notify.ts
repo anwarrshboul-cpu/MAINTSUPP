@@ -1,0 +1,345 @@
+/**
+ * WHO GETS A PHONE NOTIFICATION, AND WHAT IT SAYS.
+ *
+ * Four moments, chosen with the owner (2026-10-04) — the ones somebody away
+ * from a desk would want to be told about:
+ *
+ *   · a NEW JOB is raised            → the workspace's coordinators;
+ *   · a job's STATUS changes         → everybody who can see the job, and the
+ *                                      contractor phones following its link;
+ *   · an UPDATE is posted on a job   → the same, except whoever posted it;
+ *   · a CONTRACTOR reports back      → the workspace's coordinators.
+ *
+ * Every recipient is re-checked here at send time, not trusted from when they
+ * subscribed: a person must still hold an active membership (or be the owner
+ * or platform staff) and, if their access is limited to some sites, the job
+ * must be at one of them; a contractor link must still be unrevoked and
+ * unexpired. Nothing here can fail the write that triggered it — every path
+ * swallows its own errors — and nothing is sent when VAPID keys are absent.
+ *
+ * Notifications never carry a job link's token. A contractor's notification
+ * opens `/app?ref=<job>`, and the app finds the job among the links already
+ * saved on that phone (see app/lib/saved-jobs.ts).
+ */
+
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import type { getDb } from "../../db";
+import {
+  jobAccessTokens,
+  maintenanceRequests,
+  memberships,
+  pushSubscriptions,
+  users,
+} from "../../db/schema";
+import { parseSiteScope } from "./tenant-grants";
+import { pushConfigured, sendPush, type PushMessage } from "./web-push";
+import type { AutomationContext, AutomationEvent } from "./automations/types";
+
+type Database = Awaited<ReturnType<typeof getDb>>;
+type SubscriptionRow = typeof pushSubscriptions.$inferSelect;
+
+/** Roles that coordinate work and so hear about new jobs and contractor reports. */
+const COORDINATOR_ROLES = new Set(["owner", "admin", "manager", "super_admin"]);
+
+const MAX_PER_EVENT = 200;
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** One row per device and subject: subscribing twice is the same row. */
+export async function subscriptionRowId(endpoint: string, subject: string) {
+  return `push_${(await sha256Hex(`${endpoint}\n${subject}`)).slice(0, 40)}`;
+}
+
+/* ── Delivery ────────────────────────────────────────────────────────────── */
+
+async function deliver(db: Database, rows: SubscriptionRow[], message: PushMessage) {
+  /* One phone subscribed twice (as a person AND to a job link) gets it once. */
+  const seen = new Set<string>();
+  const unique = rows.filter((row) => {
+    if (seen.has(row.endpoint)) return false;
+    seen.add(row.endpoint);
+    return true;
+  });
+  await Promise.allSettled(
+    unique.slice(0, MAX_PER_EVENT).map(async (row) => {
+      const result = await sendPush(
+        { endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth },
+        message,
+      );
+      try {
+        if (result.gone) {
+          await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, row.endpoint));
+        } else if (result.ok) {
+          await db
+            .update(pushSubscriptions)
+            .set({ lastSentAt: new Date().toISOString(), failures: 0 })
+            .where(eq(pushSubscriptions.endpoint, row.endpoint));
+        } else if (result.status) {
+          await db
+            .update(pushSubscriptions)
+            .set({ failures: row.failures + 1 })
+            .where(eq(pushSubscriptions.id, row.id));
+        }
+      } catch {
+        /* Bookkeeping only. */
+      }
+    }),
+  );
+}
+
+/* ── Recipients ──────────────────────────────────────────────────────────── */
+
+type Job = {
+  id: string;
+  siteId: string | null;
+  location: string;
+  description: string;
+  status: string;
+  parentId: string | null;
+};
+
+async function loadJob(db: Database, orgId: string, requestId: string): Promise<Job | null> {
+  const [job] = await db
+    .select({
+      id: maintenanceRequests.id,
+      siteId: maintenanceRequests.siteId,
+      location: maintenanceRequests.location,
+      description: maintenanceRequests.description,
+      status: maintenanceRequests.status,
+      parentId: maintenanceRequests.parentId,
+    })
+    .from(maintenanceRequests)
+    .where(
+      and(
+        eq(maintenanceRequests.id, requestId),
+        eq(maintenanceRequests.organisationId, orgId),
+        isNull(maintenanceRequests.deletedAt),
+      ),
+    )
+    .limit(1);
+  return job ?? null;
+}
+
+/**
+ * The people in this workspace with notifications on who may see `job`.
+ *
+ * A subscriber with no membership row here is only kept when they are the
+ * workspace's owner or platform staff — the two kinds of access that do not
+ * come from a membership — which is decided by `users.role`.
+ */
+async function userRecipients(
+  db: Database,
+  orgId: string,
+  job: Job | null,
+  options: { coordinatorsOnly: boolean; excludeUserId?: string | null },
+): Promise<SubscriptionRow[]> {
+  const rows = await db
+    .select()
+    .from(pushSubscriptions)
+    .where(and(eq(pushSubscriptions.organisationId, orgId), isNotNull(pushSubscriptions.userId)));
+  if (!rows.length) return [];
+  const userIds = [...new Set(rows.map((row) => row.userId as string))];
+  const [memberRows, userRows] = await Promise.all([
+    db
+      .select({
+        userId: memberships.userId,
+        role: memberships.role,
+        siteScope: memberships.siteScope,
+        status: memberships.status,
+      })
+      .from(memberships)
+      .where(and(eq(memberships.organisationId, orgId), inArray(memberships.userId, userIds))),
+    db
+      .select({ id: users.id, role: users.role, active: users.active })
+      .from(users)
+      .where(inArray(users.id, userIds)),
+  ]);
+  const membership = new Map(memberRows.map((row) => [row.userId, row]));
+  const account = new Map(userRows.map((row) => [row.id, row]));
+
+  return rows.filter((row) => {
+    const userId = row.userId as string;
+    if (options.excludeUserId && userId === options.excludeUserId) return false;
+    const person = account.get(userId);
+    if (!person || !person.active) return false;
+    const member = membership.get(userId);
+    let role: string;
+    let scope: string[] | null = null;
+    if (member) {
+      if (member.status !== "active") return false;
+      role = member.role;
+      scope = parseSiteScope(member.siteScope);
+    } else if (person.role === "owner" || person.role === "super_admin") {
+      role = person.role;
+    } else {
+      return false;
+    }
+    if (options.coordinatorsOnly && !COORDINATOR_ROLES.has(role)) return false;
+    if (scope && job && !(job.siteId && scope.includes(job.siteId))) return false;
+    return true;
+  });
+}
+
+/** Contractor phones following a still-valid link to this job. */
+async function jobLinkRecipients(db: Database, orgId: string, requestId: string) {
+  const rows = await db
+    .select()
+    .from(pushSubscriptions)
+    .where(
+      and(
+        eq(pushSubscriptions.organisationId, orgId),
+        eq(pushSubscriptions.requestId, requestId),
+        isNotNull(pushSubscriptions.jobTokenId),
+      ),
+    );
+  if (!rows.length) return [];
+  const tokens = await db
+    .select({
+      id: jobAccessTokens.id,
+      expiresAt: jobAccessTokens.expiresAt,
+      revokedAt: jobAccessTokens.revokedAt,
+    })
+    .from(jobAccessTokens)
+    .where(inArray(jobAccessTokens.id, rows.map((row) => row.jobTokenId as string)));
+  const now = Date.now();
+  const live = new Set(
+    tokens
+      .filter((token) => !token.revokedAt && new Date(token.expiresAt).getTime() >= now)
+      .map((token) => token.id),
+  );
+  return rows.filter((row) => live.has(row.jobTokenId as string));
+}
+
+/* ── Messages ────────────────────────────────────────────────────────────── */
+
+function shorten(text: string, max: number) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+const STAFF_URL = "/dashboard/maintenance";
+const contractorUrl = (job: Job) => `/app?ref=${encodeURIComponent(job.id)}`;
+
+/* ── The four moments ────────────────────────────────────────────────────── */
+
+export async function notifyNewJob(db: Database, orgId: string, requestId: string) {
+  if (!pushConfigured()) return;
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job || job.parentId) return;
+    const people = await userRecipients(db, orgId, job, { coordinatorsOnly: true });
+    await deliver(db, people, {
+      title: `New job ${job.id} · ${shorten(job.location, 40)}`,
+      body: shorten(job.description, 140),
+      url: STAFF_URL,
+      tag: `job-${job.id}`,
+    });
+  } catch (cause) {
+    console.error("[push] new job", cause);
+  }
+}
+
+export async function notifyStatusChange(
+  db: Database,
+  orgId: string,
+  requestId: string,
+  status: string,
+  excludeUserId?: string | null,
+) {
+  if (!pushConfigured()) return;
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job) return;
+    const title = `${job.id} · ${shorten(job.location, 40)}`;
+    const body = `Status: ${status}`;
+    const [people, phones] = await Promise.all([
+      userRecipients(db, orgId, job, { coordinatorsOnly: false, excludeUserId }),
+      jobLinkRecipients(db, orgId, job.id),
+    ]);
+    await Promise.all([
+      deliver(db, people, { title, body, url: STAFF_URL, tag: `status-${job.id}` }),
+      deliver(db, phones, { title, body, url: contractorUrl(job), tag: `status-${job.id}` }),
+    ]);
+  } catch (cause) {
+    console.error("[push] status", cause);
+  }
+}
+
+export async function notifyUpdate(
+  db: Database,
+  orgId: string,
+  requestId: string,
+  excludeUserId?: string | null,
+) {
+  if (!pushConfigured()) return;
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job) return;
+    const title = `New update on ${job.id}`;
+    const body = shorten(`${job.location}: ${job.description}`, 140);
+    const [people, phones] = await Promise.all([
+      userRecipients(db, orgId, job, { coordinatorsOnly: false, excludeUserId }),
+      jobLinkRecipients(db, orgId, job.id),
+    ]);
+    await Promise.all([
+      deliver(db, people, { title, body, url: STAFF_URL, tag: `update-${job.id}` }),
+      deliver(db, phones, { title, body, url: contractorUrl(job), tag: `update-${job.id}` }),
+    ]);
+  } catch (cause) {
+    console.error("[push] update", cause);
+  }
+}
+
+export async function notifyContractorReport(
+  db: Database,
+  orgId: string,
+  requestId: string,
+  what: string,
+) {
+  if (!pushConfigured()) return;
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job) return;
+    const people = await userRecipients(db, orgId, job, { coordinatorsOnly: true });
+    await deliver(db, people, {
+      title: `Contractor update · ${job.id}`,
+      body: shorten(`${what} — ${job.location}`, 140),
+      url: STAFF_URL,
+      tag: `contractor-${job.id}`,
+    });
+  } catch (cause) {
+    console.error("[push] contractor report", cause);
+  }
+}
+
+/**
+ * The automation dispatcher's events, turned into the moments above.
+ *
+ * Called once per originating write (depth 0). One job gets at most one
+ * notification of each kind per write, however many events the write raised.
+ */
+export async function pushForEvents(ctx: AutomationContext, events: AutomationEvent[]) {
+  if (!pushConfigured() || !events.length) return;
+  const done = new Set<string>();
+  const exclude = ctx.actor.userId ?? null;
+  for (const event of events) {
+    if (!event.requestId) continue;
+    const key = `${event.type}:${event.requestId}`;
+    if (done.has(key)) continue;
+    if (event.type === "item_created" && !event.parentId) {
+      done.add(key);
+      await notifyNewJob(ctx.db, ctx.orgId, event.requestId);
+    } else if (event.type === "column_changed" && event.column === "status" && event.to) {
+      done.add(key);
+      await notifyStatusChange(ctx.db, ctx.orgId, event.requestId, event.to, exclude);
+    } else if (event.type === "update_created") {
+      done.add(key);
+      await notifyUpdate(ctx.db, ctx.orgId, event.requestId, exclude);
+    }
+  }
+}

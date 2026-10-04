@@ -1,0 +1,328 @@
+/*
+ * maintsupp.com/app — the install page and the installed app's front door.
+ *
+ * Self-contained like /f and /j (the public layout loads no shared stylesheet).
+ * Always the brand's dark navy: it is the app's splash colour (the manifest's
+ * background_color), the home-screen icon's colour and the status bar's, so the
+ * app opens without a flash of white whichever theme the phone is in.
+ *
+ * Contrast on --mapp-card: ink 14.9:1, muted 6.9:1, teal 6.5:1 — AA with room.
+ */
+
+.mapp,
+.mapp *,
+.mapp *::before,
+.mapp *::after {
+  box-sizing: border-box;
+}
+
+html:has(.mapp),
+body:has(.mapp) {
+  margin: 0;
+  background: #101920;
+}
+
+.mapp {
+  --mapp-bg: #101920;
+  --mapp-card: #16232c;
+  --mapp-line: #26363f;
+  --mapp-ink: #eef3f6;
+  --mapp-muted: #a7b6bf;
+  --mapp-teal: #12b4a8;
+  --mapp-on-teal: #04211f;
+  --mapp-red: #ff8f87;
+
+  min-height: 100vh;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--mapp-bg);
+  color: var(--mapp-ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.mapp a {
+  color: var(--mapp-teal);
+}
+
+.mapp__head {
+  padding: 4px 0 8px;
+}
+
+.mapp__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mapp__word {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+
+.mapp__word span {
+  color: var(--mapp-teal);
+}
+
+.mapp__tag {
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mapp-muted);
+}
+
+.mapp__hero h1 {
+  margin: 0 0 6px;
+  font-size: 28px;
+  line-height: 1.2;
+}
+
+.mapp__hero p {
+  margin: 0;
+  color: var(--mapp-muted);
+}
+
+.mapp__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 14px;
+  background: var(--mapp-card);
+}
+
+.mapp__card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.mapp__install {
+  border-color: var(--mapp-teal);
+}
+
+.mapp__muted {
+  margin: 0;
+  color: var(--mapp-muted);
+  font-size: 15px;
+}
+
+.mapp__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mapp__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 18px;
+  border: 1px solid var(--mapp-teal);
+  border-radius: 10px;
+  background: var(--mapp-teal);
+  color: var(--mapp-on-teal);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.mapp a.mapp__btn {
+  color: var(--mapp-on-teal);
+}
+
+.mapp__btn--ghost,
+.mapp a.mapp__btn--ghost {
+  background: transparent;
+  color: var(--mapp-teal);
+}
+
+.mapp__btn--big {
+  width: 100%;
+  min-height: 52px;
+  font-size: 17px;
+}
+
+.mapp__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mapp__btn:focus-visible,
+.mapp__remove:focus-visible,
+.mapp input:focus-visible {
+  outline: 3px solid var(--mapp-teal);
+  outline-offset: 2px;
+}
+
+.mapp__steps {
+  margin: 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mapp__glyph {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 6px;
+}
+
+.mapp__desk {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.mapp__qr {
+  flex: 0 0 auto;
+  width: 148px;
+  height: 148px;
+  border-radius: 8px;
+}
+
+.mapp__jobs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mapp__jobs li {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--mapp-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.mapp__jobs a {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  color: var(--mapp-ink);
+  text-decoration: none;
+}
+
+.mapp__jobs li.is-gone a {
+  opacity: 0.6;
+}
+
+.mapp__jobref {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mapp-teal);
+}
+
+.mapp__jobtitle {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mapp__jobmeta {
+  font-size: 13px;
+  color: var(--mapp-muted);
+}
+
+.mapp__remove {
+  flex: 0 0 44px;
+  border: 0;
+  border-left: 1px solid var(--mapp-line);
+  background: transparent;
+  color: var(--mapp-muted);
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.mapp__paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.mapp__paste label {
+  font-size: 13px;
+  color: var(--mapp-muted);
+}
+
+.mapp__paste input {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 10px;
+  background: var(--mapp-bg);
+  color: var(--mapp-ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+.mapp__on {
+  color: var(--mapp-teal);
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.mapp__note {
+  margin: 0;
+  font-size: 14px;
+  color: var(--mapp-muted);
+}
+
+.mapp__error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--mapp-red);
+}
+
+.mapp__foot {
+  margin-top: auto;
+  padding-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--mapp-muted);
+}
+
+.mapp__foot p {
+  margin: 2px 0;
+}
+
+@media (max-width: 640px) {
+  /* The link box gets its own line; Add and Paste share the next. */
+  .mapp__paste input {
+    flex-basis: 100%;
+  }
+
+  .mapp__paste .mapp__btn {
+    flex: 1 1 0;
+  }
+
+  .mapp__desk {
+    flex-direction: column;
+    text-align: center;
+  }
+}

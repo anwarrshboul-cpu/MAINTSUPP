@@ -175,6 +175,9 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
      insert (the confinement pins in tests/demo-workspace.test.mjs). No
      statement changed meaning. */
   "7a290950",
+  /* 7 — `ensurePushSubscriptions`: the installed app's phone notifications,
+     one new guarded table and three indexes. */
+  "bddb6b7f",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */
