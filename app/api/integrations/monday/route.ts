@@ -9,6 +9,7 @@ import {
   repairMissingFiles,
   syncMondayItems,
 } from "../../../lib/monday-live-sync";
+import { verifyStoreDocumentation } from "../../../lib/monday-verify";
 import { publicOrigin } from "../../../lib/public-origin";
 import { anonymousRefusal, scopedDb } from "../../../lib/tenant-db";
 
@@ -31,6 +32,9 @@ export const dynamic = "force-dynamic";
  *        puts back the bytes of files the database names but storage does not
  *        hold, from monday, at the object key each row already names;
  *        or { action: "repair-files", itemIds } for up to 10 named items
+ *
+ *   POST { action: "verify-store-docs" }
+ *        read-only comparison of Store Documentation with monday
  *
  * Every write is idempotent — matched on monday's item id, files on name and
  * size — so any call can be repeated safely.
@@ -83,6 +87,11 @@ export async function POST(request: Request) {
       page?: unknown;
       size?: unknown;
     };
+    if (body.action === "verify-store-docs") {
+      /* Read-only: every difference between monday's Store Documentation and
+         ours — stores, certificate files (and their bytes), expiry dates. */
+      return Response.json(await verifyStoreDocumentation(await getDb()));
+    }
     if (body.action === "connect") {
       return Response.json({ ok: true, ...(await connectMondayWebhooks(publicOrigin(request))) });
     }
