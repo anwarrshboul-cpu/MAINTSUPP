@@ -1,7 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import {
+  deviceUnlockAvailable,
+  signInWithThisDevice,
+  unlockLabel,
+} from "../../lib/passkey-client";
 import { useHydrated } from "../../lib/use-hydrated";
 
 /**
@@ -30,6 +35,33 @@ export default function SignInForm({ next }: { next: string }) {
   const [pending, setPending] = useState(false);
   /* Until hydrated, a submit is native — see app/lib/use-hydrated.ts. */
   const hydrated = useHydrated();
+  /*
+   * FACE ID / FINGERPRINT — offered only on a device that has one ready, so a
+   * desktop without Windows Hello is not shown a button that cannot work. The
+   * password form is unchanged and always there.
+   */
+  const [unlock, setUnlock] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void deviceUnlockAvailable().then((available) => {
+      if (active && available) setUnlock(unlockLabel());
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function signInWithUnlock() {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      window.location.assign(await signInWithThisDevice(next));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Face ID sign-in didn't work.");
+      setPending(false);
+    }
+  }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -111,6 +143,17 @@ export default function SignInForm({ next }: { next: string }) {
       <button className="login-form__submit" type="submit" disabled={pending || !hydrated}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
+
+      {unlock && (
+        <button
+          className="login-form__unlock"
+          type="button"
+          disabled={pending || !hydrated}
+          onClick={() => void signInWithUnlock()}
+        >
+          Sign in with {unlock}
+        </button>
+      )}
     </form>
   );
 }

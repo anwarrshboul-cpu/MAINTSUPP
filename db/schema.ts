@@ -2109,6 +2109,47 @@ export const notificationCooldowns = sqliteTable(
  * `id` is a hash of endpoint + subject, so subscribing twice is the same row.
  * A device the push service reports as gone (404/410) is deleted on the spot.
  */
+/**
+ * FACE ID / FINGERPRINT SIGN-IN — one row per passkey.
+ *
+ * A passkey is a key pair made by the person's own phone or computer; only the
+ * PUBLIC half is ever here (`public_key`, SubjectPublicKeyInfo, base64url).
+ * Signing in proves possession of the private half, which never leaves the
+ * device and is unlocked by Face ID, Touch ID or a fingerprint. `id` is the
+ * credential id the browser reports. `sign_count` is BIGINT because the
+ * authenticator's counter is unsigned 32-bit and overflows a Postgres integer.
+ */
+export const passkeys = sqliteTable(
+  "passkeys",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    algorithm: integer("algorithm").notNull(),
+    signCount: integer("sign_count").notNull().default(0),
+    name: text("name"),
+    transports: text("transports"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    lastUsedAt: text("last_used_at"),
+  },
+  (table) => [index("passkeys_user_idx").on(table.userId)],
+);
+
+/**
+ * One-time WebAuthn challenges. Each is used once and lives five minutes;
+ * `expires_at` is epoch milliseconds in a BIGINT (see `notificationCooldowns`).
+ */
+export const webauthnChallenges = sqliteTable(
+  "webauthn_challenges",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id"),
+    purpose: text("purpose").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [index("webauthn_challenges_expires_idx").on(table.expiresAt)],
+);
+
 export const pushSubscriptions = sqliteTable(
   "push_subscriptions",
   {

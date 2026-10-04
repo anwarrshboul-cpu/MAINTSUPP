@@ -457,6 +457,40 @@
   flex-wrap: wrap;
 }
 
+/* Face ID devices — a list, not a table, so Remove is always on screen on a
+   phone. */
+.account-passkeys {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.account-passkeys li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.account-passkeys li + li {
+  border-top: 1px solid var(--line);
+}
+
+.account-passkeys li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-passkeys span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .account-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);

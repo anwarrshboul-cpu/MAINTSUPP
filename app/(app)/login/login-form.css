@@ -70,6 +70,26 @@
 .login-form__submit:hover:not(:disabled) { background: var(--brand-bright); }
 .login-form__submit:disabled { cursor: progress; opacity: 0.7; }
 
+/* Face ID / fingerprint — the same size as Sign in, outlined so the password
+   path stays the obvious default for somebody who has not set it up. */
+.login-form__unlock {
+  display: inline-flex;
+  min-height: 50px;
+  padding: 0 22px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--brand-primary);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--brand-primary);
+  font-size: 15px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.login-form__unlock:disabled { cursor: progress; opacity: 0.7; }
+
 /* One message region, always present in the DOM and announced when it fills.
    A block that appears and disappears is skipped by most screen readers. */
 .login-form__error {
