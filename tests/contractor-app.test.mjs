@@ -94,3 +94,12 @@ test("UK mobiles are one identity however they are typed", async () => {
   const auth = await read("app/lib/contractor-auth.ts");
   assert.match(auth, /digits = `44\$\{digits\.slice\(1\)\}`;/);
 });
+
+test("the sign-in screen offers codes only when the server can send them, and always takes a pasted app link", async () => {
+  const start = await read("app/api/contractor/code/start/route.ts");
+  assert.match(start, /export function GET\(\) \{[\s\S]*?email: emailDeliveryStatus\(\)\.deliverable, text: verifyConfigured\(\)/);
+  const app = await read("app/(public)/contractor/contractor-app.tsx");
+  assert.match(app, /const codes = methods \? methods\.email \|\| methods\.text : false;/);
+  assert.match(app, /!codes \? null : !sent \?/);
+  assert.match(app, /window\.location\.href = `\/c\/\$\{match\[1\]\.toLowerCase\(\)\}`/);
+});

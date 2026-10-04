@@ -105,6 +105,42 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /* Which codes this server can send; null while asking. */
+  const [methods, setMethods] = useState<{ email: boolean; text: boolean } | null>(null);
+  const [link, setLink] = useState("");
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/contractor/code/start", { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { email?: boolean; text?: boolean } | null) => {
+        if (active) setMethods({ email: Boolean(payload?.email), text: Boolean(payload?.text) });
+      })
+      .catch(() => {
+        if (active) setMethods({ email: false, text: false });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /* The personal link the office sent, pasted in — the way to sign in inside
+     the installed iPhone app, which keeps its own sign-in apart from Safari. */
+  function openLink(event: React.FormEvent) {
+    event.preventDefault();
+    void askAlertPermissionNow();
+    const match = link.match(/\/c\/([a-f0-9]{64})/i) ?? link.trim().match(/^([a-f0-9]{64})$/i);
+    if (!match) {
+      setLinkError("That isn't a MAINTSUPP app link. It looks like maintsupp.com/c/…");
+      return;
+    }
+    setLinkError(null);
+    window.location.href = `/c/${match[1].toLowerCase()}`;
+  }
+
+  const codes = methods ? methods.email || methods.text : false;
+  const askFor = methods?.email && methods?.text ? "Your email or mobile number" : methods?.text ? "Your mobile number" : "Your email";
 
   useEffect(() => {
     try {
@@ -179,14 +215,16 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <h1 id="ctr-signin" className="ctr__title">
         Contractor sign-in
       </h1>
-      {!sent ? (
+      {methods === null ? (
+        <p className="mapp__muted">Loading…</p>
+      ) : !codes ? null : !sent ? (
         <form className="ctr__form" onSubmit={sendCode}>
-          <label htmlFor="ctr-identity">Your email or mobile number</label>
+          <label htmlFor="ctr-identity">{askFor}</label>
           <input
             id="ctr-identity"
             value={identity}
             onChange={(event) => setIdentity(event.target.value)}
-            placeholder="name@company.com or 07…"
+            placeholder={methods.email && methods.text ? "name@company.com or 07…" : methods.text ? "07…" : "name@company.com"}
             autoComplete="username"
             inputMode="email"
             autoCapitalize="none"
@@ -228,8 +266,38 @@ function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           {error}
         </p>
       )}
+      {methods !== null && (
+        <form className="ctr__form" onSubmit={openLink}>
+          <label htmlFor="ctr-link">
+            {codes ? "Or paste the app link your coordinator sent you" : "Paste the app link your coordinator sent you"}
+          </label>
+          <input
+            id="ctr-link"
+            value={link}
+            onChange={(event) => setLink(event.target.value)}
+            placeholder="maintsupp.com/c/…"
+            inputMode="url"
+            autoCapitalize="none"
+            autoComplete="off"
+            spellCheck={false}
+            required
+          />
+          <button
+            type="submit"
+            className={codes ? "mapp__btn mapp__btn--ghost" : "mapp__btn mapp__btn--big"}
+            disabled={!link.trim()}
+          >
+            Open my jobs
+          </button>
+          {linkError && (
+            <p className="mapp__error" role="alert">
+              {linkError}
+            </p>
+          )}
+        </form>
+      )}
       <p className="mapp__muted ctr__hint">
-        Got an app link from your coordinator on WhatsApp? Just open it — it signs you in.
+        Got the link on WhatsApp or by text? Tapping it signs you in too.
       </p>
       <p className="mapp__muted ctr__hint">
         A client? <a href="/login">Sign in to the client portal</a>

@@ -24,6 +24,18 @@ export const dynamic = "force-dynamic";
  * does say is whether codes can be sent AT ALL on this deployment for that kind
  * of address — a fact about the server, not the person.
  */
+/**
+ * GET /api/contractor/code/start — which kinds of code this deployment can
+ * send right now, so the sign-in screen offers only what works. A fact about
+ * the server, never about a person.
+ */
+export function GET() {
+  return Response.json(
+    { email: emailDeliveryStatus().deliverable, text: verifyConfigured() },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
