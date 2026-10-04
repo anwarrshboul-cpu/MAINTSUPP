@@ -760,13 +760,21 @@ export function BuildVibeView({ items }: { items: BoardItem[] }) {
         </span>
         <h3>Build Vibe view</h3>
         <p>
-          This is an app-style board view rather than a table, board or calendar. On the
-          board this one was rebuilt from it was an installed app —{" "}
-          <strong>Vibe, app 15528052</strong> — whose panel was an in-board app builder.
-          MAINTSUPP has no app builder, so rather than draw a canvas that does nothing,
-          the tab shows what an app built against this board would read: the board&rsquo;s
-          own figures, counted from the rows currently in view.
+          An at-a-glance summary of this board, counted from the jobs currently in view.
         </p>
+        {/* The provenance stays, one tap away rather than in the reader's path:
+            it is the record that this tab does not pretend to be an app builder. */}
+        <details className="vibe-view__about">
+          <summary>About this view</summary>
+          <p>
+            This is an app-style board view rather than a table, board or calendar. On the
+            board this one was rebuilt from it was an installed app —{" "}
+            <strong>Vibe, app 15528052</strong> — whose panel was an in-board app builder.
+            MAINTSUPP has no app builder, so rather than draw a canvas that does nothing,
+            the tab shows what an app built against this board would read: the board&rsquo;s
+            own figures, counted from the rows currently in view.
+          </p>
+        </details>
       </header>
 
       <ul className="vibe-view__figures">
@@ -780,9 +788,7 @@ export function BuildVibeView({ items }: { items: BoardItem[] }) {
 
       <p className="vibe-view__foot">
         A job counts as complete when its Status is &ldquo;{DONE_STATUS}&rdquo; — the
-        board&rsquo;s own done flag — or it carries a completion date. Fix Tracker is the
-        other app tab on this board (app 22247989) and it is fully rebuilt; both carry the
-        app glyph in the tab strip, which is how an app tab is marked.
+        board&rsquo;s own done flag — or it carries a completion date.
       </p>
     </div>
   );

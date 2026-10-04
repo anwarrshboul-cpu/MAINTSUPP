@@ -203,7 +203,25 @@ export function ReconcilePanel({ today }: { today?: string } = {}) {
           </div>
         </header>
 
-        {payload?.error ? (
+        {payload?.error && payload.checks?.length ? (
+          /*
+           * The deployment refused to run: this is the LIVE database, which the
+           * harness never touches by design. That is the system working, not a
+           * fault, so it reads as a calm note; the checks stay one tap away.
+           */
+          <div className="reconcile__notice" role="status">
+            <strong>Numbers reconciliation runs on test copies of the data only.</strong>
+            <p>It is switched off on the live site, so the live database is never touched by it. Nothing here needs attention.</p>
+            <details>
+              <summary>Why it is off here</summary>
+              {(payload.checks ?? []).map((check) => (
+                <p key={check.name} className="reconcile__check">
+                  <code>{check.name}</code> read <code>{check.observed}</code> — {check.reason}
+                </p>
+              ))}
+            </details>
+          </div>
+        ) : payload?.error ? (
           <div className="reconcile__notice reconcile__notice--stop" role="status">
             <strong>{payload.error}</strong>
             {payload.reason ? <p>{payload.reason}</p> : null}

@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
-import { complianceDocuments } from "../../../../db/schema";
+import { complianceDocuments, organisations } from "../../../../db/schema";
+import { getDb } from "../../../../db";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../../lib/tenant-db";
 import {
   headlineComplianceRegisters,
@@ -16,7 +17,11 @@ import {
 } from "../../../lib/notifications";
 import { memberSiteSet, withinMemberScope } from "../../../lib/member-site-scope";
 import { beyondMemberScope } from "../../../lib/job-site-scope";
-import { moduleRefusal } from "../../../lib/module-guard";
+import { moduleRefusal, moduleSwitchedOff } from "../../../lib/module-guard";
+import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
+import { DEMO_ORGANISATION_ID } from "../../../lib/tenant-access";
+import { DEMO_WORKSPACE_ID } from "../../../../db/demo-workspace";
+import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../../db/website-leads-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -397,12 +402,75 @@ export async function POST(request: Request) {
     if (siteScope) return beyondMemberScope("a compliance alert run covers every site in the workspace");
     const url = new URL(request.url);
     const dryRun = url.searchParams.get("dryRun") === "true";
+    return Response.json(await sendDigest(db, orgId, dryRun));
+  } catch (error) {
+    // A session that has ended is not an outage. See `anonymousRefusal`.
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
+    return Response.json(
+      { error: "The compliance alert is temporarily unavailable." },
+      { status: 503 },
+    );
+  }
+}
 
+/**
+ * Workspaces the daily run never emails about: the demo and leads workspaces,
+ * and any id or slug in COMPLIANCE_DIGEST_SKIP (default: the QA workspace,
+ * `claude-data`). Their sample certificates are nobody's estate.
+ */
+function skippedWorkspaces() {
+  const listed = (process.env.COMPLIANCE_DIGEST_SKIP ?? "claude-data")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return new Set([DEMO_ORGANISATION_ID, DEMO_WORKSPACE_ID, WEBSITE_LEADS_WORKSPACE_ID, ...listed]);
+}
+
+/**
+ * THE DAILY RUN (2026-10-04). Nothing called POST on a schedule — it needs a
+ * signed-in admin — so certificate expiries reminded nobody. `/api/cron/daily`
+ * calls this with the cron secret, and every client workspace with Compliance
+ * switched on gets the digest a person's run would send, named by workspace and
+ * recorded per stage so each warning goes once.
+ */
+export async function runComplianceDigestsForCron(request: Request) {
+  const refused = authoriseCron(request, "compliance alerts", await resolveCronSecret());
+  if (refused) return { refused: refused.status };
+  const db = await getDb();
+  const skip = skippedWorkspaces();
+  const workspaces = await db
+    .select({ id: organisations.id, name: organisations.name, slug: organisations.slug })
+    .from(organisations)
+    .where(eq(organisations.status, "active"));
+  const results: Array<Record<string, unknown>> = [];
+  for (const workspace of workspaces) {
+    if (skip.has(workspace.id) || skip.has(workspace.slug)) continue;
+    if (await moduleSwitchedOff(db, workspace.id, "compliance")) continue;
+    try {
+      const outcome = await sendDigest(db, workspace.id, false, workspace.name);
+      results.push({ organisationId: workspace.id, sent: outcome.sent, expired: outcome.expired, expiring: outcome.expiring });
+    } catch (cause) {
+      console.error("[compliance digest] a workspace failed", workspace.id, cause);
+      results.push({ organisationId: workspace.id, sent: false, failed: true });
+    }
+  }
+  return { results };
+}
+
+/** The emailing half of POST, for one workspace — shared with the daily run. */
+async function sendDigest(
+  db: Awaited<ReturnType<typeof scopedDb>>["db"],
+  orgId: string,
+  dryRun: boolean,
+  workspaceName?: string,
+): Promise<Record<string, unknown>> {
+  {
     const scanned = await scan(db, orgId);
     const fresh = scanned.filter((item) => !item.alreadyAlerted);
 
     if (fresh.length === 0) {
-      return Response.json({ sent: false, reason: "Nothing has crossed a new threshold." });
+      return { sent: false, reason: "Nothing has crossed a new threshold." };
     }
 
     const expired = fresh
@@ -411,7 +479,7 @@ export async function POST(request: Request) {
     const expiring = fresh.filter((item) => item.daysAway >= 0).map(forDigest);
 
     if (dryRun) {
-      return Response.json({ sent: false, dryRun: true, expired, expiring });
+      return { sent: false, dryRun: true, expired, expiring };
     }
 
     const template = complianceDigestTemplate({ expired, expiring });
@@ -422,7 +490,7 @@ export async function POST(request: Request) {
       event: expired.length ? "compliance.expired" : "compliance.expiring",
       subjectType: "compliance",
       to: opsInbox,
-      subject: template.subject,
+      subject: workspaceName ? `${workspaceName} · ${template.subject}` : template.subject,
       body: template.body,
     });
 
@@ -434,20 +502,12 @@ export async function POST(request: Request) {
       }
     }
 
-    return Response.json({
+    return {
       sent: result.ok,
       status: result.status,
       error: result.error,
       expired: expired.length,
       expiring: expiring.length,
-    });
-  } catch (error) {
-    // A session that has ended is not an outage. See `anonymousRefusal`.
-    const refusal = anonymousRefusal(error);
-    if (refusal) return refusal;
-    return Response.json(
-      { error: "The compliance alert is temporarily unavailable." },
-      { status: 503 },
-    );
+    };
   }
 }

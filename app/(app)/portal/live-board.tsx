@@ -2512,6 +2512,12 @@ export function LiveMaintenanceBoard({
         ...current,
         [key]: payload.cell!.value,
       }));
+      /* The server moves `title` with the name cell; the job's own copy here
+         must too, or the drawer opened next shows the old name. */
+      const renamed = typeof payload.cell.value === "string" ? payload.cell.value.trim() : "";
+      if (column.system && column.key === "name" && renamed) {
+        onRequestChange({ ...request, title: renamed.slice(0, 200) });
+      }
       /*
        * An automation fired on this edit, so cells this response does not name
        * may have changed too. Refetch rather than keep values the database no

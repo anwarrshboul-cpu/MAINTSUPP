@@ -2942,6 +2942,8 @@ export default function PortalApp({
     );
     try {
       await persistRequestUpdate(id, { stage: nextStage });
+      /* The server moved the row into its stage's group; redraw the board. */
+      window.dispatchEvent(new Event("maintsupp:refresh-board"));
       setToast(`${id} moved to ${stageLabel(nextStage)}.`);
     } catch (caught) {
       setRequests((current) =>
