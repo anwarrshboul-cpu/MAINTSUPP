@@ -1,3 +1,4 @@
+import PwaRegister from "./pwa-register";
 import type { Metadata } from "next";
 import { SkipLink } from "./skip-link";
 
@@ -117,11 +118,25 @@ export default function RootLayout({
         <link rel="icon" href="/favicon-96.png" type="image/png" sizes="96x96" />
         <link rel="shortcut icon" href="/favicon.ico" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" type="image/png" />
+        {/*
+          THE INSTALLED APP. The manifest makes maintsupp.com installable from
+          Chrome and Edge; iPhone reads the apple-* tags instead when somebody
+          uses Share → Add to Home Screen. No app store, no store fees: it is
+          the same site, opened full screen from its own icon. See /app.
+        */}
+        <link rel="manifest" href="/manifest.webmanifest" />
+        {/* The address-bar tint is not set here: the app group sets its own
+            (light and dark), and the manifest's colour covers the installed app. */}
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="MAINTSUPP" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black" />
       </head>
       <body suppressHydrationWarning>
         {/* First in the tab order on every page — see app/skip-link.tsx. */}
         <SkipLink />
         {children}
+        <PwaRegister />
       </body>
     </html>
   );

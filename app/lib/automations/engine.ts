@@ -22,6 +22,7 @@
  *    the event can name a workspace.
  */
 
+import { pushForEvents } from "../push-notify";
 import { and, eq, sql } from "drizzle-orm";
 import { automationRuns, boardAutomations } from "../../../db/schema";
 import { recordAudit } from "../audit";
@@ -274,5 +275,20 @@ export async function dispatchAutomationEvents(
 ): Promise<number> {
   let ran = 0;
   for (const event of events) ran += await dispatchAutomationEvent(ctx, event, depth);
+  /*
+   * PHONE NOTIFICATIONS ride on the same events, once per originating write.
+   * Every route that creates a job, changes its status or posts an update
+   * already reports it here, so this is the one place that sees all of them.
+   * After the rules, so a status a rule sets in the same write is the status
+   * people are told about; never at depth > 0, so a chain notifies once.
+   * `pushForEvents` swallows its own errors — see app/lib/push-notify.ts.
+   */
+  if (depth === 0) {
+    try {
+      await pushForEvents(ctx, events);
+    } catch (cause) {
+      console.error("[push] dispatch failed", cause);
+    }
+  }
   return ran;
 }

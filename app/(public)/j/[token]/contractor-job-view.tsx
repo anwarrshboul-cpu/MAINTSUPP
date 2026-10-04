@@ -5,6 +5,7 @@ import { SignaturePad } from "./signature-pad";
 import { ArrivalPack, type ArrivalPack as ArrivalPackData } from "./arrival-pack";
 import { uploadEvidenceFile } from "../../../lib/client-upload";
 import type { AttachmentKind } from "../../../lib/types";
+import { saveJob } from "../../../lib/saved-jobs";
 /*
  * THE SAME VIEWER THE PORTAL OPENS, on a page nobody signs in to.
  *
@@ -271,7 +272,17 @@ export default function ContractorJobView({ token }: { token: string }) {
     void (async () => {
       try {
         const payload = await load();
-        if (!cancelled) setData(payload);
+        if (!cancelled) {
+          setData(payload);
+          /* Remembered on this phone for the app's "My jobs" list — see
+             app/lib/saved-jobs.ts. Only a link that actually opened is kept. */
+          saveJob({
+            token,
+            reference: payload.job.reference,
+            title: payload.job.description?.trim() || payload.job.title,
+            location: payload.job.location,
+          });
+        }
       } catch (caught) {
         if (!cancelled) {
           setError(
@@ -287,7 +298,7 @@ export default function ContractorJobView({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [load, token]);
 
   async function upload(slot: UploadSlot, files: FileList | null) {
     if (!files?.length || !data) return;
@@ -819,6 +830,9 @@ export default function ContractorJobView({ token }: { token: string }) {
       <footer className="job-link__foot">
         {expires && <p>This link works until {expires}.</p>}
         <p>Maintsupp · +44 7852 224644 · Mon–Fri 8:30am–5:30pm</p>
+        <p>
+          <a href="/app">Get the MAINTSUPP app</a> — all your jobs in one place, with alerts.
+        </p>
       </footer>
     </main>
   );

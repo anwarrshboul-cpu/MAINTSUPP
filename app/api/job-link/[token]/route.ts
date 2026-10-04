@@ -1,3 +1,4 @@
+import { notifyContractorReport } from "../../../lib/push-notify";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { getDb } from "../../../../db";
@@ -759,6 +760,7 @@ export async function POST(
       await recordContractorHandling(db, scope, by, "blocked");
       await recordTokenUse(db, scope.id);
       await notifyCoordinator(db, scope, "blocked", by || null, note || null, reason);
+      await notifyContractorReport(db, scope.organisationId, scope.requestId, `Can't complete: ${reason}`);
       return Response.json({ ok: true, recorded: "blocked" });
     }
 
@@ -865,6 +867,7 @@ export async function POST(
       await recordContractorHandling(db, scope, by, "completion");
       await recordTokenUse(db, scope.id);
       await notifyCoordinator(db, scope, "completion", by || null, note || null, null);
+      await notifyContractorReport(db, scope.organisationId, scope.requestId, "Work completed — ready to review");
       return Response.json({
         ok: true,
         recorded: "completion-requested",
@@ -899,6 +902,7 @@ export async function POST(
     await recordComment(db, scope, completionUpdate(note, finishedOn), by);
     await recordContractorHandling(db, scope, by, "note");
     await recordTokenUse(db, scope.id);
+    await notifyContractorReport(db, scope.organisationId, scope.requestId, "New note from the contractor");
     return Response.json({ ok: true, recorded: "note" });
   } catch {
     return Response.json(

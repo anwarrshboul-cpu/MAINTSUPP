@@ -484,6 +484,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      `ensureFeatureEpochs`. */
   await ensureFeatureEpochs(d1);
 
+  /* The installed app's phone notifications — one row per device and subject.
+     One guarded table and three indexes; no seed (no row means nobody has
+     turned notifications on). See `ensurePushSubscriptions`. */
+  await ensurePushSubscriptions(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6439,6 +6444,41 @@ async function ensureNotificationPreferences(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS notification_cooldowns_last_idx ON notification_cooldowns(last_at)",
+    ),
+  ]);
+}
+
+/**
+ * THE INSTALLED APP'S PHONE NOTIFICATIONS. See `pushSubscriptions` in
+ * db/schema.ts. Additive: a new table nothing else reads, so a database without
+ * it is simply one where nobody has switched notifications on.
+ */
+async function ensurePushSubscriptions(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS push_subscriptions (
+         id TEXT PRIMARY KEY,
+         organisation_id TEXT NOT NULL,
+         user_id TEXT,
+         job_token_id TEXT,
+         request_id TEXT,
+         endpoint TEXT NOT NULL,
+         p256dh TEXT NOT NULL,
+         auth TEXT NOT NULL,
+         user_agent TEXT,
+         failures INTEGER NOT NULL DEFAULT 0,
+         last_sent_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS push_subscriptions_org_user_idx ON push_subscriptions(organisation_id, user_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS push_subscriptions_request_idx ON push_subscriptions(organisation_id, request_id)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)",
     ),
   ]);
 }
