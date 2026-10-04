@@ -256,12 +256,21 @@ export function intakeWarnings(input: IntakeInput): IntakeWarning[] {
     } else {
       const options = offeredOptions(location, input.optionOverrides);
       if (!options.length) {
+        /*
+         * NO LONGER BLOCKING. A workspace with no locations used to be offered
+         * another client's store list and refuse every answer. Since
+         * `formOptionOverrides` sends an empty list, the link asks Location as
+         * a typed answer and the submit route accepts it (the job is filed
+         * with the typed location and no site). So the form DOES file a job;
+         * what is worth saying is that the answer is free text until the
+         * workspace's stores are added under Sites.
+         */
         warnings.push({
           id: "location-empty",
-          level: "blocking",
-          title: "The Location question offers no locations",
+          level: "warning",
+          title: "No locations are set up in this workspace yet",
           detail:
-            "A location is matched against the workspace's own Sites register, and that register has nothing in it this form may offer. Every submission is refused with “Choose a location from the list.”",
+            "Location is asked as a typed answer for now, and jobs are filed with whatever is typed. Add this workspace's stores under Sites and it becomes a dropdown of them.",
           questionId: LOCATION_ID,
         });
       }
