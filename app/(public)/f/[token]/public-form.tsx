@@ -61,7 +61,27 @@ type Payload =
   | { state: "login-required"; title: string }
   | { state: "unavailable"; reason: string; title: string; message: string };
 
-export default function PublicForm({ token }: { token: string }) {
+export default function PublicForm({
+  token,
+  embedded = false,
+  onSubmitted,
+}: {
+  token: string;
+  /**
+   * Mounted inside the dashboard's Form tab rather than on its own page.
+   *
+   * The Form tab used to draw `FormView`, a hard-coded form that ignored the
+   * saved configuration, so every edit made in the builder was invisible on
+   * the screen the operator was looking at. It now mounts THIS component — the
+   * one the shared link serves — so what the dashboard shows and what a
+   * submitter fills in are the same form. Embedded, a configured redirect is
+   * not followed: sending an operator off the dashboard after logging a job
+   * from it is not what the redirect was configured for.
+   */
+  embedded?: boolean;
+  /** Told once a submission has been logged, so the board can refresh. */
+  onSubmitted?: () => void;
+}) {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [failed, setFailed] = useState(false);
   /*
@@ -349,8 +369,10 @@ export default function PublicForm({ token }: { token: string }) {
       setAnswers({});
       setFiles([]);
 
+      onSubmitted?.();
+
       const redirect = payload.form.afterSubmission.redirectUrl;
-      if (redirect) window.location.href = redirect;
+      if (redirect && !embedded) window.location.href = redirect;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Your request could not be submitted.");
       setState("form");

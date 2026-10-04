@@ -7,6 +7,7 @@ import type { BuilderColumn } from "./form-bindings";
 import { FormDesignPanel, FormSettingsPanel } from "./form-builder-panels";
 import { FormEditPanel } from "./form-edit-panel";
 import FormPreview from "./form-preview";
+import PublicForm from "../../(public)/f/[token]/public-form";
 import FormShareDialog from "./form-share-dialog";
 import type { BuilderForm, BuilderMode } from "./form-builder-model";
 import { formSaveLabel, useFormSave } from "./form-builder-save";
@@ -293,6 +294,57 @@ export default function FormBuilder({
       saver.save(body, { immediate: !bursty });
     },
     [saver],
+  );
+
+  /**
+   * A NEW FIELD — a new board column — made from inside the form editor.
+   *
+   * Every question is bound to a column (see `form-bindings.ts`), so a field the
+   * board has never had — "Company name" — could not be put on the form at all:
+   * the picker only lists columns that already exist. monday's builder answers
+   * that by creating the column as part of adding the question, and so does
+   * this. It is the existing `POST /api/board/columns` (same `board.edit`
+   * check, same audit entry as the board's own "+ Add column"), made here in the
+   * shell because no panel may reach the network on its own.
+   *
+   * The new column is added to the list the panels hold, so the picker and the
+   * intake checks know about it at once, and handed back for the caller to bind.
+   */
+  const createField = useCallback(
+    async (title: string, type: string): Promise<BuilderColumn | null> => {
+      setError(null);
+      try {
+        const response = await fetch("/api/board/columns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ board: boardId, title, type }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          id?: string;
+          key?: string;
+          title?: string;
+          type?: string;
+          error?: string;
+        };
+        if (!response.ok || !payload.id || !payload.key) {
+          throw new Error(payload.error || "The new field could not be created.");
+        }
+        const column: BuilderColumn = {
+          id: payload.id,
+          key: payload.key,
+          title: payload.title ?? title,
+          type: payload.type ?? type,
+          required: false,
+          system: false,
+        };
+        setColumns((current) => [...current, column]);
+        return column;
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "The new field could not be created.");
+        return null;
+      }
+    },
+    [boardId],
   );
 
   /**
@@ -646,7 +698,13 @@ export default function FormBuilder({
 
       <div className="form-builder__stage" data-mode={mode}>
         {mode === "edit" && (
-          <FormEditPanel form={form} patch={patch} busy={busy} columns={columns} />
+          <FormEditPanel
+            form={form}
+            patch={patch}
+            busy={busy}
+            columns={columns}
+            createField={createField}
+          />
         )}
         {mode === "design" && <FormDesignPanel form={form} patch={patch} busy={busy} />}
         {mode === "settings" && (
@@ -665,8 +723,32 @@ export default function FormBuilder({
           through the shared public renderer instead, which is exactly what the
           link serves.
         */}
+        {/*
+          THE SAVED FORM, NOT A HARD-CODED ONE.
+
+          `FormView` draws a fixed set of seven questions and never reads the
+          configuration, so on the job board every edit made in Edit / Design /
+          Settings saved correctly and then did not appear here — the form
+          looked uneditable. A reader who may hold the link (`shareToken` is
+          withheld without `board.edit`) now gets the shared link's own
+          component, which renders the saved questions in their saved order and
+          submits through `/api/forms/:token/submit`, the path that files every
+          answer — including fields added in the builder — onto THIS board.
+          `FormView` remains only for a reader with no link to use.
+        */}
         {mode === "view" &&
-          (form.filesIntoThisBoard === false ? (
+          (form.shareToken ? (
+            <div className="form-builder__preview-live">
+              {/* Keyed by token only. Leaving view for Edit unmounts this, so
+                  coming back fetches the definition just saved. */}
+              <PublicForm
+                key={form.shareToken}
+                token={form.shareToken}
+                embedded
+                onSubmitted={onSubmitted}
+              />
+            </div>
+          ) : form.filesIntoThisBoard === false ? (
             <FormPreview form={form} />
           ) : (
             <FormView onSubmitted={onSubmitted} />
