@@ -60,8 +60,9 @@ test("client Owners and Admins keep their own preferences, not the workspace's s
 test("an invitation points at the app, and accepting on a phone goes there", async () => {
   const notifications = await read("app/lib/notifications.ts");
   const invite = notifications.slice(notifications.indexOf("export function invitationEmailTemplate"));
-  assert.match(invite, /Then get the MAINTSUPP app/);
-  assert.match(invite, /appLinkFor\(invite\.inviteUrl\)/);
+  /* One button does both (owner, 2026-10-04). */
+  assert.match(invite, />Accept &amp; download the app<\/a>/);
+  assert.equal((invite.slice(0, invite.indexOf("const text")).match(/<a href=/g) ?? []).length, 1, "exactly one button");
   const form = await read("app/(public)/invite/[token]/accept-invite-form.tsx");
-  assert.match(form, /onPhone && !installed \? "\/app\?welcome=1"/);
+  assert.match(form, /window\.location\.assign\(installed \? \(payload\.redirectTo \?\? "\/dashboard"\) : "\/app\?welcome=1"\)/);
 });

@@ -295,7 +295,8 @@ test("the invitation email says who, where, what role and until when — and not
   assert.match(email.body, /Acme &lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt; Ltd/);
   assert.match(email.body, />Manager</);
   assert.match(email.body, /23 Sept 2026/);
-  assert.match(email.body, />Accept invitation<\/a>/);
+  /* Re-pointed 2026-10-04 (owner): one button accepts AND leads to the app. */
+  assert.match(email.body, />Accept &amp; download the app<\/a>/);
   assert.match(email.text, /Your role: Manager/);
   assert.match(email.text, /Link expires: 23 Sept 2026/);
 

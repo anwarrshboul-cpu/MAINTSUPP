@@ -182,6 +182,14 @@ export default async function InvitePage({
             ) : null}
           </dl>
 
+          <div className="invite__app" role="note">
+            <strong>Next: the MAINTSUPP app</strong>
+            <span>
+              After you accept, we take you straight to the free app &mdash; add it to your
+              phone for your jobs, updates and alerts. No App Store or Google Play needed.
+            </span>
+          </div>
+
           <AcceptInviteForm
             token={token}
             email={email}
