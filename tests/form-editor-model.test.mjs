@@ -372,18 +372,25 @@ test("an optional Description is blocking, because the server has a ten-characte
   assert.match(found.detail, /shorter than ten characters/);
 });
 
-test("a Location question with no live sites behind it is blocking", () => {
+test("a Location question with no live sites behind it is reported, as a typed answer", () => {
   /*
-   * Trap 3. The stored options are monday's 21 captured labels, and the server
-   * substitutes the live `sites` register over them — so an estate with no
-   * canonical sites offers a list of nothing and refuses every submission with
-   * "Choose a location from the list.", while the editor looks perfectly fine.
+   * Trap 3, RE-POINTED because the behaviour it guarded changed on purpose
+   * (2026-10-04, owner's request). An estate with no canonical sites used to be
+   * offered monday's captured labels — another client's real stores — and every
+   * submission was refused with "Choose a location from the list.". Now
+   * `formOptionOverrides` sends an empty list, `projectQuestions` asks Location
+   * as free text, and the submit route accepts a typed location when the
+   * workspace has no sites. The form files a job, so this is no longer
+   * blocking — but it is still reported, on the Location question, so an
+   * operator knows the list comes from Sites.
    */
   const input = healthyJobForm();
   input.optionOverrides = { [LOCATION]: [] };
   const found = intake.intakeWarnings(input).find((warning) => warning.id === "location-empty");
   assert.ok(found);
-  assert.equal(found.level, "blocking");
+  assert.equal(found.level, "warning");
+  assert.match(found.detail, /typed answer/);
+  assert.match(found.detail, /Sites/);
   assert.equal(found.questionId, LOCATION);
 });
 
@@ -548,4 +555,20 @@ test("a question is addressed by column id, and a canonical one by monday's id",
   assert.equal(bindings.columnForQuestion(LOCATION, [location, plain]), location);
   assert.equal(bindings.columnForQuestion("col_7", [location, plain]), plain);
   assert.equal(bindings.columnForQuestion("nobody", [location, plain]), null);
+});
+
+test("a choice question whose canonical list is empty is asked as free text", () => {
+  /*
+   * The other half of the location-empty change. An empty substitution is the
+   * signal that the register behind the question has nothing in it yet, so the
+   * link asks a typed answer instead of drawing a dropdown nobody can answer.
+   * A missing substitution is NOT the same signal and keeps the stored list.
+   */
+  const config = healthyJobForm().config;
+  const asked = projection.projectQuestions(config, { [LOCATION]: [] });
+  const location = asked.find((entry) => entry.id === LOCATION);
+  assert.equal(location.type, "ShortText");
+  assert.deepEqual(location.options, []);
+  const untouched = projection.projectQuestions(config, {});
+  assert.notEqual(untouched.find((entry) => entry.id === LOCATION).type, "ShortText");
 });
