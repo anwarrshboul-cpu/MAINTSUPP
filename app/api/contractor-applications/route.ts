@@ -5,9 +5,11 @@ import { contractorApplications, organisations } from "../../../db/schema";
 import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../db/website-leads-workspace";
 import { scopedDb } from "../../lib/tenant-db";
 import {
+  emailShell,
   notificationTargets,
   sendNotification,
 } from "../../lib/notifications";
+import { notifyPlatformStaff } from "../../lib/push-notify";
 import {
   publicRetryAfter,
   recordPublicAttempt,
@@ -17,6 +19,23 @@ import {
 import { CONTRACTOR_APPLICATIONS } from "../../lib/form-throttle";
 
 export const dynamic = "force-dynamic";
+
+function randomHex(bytes: number) {
+  return Array.from(crypto.getRandomValues(new Uint8Array(bytes)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
 
 /**
  * An application from the public /contractors page.
@@ -165,7 +184,14 @@ export async function POST(request: Request) {
     }
 
     const id = crypto.randomUUID();
+    /* A one-time key the applicant's browser uses to attach insurance and
+       certificates right after submitting (2026-10-04). Only its hash is
+       kept, and it lasts an hour. */
+    const uploadToken = randomHex(32);
     await db.insert(contractorApplications).values({
+      uploadTokenHash: await sha256Hex(uploadToken),
+      uploadTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      documents: "[]",
       id,
       organisationId: intake.id,
       company,
@@ -230,7 +256,33 @@ export async function POST(request: Request) {
         .replace(/"/g, "&quot;")}</pre>`,
     });
 
-    return Response.json({ ok: true, id, notified: delivered.ok }, { status: 201 });
+    /* The applicant hears back at once (2026-10-04), from the address the
+       office replies from. */
+    await sendNotification(db, {
+      organisationId: intake.id,
+      channel: "email",
+      event: "contractor.application_received",
+      subjectType: "contractor-application",
+      subjectId: id,
+      to: email,
+      subject: "We've received your MAINTSUPP contractor application",
+      body: emailShell(
+        "Thank you for applying",
+        `<p style="font-size:14px;line-height:1.55">Hi ${escapeHtml(contactName)},</p>
+         <p style="font-size:14px;line-height:1.55">Thank you for applying to join the MAINTSUPP contractor network on behalf of <strong>${escapeHtml(company)}</strong>. Our team reviews every application, including your insurance and accreditations, and will be in touch.</p>
+         <p style="font-size:14px;line-height:1.55">If you have documents you did not attach, simply reply to this email with them.</p>`,
+      ),
+      text: `Hi ${contactName},\n\nThank you for applying to join the MAINTSUPP contractor network on behalf of ${company}. Our team reviews every application and will be in touch.\n\nIf you have documents you did not attach, reply to this email with them.`,
+    }).catch(() => null);
+
+    await notifyPlatformStaff(db, {
+      title: `New contractor application · ${company}`,
+      body: `${trades.slice(0, 3).join(", ")} · ${regions}`.slice(0, 160),
+      url: "/admin/applications",
+      tag: `application-${id}`,
+    });
+
+    return Response.json({ ok: true, id, uploadToken, notified: delivered.ok }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     console.error("contractor application failed", message);

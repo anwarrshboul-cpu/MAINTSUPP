@@ -322,7 +322,10 @@ test("each door keeps its own authentication, which is the part that must differ
   assert.match(items, /scopedDbWithCapability\(request, "board\.edit"\)/);
   const reportJob = await read("app/api/report-job/route.ts");
   assert.match(reportJob, /allowAnonymous: true/);
-  assert.match(reportJob, /const orgId = PRIMARY_ORGANISATION_ID/);
+  /* Re-pointed 2026-10-04: pinned to the primary client for its own stores,
+     Website Leads for everyone else — see stage-twentyeight's pin. */
+  assert.match(reportJob, /const primaryOrgId = PRIMARY_ORGANISATION_ID/);
+  assert.match(reportJob, /const orgId = site \? primaryOrgId : WEBSITE_LEADS_WORKSPACE_ID;/);
   const submit = await read("app/api/forms/[token]/submit/route.ts");
   assert.match(submit, /loadFormByToken\(db, token\)/);
   assert.match(submit, /const boardKey = record\.boardId;/);

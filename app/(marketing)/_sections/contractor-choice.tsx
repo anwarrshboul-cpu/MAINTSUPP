@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { HOME_COPY, type HomeCopy } from "./copy";
 /**
  * SECTION — Your contractors or ours. New in Homepage V3.
@@ -123,6 +124,22 @@ export function ContractorChoice({ copy = HOME_COPY.yourContractors }: { copy?: 
           comes from, they invoice you directly at their own agreed rates: the coordination
           fee is the only thing Maintsupp charges for.
         </p>
+
+        {/* For the other reader of this section (2026-10-04): the contractor
+            who wants to BE on the network. One clear door to the application. */}
+        <div className="choice__join reveal">
+          <div>
+            <h3>Are you a contractor?</h3>
+            <p>
+              Join the Maintsupp network — tell us your trades, the areas you cover and your
+              accreditations, and attach your insurance. Approved contractors get jobs and
+              alerts in the MAINTSUPP app.
+            </p>
+          </div>
+          <Link className="btn btn--primary" href="/contractors">
+            Join our contractor network
+          </Link>
+        </div>
       </div>
     </section>
   );

@@ -184,6 +184,9 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   /* 9 — `ensureContractorApp`: contractor sessions, invites and one-time
      codes, and the contractor a phone's alerts belong to. */
   "aa309e45",
+  /* 10 — contractor applications: document upload key, documents, and the
+     register record an approved application became. */
+  "43652600",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

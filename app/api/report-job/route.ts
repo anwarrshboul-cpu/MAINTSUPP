@@ -1,5 +1,5 @@
 import { eq, sql } from "drizzle-orm";
-import { ensureDatabase } from "../../../db/init";
+import { ensureDatabase, seedBoardStructure } from "../../../db/init";
 import { maintenanceRequests } from "../../../db/schema";
 import { exposeRequest } from "../../lib/request-payload";
 import {
@@ -12,6 +12,9 @@ import { automationContext, dispatchAutomationEvents, itemCreatedEvent } from ".
 import { createSubmission, resolveSubmissionSite } from "../../lib/submission-service";
 import { PRIMARY_ORGANISATION_ID, scopedDb } from "../../lib/tenant-db";
 import { getD1 } from "../../../db";
+import { WEBSITE_LEADS_WORKSPACE_ID } from "../../../db/website-leads-workspace";
+import { JOBS_TEMPLATE_GROUP_KEYS } from "../../lib/generic-board-template";
+import { notifyPlatformStaff } from "../../lib/push-notify";
 import {
   publicRetryAfter,
   recordPublicAttempt,
@@ -137,7 +140,7 @@ export async function POST(request: Request) {
     const { db } = scope;
     // PINNED. An anonymous caller resolves to the primary tenant anyway; this
     // makes it true regardless of what any cookie on the request claims.
-    const orgId = PRIMARY_ORGANISATION_ID || scope.orgId;
+    const primaryOrgId = PRIMARY_ORGANISATION_ID || scope.orgId;
 
     /*
      * The site a public report belongs to.
@@ -166,7 +169,22 @@ export async function POST(request: Request) {
      * cannot name a register, so the only one they can mean is the workspace's
      * own. See `app/lib/register-scope.ts`.
      */
-    const site = await resolveSubmissionSite(db, { organisationId: orgId, location });
+    const site = await resolveSubmissionSite(db, { organisationId: primaryOrgId, location });
+    /*
+     * WHOSE REPORT IS THIS (owner decision, 2026-10-04). The home page form is
+     * used by the primary client's store staff — their typed site matches one
+     * of that client's stores, and the job is theirs. Anybody else's report
+     * matched nothing and was still filed in that CLIENT's workspace, where the
+     * client's own users could read a stranger's fault report. An unmatched
+     * report now goes to MAINTSUPP's Website Leads workspace instead, whose job
+     * board is created the first time one arrives.
+     */
+    const orgId = site ? primaryOrgId : WEBSITE_LEADS_WORKSPACE_ID;
+    if (!site) {
+      await seedBoardStructure(await getD1(), WEBSITE_LEADS_WORKSPACE_ID, DEFAULT_BOARD_KEY, [
+        ...JOBS_TEMPLATE_GROUP_KEYS,
+      ]);
+    }
 
     /*
      * The single-use grant that lets the reporter attach the photographs they
@@ -272,6 +290,17 @@ export async function POST(request: Request) {
       automationContext({ ...scope, orgId }, request),
       [itemCreatedEvent(DEFAULT_BOARD_KEY, created.id, null, submission.group?.id ?? null)],
     );
+
+    /* A report that went to Website Leads has no client coordinators to
+       alert — MAINTSUPP's staff are told on their phones instead. */
+    if (!site) {
+      await notifyPlatformStaff(db, {
+        title: `New job from the website · ${submission.displayReference}`,
+        body: `${location || "No site given"} — ${created.title}`.slice(0, 160),
+        url: "/dashboard/jobs",
+        tag: `website-job-${created.id}`,
+      });
+    }
 
     return Response.json(
       { request: exposeRequest(created), notified: alertResult.ok, uploadToken },

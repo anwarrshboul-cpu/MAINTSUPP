@@ -1314,6 +1314,13 @@ export const contractorApplications = sqliteTable(
     status: text("status").notNull().default("New"),
     notifiedAt: text("notified_at"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    /** sha-256 of the applicant's one-time document upload key (2026-10-04). */
+    uploadTokenHash: text("upload_token_hash"),
+    uploadTokenExpiresAt: text("upload_token_expires_at"),
+    /** JSON array of { id, key, name, type, size } — insurance, certificates. */
+    documents: text("documents"),
+    /** The Contractors register row an approved application was added as. */
+    contractorId: text("contractor_id"),
   },
   (table) => [
     index("contractor_applications_created_idx").on(table.organisationId, table.createdAt),

@@ -464,8 +464,6 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "users.deactivate",
     "teams.manage",
     "audit.read",
-    "settings.edit",
-    "integrations.manage",
     "navigation.personalise",
   ],
   /*
@@ -491,8 +489,6 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "users.deactivate",
     "teams.manage",
     "audit.read",
-    "settings.edit",
-    "integrations.manage",
     "navigation.personalise",
   ],
   manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],

@@ -134,11 +134,12 @@ const EXPECTED = {
     "users.deactivate",
     "teams.manage",
     "audit.read",
-    "settings.edit",
-    /* §35 (owner decision Q3, scoped REST API tokens): issuing a credential
-       that reads the workspace from outside is administration — Admin and
-       Owner by default, above a Manager's ceiling, closed to a client. */
-    "integrations.manage",
+    /* Owner decision 2026-10-04: a CLIENT's Owner or Admin keeps their own
+       preferences (theme, alerts, notifications, Face ID, their sidebar) but no
+       longer changes the workspace itself — `settings.edit` and
+       `integrations.manage` (§35 API tokens) left the built-in set. MAINTSUPP
+       staff are platform Super Admins and hold both; a Super Admin can still
+       open either per workspace through the role matrix. */
     "navigation.personalise",
   ],
   manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],

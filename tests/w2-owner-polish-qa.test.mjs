@@ -781,7 +781,9 @@ test("W2C-QA report-job site resolution is recorded, scoped or not", async () =>
   const report = codeOnly(await source(REPORT_JOB));
   assert.match(
     report,
-    /resolveSubmissionSite\(db, \{ organisationId: orgId, location \}\)/,
+    /* Re-pointed 2026-10-04: the site is resolved in the primary client's
+       register, and that match is what decides the workspace. */
+    /resolveSubmissionSite\(db, \{ organisationId: primaryOrgId, location \}\)/,
     "the public form must pass no scope, so it takes the canonical default",
   );
 });

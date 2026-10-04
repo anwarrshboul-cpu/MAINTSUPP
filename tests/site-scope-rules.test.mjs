@@ -64,7 +64,10 @@ test("the ceiling is the workspace-wide set, and Super Admin — the recovery ro
 });
 
 test("refused by the ceiling, the 403 says so in the site-scope shape; refused by the role, it does not", async () => {
-  const byCeiling = permissions.requireCapability({ role: "admin", capabilities: {}, siteRestricted: true }, "settings.edit");
+  /* The example capability is one an Admin HOLDS — `settings.edit` was, until
+     the 2026-10-04 owner decision took it out of the Admin default set; an
+     Admin a Super Admin opened it for is the same case. */
+  const byCeiling = permissions.requireCapability({ role: "admin", capabilities: { "settings.edit": true }, siteRestricted: true }, "settings.edit");
   assert.equal(byCeiling.status, 403);
   const body = await byCeiling.json();
   assert.equal(body.outsideSiteScope, true);

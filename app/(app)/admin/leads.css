@@ -223,3 +223,18 @@
      scroller, and pushed the page 17-32px sideways on a phone (2026-09-24). */
   position: relative;
 }
+
+/* Documents an applicant attached (2026-10-04). */
+.leads-admin__docs {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.leads-admin__docs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
