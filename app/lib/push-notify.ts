@@ -25,6 +25,7 @@
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
+  contractors,
   jobAccessTokens,
   maintenanceRequests,
   memberships,
@@ -34,6 +35,7 @@ import {
 import { parseSiteScope } from "./tenant-grants";
 import { pushConfigured, sendPush, type PushMessage } from "./web-push";
 import type { AutomationContext, AutomationEvent } from "./automations/types";
+import { tellContractorAboutJob } from "./contractor-messaging";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 type SubscriptionRow = typeof pushSubscriptions.$inferSelect;
@@ -101,6 +103,7 @@ type Job = {
   description: string;
   status: string;
   parentId: string | null;
+  contractorId: string | null;
 };
 
 async function loadJob(db: Database, orgId: string, requestId: string): Promise<Job | null> {
@@ -112,6 +115,7 @@ async function loadJob(db: Database, orgId: string, requestId: string): Promise<
       description: maintenanceRequests.description,
       status: maintenanceRequests.status,
       parentId: maintenanceRequests.parentId,
+      contractorId: maintenanceRequests.contractorId,
     })
     .from(maintenanceRequests)
     .where(
@@ -185,6 +189,15 @@ async function userRecipients(
   });
 }
 
+/** Phones signed in to the contractor app as the contractor on this job. */
+async function contractorAppRecipients(db: Database, job: Job) {
+  if (!job.contractorId) return [];
+  return db
+    .select()
+    .from(pushSubscriptions)
+    .where(eq(pushSubscriptions.contractorId, job.contractorId));
+}
+
 /** Contractor phones following a still-valid link to this job. */
 async function jobLinkRecipients(db: Database, orgId: string, requestId: string) {
   const rows = await db
@@ -224,6 +237,12 @@ function shorten(text: string, max: number) {
 
 const STAFF_URL = "/dashboard/maintenance";
 const contractorUrl = (job: Job) => `/app?ref=${encodeURIComponent(job.id)}`;
+const CONTRACTOR_APP_URL = (job: Job) => `/contractor?job=${encodeURIComponent(job.id)}`;
+
+function appOrigin() {
+  const configured = process.env.PUBLIC_APP_ORIGIN?.trim();
+  return configured && /^https?:\/\//.test(configured) ? configured.replace(/\/+$/, "") : "https://maintsupp.com";
+}
 
 /* ── The four moments ────────────────────────────────────────────────────── */
 
@@ -257,13 +276,15 @@ export async function notifyStatusChange(
     if (!job) return;
     const title = `${job.id} · ${shorten(job.location, 40)}`;
     const body = `Status: ${status}`;
-    const [people, phones] = await Promise.all([
+    const [people, phones, app] = await Promise.all([
       userRecipients(db, orgId, job, { coordinatorsOnly: false, excludeUserId }),
       jobLinkRecipients(db, orgId, job.id),
+      contractorAppRecipients(db, job),
     ]);
     await Promise.all([
       deliver(db, people, { title, body, url: STAFF_URL, tag: `status-${job.id}` }),
       deliver(db, phones, { title, body, url: contractorUrl(job), tag: `status-${job.id}` }),
+      deliver(db, app, { title, body, url: CONTRACTOR_APP_URL(job), tag: `status-${job.id}` }),
     ]);
   } catch (cause) {
     console.error("[push] status", cause);
@@ -282,13 +303,15 @@ export async function notifyUpdate(
     if (!job) return;
     const title = `New update on ${job.id}`;
     const body = shorten(`${job.location}: ${job.description}`, 140);
-    const [people, phones] = await Promise.all([
+    const [people, phones, app] = await Promise.all([
       userRecipients(db, orgId, job, { coordinatorsOnly: false, excludeUserId }),
       jobLinkRecipients(db, orgId, job.id),
+      contractorAppRecipients(db, job),
     ]);
     await Promise.all([
       deliver(db, people, { title, body, url: STAFF_URL, tag: `update-${job.id}` }),
       deliver(db, phones, { title, body, url: contractorUrl(job), tag: `update-${job.id}` }),
+      deliver(db, app, { title, body, url: CONTRACTOR_APP_URL(job), tag: `update-${job.id}` }),
     ]);
   } catch (cause) {
     console.error("[push] update", cause);
@@ -318,19 +341,56 @@ export async function notifyContractorReport(
 }
 
 /**
+ * A JOB GIVEN TO A CONTRACTOR — the fifth moment (2026-10-04). Their app
+ * alert, plus email, text or WhatsApp — whichever is connected and on their
+ * record (app/lib/contractor-messaging.ts). Runs whether or not push is set
+ * up, because email and text do not need it.
+ */
+export async function notifyContractorAssigned(db: Database, orgId: string, requestId: string) {
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job || !job.contractorId) return;
+    const [contractor] = await db
+      .select()
+      .from(contractors)
+      .where(and(eq(contractors.id, job.contractorId), eq(contractors.organisationId, orgId), eq(contractors.active, true)))
+      .limit(1);
+    if (!contractor) return;
+    if (pushConfigured()) {
+      await deliver(db, await contractorAppRecipients(db, job), {
+        title: `New job ${job.id} · ${shorten(job.location, 40)}`,
+        body: shorten(job.description, 140),
+        url: CONTRACTOR_APP_URL(job),
+        tag: `assigned-${job.id}`,
+      });
+    }
+    await tellContractorAboutJob(db, contractor, job, `${appOrigin()}/contractor?job=${encodeURIComponent(job.id)}`);
+  } catch (cause) {
+    console.error("[push] contractor assigned", cause);
+  }
+}
+
+/**
  * The automation dispatcher's events, turned into the moments above.
  *
  * Called once per originating write (depth 0). One job gets at most one
  * notification of each kind per write, however many events the write raised.
  */
 export async function pushForEvents(ctx: AutomationContext, events: AutomationEvent[]) {
-  if (!pushConfigured() || !events.length) return;
+  if (!events.length) return;
   const done = new Set<string>();
   const exclude = ctx.actor.userId ?? null;
   for (const event of events) {
     if (!event.requestId) continue;
-    const key = `${event.type}:${event.requestId}`;
+    const key = `${event.type}:${event.column ?? ""}:${event.requestId}`;
     if (done.has(key)) continue;
+    /* A contractor named on a job hears about it — email and text need no push. */
+    if (event.type === "column_changed" && event.column === "contractor" && event.to) {
+      done.add(key);
+      await notifyContractorAssigned(ctx.db, ctx.orgId, event.requestId);
+      continue;
+    }
+    if (!pushConfigured()) continue;
     if (event.type === "item_created" && !event.parentId) {
       done.add(key);
       await notifyNewJob(ctx.db, ctx.orgId, event.requestId);

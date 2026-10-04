@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import { getDb } from "../../../db";
 import { pushSubscriptions } from "../../../db/schema";
+import { contractorScope } from "../../lib/contractor-auth";
 import { resolveJobToken } from "../../lib/job-tokens";
 import { subscriptionRowId } from "../../lib/push-notify";
 import { scopedDb } from "../../lib/tenant-db";
@@ -105,6 +106,21 @@ export async function POST(request: Request) {
       /* Not signed in: a contractor phone, subscribed through its job links. */
     }
 
+    /* A contractor signed in to the app: alerts for every job given to them. */
+    const contractor = await contractorScope(db, request).catch(() => null);
+    for (const row of contractor?.contractors ?? []) {
+      rows.push({
+        id: await subscriptionRowId(subscription.endpoint, `contractor:${row.id}`),
+        organisationId: row.organisationId,
+        userId: null,
+        jobTokenId: null,
+        requestId: null,
+        contractorId: row.id,
+        ...subscription,
+        userAgent,
+      });
+    }
+
     /* Each saved job link that still opens. */
     const tokens = Array.isArray(body.jobTokens)
       ? [...new Set(body.jobTokens.filter((value): value is string => typeof value === "string"))].slice(0, 50)
@@ -137,7 +153,7 @@ export async function POST(request: Request) {
     }
     return Response.json({
       ok: true,
-      account: rows.some((row) => row.userId),
+      account: rows.some((row) => row.userId || row.contractorId),
       jobs: rows.filter((row) => row.jobTokenId).length,
     });
   } catch (error) {

@@ -393,6 +393,8 @@ const NOT_A_MEMBERS_WRITE = new Map([
   ["app/api/board/discussion/route.ts", "the board's own conversation: no job, so no store"],
   ["app/api/options/route.ts", "workspace vocabulary: a label renamed is renamed on every job alike — board structure, left for an owner decision"],
   ["app/api/overview/contractor-aliases/route.ts", "`settings.edit` vocabulary: links contractor names to register rows across the workspace"],
+  /* Added 2026-10-04 with the contractor app: nobody on it is a member. */
+  ["app/api/contractor/jobs/[id]/open/route.ts", "the contractor app: the grant is a contractor session, and it mints a contractor link only for a job assigned to that contractor now"],
 ]);
 
 async function routeFiles(directory) {

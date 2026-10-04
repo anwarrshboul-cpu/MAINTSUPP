@@ -90,6 +90,15 @@
 
 .login-form__unlock:disabled { cursor: progress; opacity: 0.7; }
 
+/* The contractors' door — same app, their own sign-in. */
+.login-form__contractor {
+  justify-self: center;
+  padding: 6px;
+  color: var(--brand-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
 /* "Keep me signed in" — a 44px-tall target, the box on the left. */
 .login-form__remember {
   display: flex;
