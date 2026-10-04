@@ -1,13 +1,14 @@
 import { getDb } from "../../../../../db";
 import { ensureDatabase } from "../../../../../db/init";
-import { mondaySyncConfig, mondayWebhookKey, syncMondayItems } from "../../../../lib/monday-live-sync";
+import { mondaySyncConfig, mondayWebhookKey, syncMondayItems, syncedBoardFor } from "../../../../lib/monday-live-sync";
 import { anonymousRefusal } from "../../../../lib/tenant-db";
 
 export const dynamic = "force-dynamic";
 
 /**
  * `POST /api/integrations/monday/webhook?key=…` — monday.com calls this the
- * moment an item on Sunnamusk's Maintenance board changes (owner, 2026-10-04).
+ * moment an item on Sunnamusk's Maintenance or Store Documentation board
+ * changes (owner, 2026-10-04).
  *
  *   - monday's handshake (`{ challenge }`) is answered by echoing it back;
  *   - otherwise the event names an item, which is read back from monday with
@@ -42,14 +43,14 @@ export async function POST(request: Request) {
   }
   const event = payload?.event;
   const itemId = String(event?.pulseId ?? event?.itemId ?? "");
-  if (!/^\d{1,20}$/.test(itemId) || String(event?.boardId ?? config.boardId) !== config.boardId) {
+  if (!/^\d{1,20}$/.test(itemId) || (event?.boardId != null && !syncedBoardFor(event.boardId))) {
     /* Not ours, or nothing to look at: acknowledged so monday stops retrying. */
     return Response.json({ ok: true, ignored: true });
   }
   try {
     await ensureDatabase();
     const db = await getDb();
-    const result = await syncMondayItems(db, [itemId]);
+    const result = await syncMondayItems(db, [itemId], { budgetMs: 25_000 });
     return Response.json({ ok: true, ...result });
   } catch (error) {
     const refusal = anonymousRefusal(error);

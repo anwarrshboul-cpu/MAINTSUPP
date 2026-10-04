@@ -11,18 +11,22 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 test("the sync writes through the file import's own commit, matched on monday's item id", async () => {
   const lib = await read("app/lib/monday-live-sync.ts");
   assert.match(lib, /import \{ commit, jobTypeMatcher \} from "\.\.\/api\/import\/route";/);
-  assert.match(lib, /await commit\(db, orgId, BOARD_KEY, plan, batchId, jobTypeMatcher\(await listJobTypes\(db, orgId\)\)\)/);
+  assert.match(lib, /const outcome = await commit\(db, orgId, board\.key, plan, batchId, board\.key === "maintenance" \? matchJobType : null\);/);
   assert.match(lib, /const titles = \["Name", "Item ID"\];/, "Item ID carries monday's id, so jobs are never duplicated");
-  assert.match(lib, /return planImport\(rows, "maintenance"\);/);
+  assert.match(lib, /return planImport\(rows, board\);/);
   const route = await read("app/api/import/route.ts");
   assert.match(route, /export async function commit\(/);
   assert.match(route, /export function jobTypeMatcher\(/);
 });
 
-test("only the configured board, and nothing is ever written back to monday", async () => {
+test("only Maintenance and Store Documentation, and nothing is ever written back to monday", async () => {
+  /* Re-pointed 2026-10-04 (owner): Store Documentation joined Maintenance, so
+     the one-board check became "one of our two boards". */
   const lib = await read("app/lib/monday-live-sync.ts");
-  assert.match(lib, /const onBoard = String\(item\.board\?\.id \?\? ""\) === config\.boardId;/);
+  assert.match(lib, /const board = syncedBoardFor\(item\.board\?\.id\);/);
+  assert.match(lib, /if \(board && \(live \|\| known\.has\(String\(item\.id\)\)\)\) items\.push\(\{ item, board \}\);/);
   assert.match(lib, /const DEFAULT_BOARD_ID = "1139774521";/);
+  assert.match(lib, /const DEFAULT_STORE_DOC_BOARD_ID = "1398027719";/);
   /* The only mutation sent to monday is registering our own webhooks. */
   const mutations = lib.match(/mutation \(/g) ?? [];
   assert.equal(mutations.length, 1);
@@ -40,7 +44,7 @@ test("the webhook needs its key, answers monday's handshake and re-reads the ite
   const hook = await read("app/api/integrations/monday/webhook/route.ts");
   assert.match(hook, /if \(!config\.configured \|\| !sameKey\(key, await mondayWebhookKey\(\)\)\) \{\s*return Response\.json\(\{ error: "Not accepted\." \}, \{ status: 403 \}\);/);
   assert.match(hook, /return Response\.json\(\{ challenge: payload\.challenge \}\);/);
-  assert.match(hook, /await syncMondayItems\(db, \[itemId\]\)/);
+  assert.match(hook, /await syncMondayItems\(db, \[itemId\], \{ budgetMs: 25_000 \}\)/);
 });
 
 test("one variable is enough: the webhook key is derived from the token when not set", async () => {
@@ -59,4 +63,21 @@ test("the daily run catches up anything a webhook missed", async () => {
   assert.match(daily, /const monday = await catchUpMondaySync\(db, 2\)\.catch\(/);
   const lib = await read("app/lib/monday-live-sync.ts");
   assert.match(lib, /if \(!config\.token\) return \{ skipped: "MONDAY_API_TOKEN is not set" \} as const;/);
+});
+
+test("store rows are linked to monday by exact name on their own board, never a guess", async () => {
+  const lib = await read("app/lib/monday-live-sync.ts");
+  const link = lib.slice(lib.indexOf("async function linkStoreDocumentationRows"));
+  assert.match(link, /eq\(maintenanceGroupItems\.boardId, "store-documentation"\)/);
+  assert.match(link, /isNull\(maintenanceRequests\.externalId\)/);
+  assert.match(link, /if \(matches\.length !== 1\) continue;/);
+});
+
+test("files are copied once: the historical import's ledger key, on the column they sit in", async () => {
+  const lib = await read("app/lib/monday-live-sync.ts");
+  const files = lib.slice(lib.indexOf("async function copyMondayFiles"));
+  assert.match(files, /`\$\{row\.requestId\}\|\$\{row\.columnId\}\|\$\{row\.name\}\|\$\{row\.size\}`/);
+  assert.match(files, /const kind = kindForColumnKey\(entry\.columnKey\);/);
+  assert.match(files, /for \(const requestId of touched\) await reconcileAttachmentCounts\(db, orgId, requestId\);/);
+  assert.match(files, /if \(Date\.now\(\) > deadline\) \{\s*result\.filesPending \+= 1;/, "a long run stops in time and resumes later");
 });
