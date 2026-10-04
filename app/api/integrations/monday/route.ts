@@ -6,6 +6,7 @@ import {
   connectMondayWebhooks,
   listMondayWebhooks,
   mondaySyncConfig,
+  repairMissingFiles,
   syncMondayItems,
 } from "../../../lib/monday-live-sync";
 import { publicOrigin } from "../../../lib/public-origin";
@@ -25,6 +26,10 @@ export const dynamic = "force-dynamic";
  *        every item of one board, a page at a time (size ≤ 40), so a full
  *        import never runs into the function's time limit; `done` says when
  *        the last page has been taken
+ *
+ *   POST { action: "repair-files", board, page, size? }
+ *        puts back the bytes of files the database names but storage does not
+ *        hold, from monday, at the object key each row already names
  *
  * Every write is idempotent — matched on monday's item id, files on name and
  * size — so any call can be repeated safely.
@@ -87,6 +92,16 @@ export async function POST(request: Request) {
       }
       const days = typeof body.days === "number" ? body.days : 2;
       return Response.json({ ok: true, ...(await catchUpMondaySync(db, days)) });
+    }
+    if (body.action === "repair-files") {
+      const board = config.boards.find((entry) => entry.key === body.board);
+      if (!board) return Response.json({ error: "Choose maintenance or store-documentation." }, { status: 400 });
+      const size = Math.min(Math.max(typeof body.size === "number" ? Math.floor(body.size) : 25, 1), 40);
+      const page = Math.max(typeof body.page === "number" ? Math.floor(body.page) : 0, 0);
+      const ids = await boardItemIds(board.mondayId, null);
+      const slice = ids.slice(page * size, page * size + size);
+      const outcome = await repairMissingFiles(await getDb(), slice);
+      return Response.json({ ok: true, board: board.key, page, total: ids.length, done: (page + 1) * size >= ids.length, ...outcome });
     }
     if (body.action === "import") {
       const board = config.boards.find((entry) => entry.key === body.board);
