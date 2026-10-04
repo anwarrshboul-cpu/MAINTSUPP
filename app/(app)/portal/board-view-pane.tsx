@@ -415,7 +415,7 @@ export default function BoardViewPane({
         add further kanban views and those should stay kanbans.
       */}
       {activeView.type === "kanban" && activeView.key === "fix-tracker" && (
-        <FixTrackerView items={items} palette={palette} onChanged={onFormSubmitted} />
+        <FixTrackerView items={items} palette={palette} onChanged={onFormSubmitted} boardId={boardId} />
       )}
       {activeView.type === "kanban" && activeView.key !== "fix-tracker" && (
         <KanbanView

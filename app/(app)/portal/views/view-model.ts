@@ -26,6 +26,8 @@ export type BoardItem = {
   location?: string | null;
   description?: string | null;
   requester?: string | null;
+  /** The submitter's contact number, passed straight through like the three above. */
+  contact?: string;
   category: string | null;
   engineer: string | null;
   tier: number | null;

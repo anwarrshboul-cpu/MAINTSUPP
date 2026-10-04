@@ -248,7 +248,18 @@ export function projectQuestions(
     .filter((question) => question.visible && question.type !== "PAGE_BLOCK")
     .map<PublicQuestion>((question) => ({
       id: question.id,
-      type: question.type,
+      /*
+       * A choice question whose canonical list is EMPTY is asked as free text.
+       * An empty override means the register behind it has nothing in it yet
+       * (a workspace with no locations — see `formOptionOverrides`); a dropdown
+       * with no options would make a required question impossible to answer.
+       */
+      type:
+        question.type === "SingleSelect" &&
+        Array.isArray(optionOverrides[question.id]) &&
+        optionOverrides[question.id].length === 0
+          ? "ShortText"
+          : question.type,
       title: question.title,
       description: question.description,
       required: question.required,

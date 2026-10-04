@@ -374,6 +374,11 @@ export default function FormBuilder({
       setForm(payload.form);
       setGroups(payload.groups ?? []);
       setCreatable(false);
+      /* A NEW FORM OPENS ON ITS LINK AND QR CODE. The first thing anybody
+         does with a form they have just created is hand it out, so the Share
+         dialog — link, Copy, QR code, Download — is shown straight away
+         rather than left behind a button. Only where the link may be shown. */
+      if (payload.form.canShare) setSharing(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The form could not be created.");
     } finally {
@@ -652,6 +657,16 @@ export default function FormBuilder({
         >
           <Icon name={copied ? "check" : "share"} size={15} />
           {copied ? "Link copied" : "Share link"}
+        </button>
+        {/* The QR code lives in the Share dialog, which the phone strip
+            otherwise has no way to open. */}
+        <button
+          type="button"
+          className="form-builder__mshare-btn"
+          onClick={() => setSharing(true)}
+        >
+          <Icon name="download" size={15} />
+          QR code
         </button>
       </div>
       )}

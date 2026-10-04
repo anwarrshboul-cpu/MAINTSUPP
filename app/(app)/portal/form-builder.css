@@ -2047,6 +2047,7 @@
    */
   .form-builder__mshare {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     min-width: 0;
@@ -2056,7 +2057,7 @@
   }
 
   .form-builder__mshare-url {
-    flex: 1 1 auto;
+    flex: 1 1 100%;
     min-width: 0;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
@@ -2203,5 +2204,64 @@
   .form-switch,
   .form-switch::after {
     transition: none;
+  }
+}
+
+/* ── The form's QR code, in the Share dialog ─────────────── */
+
+.form-qr {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 14px 0 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+}
+
+.form-qr__code {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 132px;
+  border-radius: 4px;
+}
+
+.form-qr__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-qr__side strong {
+  color: var(--ink);
+}
+
+.form-qr__download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--brand-solid);
+  border-radius: var(--radius-sm);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .form-qr {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+
+  .form-qr__side {
+    align-items: center;
   }
 }

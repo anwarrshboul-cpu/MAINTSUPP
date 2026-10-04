@@ -63,6 +63,22 @@ export async function formOptionOverrides(
       /* `value` is the site NAME — the identity the submit route resolves. */
       estate.map((site) => ({ label: site.name, value: site.name })),
     );
+  } else {
+    /*
+     * A WORKSPACE WITH NO LOCATIONS GETS NO LOCATION LIST — not someone else's.
+     *
+     * With nothing to substitute, the question fell back to the options stored
+     * in the configuration, which every form inherits from the captured monday
+     * form: one client's real store names. So a new workspace's public form
+     * offered another client's estate, and since the submit route matches the
+     * answer against THIS workspace's sites, every choice then bounced with
+     * "Choose a location from the list" — a form nobody could submit.
+     *
+     * An empty list is the signal `projectQuestions` reads to ask the question
+     * as free text instead, and the submit route accepts a typed location when
+     * the workspace has no locations to match it against.
+     */
+    overrides[LOCATION_QUESTION_ID] = [];
   }
 
   for (const [questionId, setKey] of Object.entries(CANONICAL_OPTION_SETS)) {

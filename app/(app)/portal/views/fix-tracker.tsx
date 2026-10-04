@@ -440,16 +440,65 @@ const TABS: Array<{ key: JobState; label: string; empty: string }> = [
   },
 ];
 
+/** A board column the tracker can show the answer to. */
+type BoardField = { id: string; key: string; title: string };
+
+/**
+ * The board's own, non-system columns — the fields added on the board or in
+ * the form builder — read once per board. System columns are the work order's
+ * fixed fields, which the tracker already draws from the item itself.
+ */
+function useBoardFields(boardId: string | undefined) {
+  const [fields, setFields] = useState<BoardField[]>([]);
+  useEffect(() => {
+    if (!boardId) return;
+    let active = true;
+    fetch(`/api/board/columns?board=${encodeURIComponent(boardId)}`, {
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          columns?: Array<{ id: string; key: string; title: string; system?: boolean }>;
+        };
+        if (!active || !Array.isArray(payload.columns)) return;
+        setFields(
+          payload.columns
+            .filter((column) => !column.system)
+            .map((column) => ({ id: column.id, key: column.key, title: column.title })),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [boardId]);
+  return fields;
+}
+
+/** The job's company, when the board has a Company field and it is filled. */
+function companyOf(item: BoardItem, fields: BoardField[]) {
+  const field = fields.find((entry) => /^company/i.test(entry.key));
+  return field ? (item.cells?.[field.id] ?? "").trim() : "";
+}
+
 export function FixTrackerView({
   items,
   palette,
   onChanged,
+  boardId,
 }: {
   items: BoardItem[];
   palette: Palette;
   /** Fired after a write, so the board picks the change up. */
   onChanged?: () => void;
+  /**
+   * The board these jobs belong to, so the tracker can read its columns and
+   * show the answers to fields added to the form (Company name and the like).
+   */
+  boardId?: string;
 }) {
+  const fields = useBoardFields(boardId);
   const [tab, setTab] = useState<JobState>("incoming");
   const [query, setQuery] = useState("");
   const [location, setLocation] = useState("");
@@ -618,6 +667,7 @@ export function FixTrackerView({
             <FixTrackerCard
               key={item.id}
               item={item}
+              fields={fields}
               palette={palette}
               now={now}
               onOpen={() => setOpenId(item.id)}
@@ -629,6 +679,7 @@ export function FixTrackerView({
       {open && (
         <FixTrackerDetail
           item={open}
+          fields={fields}
           palette={palette}
           onClose={() => setOpenId(null)}
           onChanged={onChanged}
@@ -649,11 +700,13 @@ export function FixTrackerView({
  */
 function FixTrackerCard({
   item,
+  fields,
   palette,
   now,
   onOpen,
 }: {
   item: BoardItem;
+  fields: BoardField[];
   palette: Palette;
   now: number;
   onOpen: () => void;
@@ -680,6 +733,9 @@ function FixTrackerCard({
       <span className="fix-tracker__card-location">
         <Icon name="map" size={14} />
         {item.location || "No location"}
+        {companyOf(item, fields) && (
+          <span className="fix-tracker__card-company"> · {companyOf(item, fields)}</span>
+        )}
       </span>
 
       <span className="fix-tracker__card-timing">
@@ -821,11 +877,13 @@ function CardPhotos({ requestId, count }: { requestId: string; count: number }) 
  */
 function FixTrackerDetail({
   item,
+  fields,
   palette,
   onClose,
   onChanged,
 }: {
   item: BoardItem;
+  fields: BoardField[];
   palette: Palette;
   onClose: () => void;
   onChanged?: () => void;
@@ -1238,6 +1296,30 @@ function FixTrackerDetail({
             <dt>Requested By</dt>
             <dd>{item.requester || "—"}</dd>
           </div>
+          {item.contact && item.contact !== "Not provided" && (
+            <div>
+              <dt>Contact Number</dt>
+              <dd>
+                <a href={`tel:${item.contact.replace(/[^\d+]/g, "")}`}>{item.contact}</a>
+              </dd>
+            </div>
+          )}
+          {/*
+            EVERY FIELD ADDED TO THE BOARD OR THE FORM, with its answer.
+
+            A question added in the form builder files its answer into its own
+            board cell. The tracker read only the fixed work-order fields, so
+            an answer like Company name reached the board and was invisible
+            here. Every non-system column with a value on this job is listed.
+          */}
+          {fields
+            .filter((field) => (item.cells?.[field.id] ?? "").trim())
+            .map((field) => (
+              <div key={field.id}>
+                <dt>{field.title}</dt>
+                <dd>{item.cells[field.id]}</dd>
+              </div>
+            ))}
         </dl>
 
         <section className="fix-tracker__block">
