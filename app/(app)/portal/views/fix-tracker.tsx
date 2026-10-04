@@ -152,7 +152,7 @@ function chipStyle(palette: Palette, value: string | null) {
  * to edit, so it is read defensively here. The old status heuristic stays as
  * the fallback for any caller that really does pass a stage-less item.
  */
-type JobState = "incoming" | "booked" | "completed";
+type JobState = "incoming" | "attention" | "booked" | "completed";
 
 function jobState(item: BoardItem): JobState {
   const stage = (item as { stage?: string | null }).stage;
@@ -160,8 +160,14 @@ function jobState(item: BoardItem): JobState {
     const key = stage.trim().toLowerCase();
     if (key === "booked") return "booked";
     if (key === "completed") return "completed";
-    // "Incoming" and "Attention" both mean outstanding work an engineer has not
-    // been booked onto, which is what the Incoming Requests tab is for.
+    /*
+     * "Attention" is its own tab (owner, 2026-10-04). It used to be folded into
+     * Incoming Requests, so that tab read 72 against the 8 rows of the board's
+     * "Incoming requests" group: the 7 in "Needs attention" plus 57 open jobs
+     * parked in On Hold and the per-store groups. Incoming Requests now holds
+     * exactly the Incoming group, and nothing open is hidden.
+     */
+    if (key === "attention") return "attention";
     return "incoming";
   }
   const status = (item.status ?? "").toLowerCase();
@@ -429,6 +435,11 @@ const TABS: Array<{ key: JobState; label: string; empty: string }> = [
     empty: "No incoming requests match this search.",
   },
   {
+    key: "attention",
+    label: "Needs Attention & On Hold",
+    empty: "Nothing needs attention or is on hold for this search.",
+  },
+  {
     key: "booked",
     label: "Jobs Booked",
     empty: "No booked jobs match this search.",
@@ -561,7 +572,7 @@ export function FixTrackerView({
   }, [items, location, query]);
 
   const counts = useMemo(() => {
-    const tally: Record<JobState, number> = { incoming: 0, booked: 0, completed: 0 };
+    const tally: Record<JobState, number> = { incoming: 0, attention: 0, booked: 0, completed: 0 };
     for (const item of matching) tally[jobState(item)] += 1;
     return tally;
   }, [matching]);
