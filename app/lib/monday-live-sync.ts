@@ -300,7 +300,14 @@ const CONTENT_TYPES: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   txt: "text/plain", csv: "text/csv",
 };
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/*
+ * 50 MB, the Supabase Free plan's per-file upload ceiling (the job-media bucket
+ * itself allows 100 MB). Raised from 25 MB on 2026-10-04: two O&M manuals on
+ * the Store Documentation board are larger than 25 MB and were skipped, so the
+ * register held 99 of monday's 101 certificate files. /api/files streams the
+ * object body, so a large file costs no function memory on the way out.
+ */
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 function contentTypeFor(name: string, bytes: Uint8Array) {
   const extension = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";

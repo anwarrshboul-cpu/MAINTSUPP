@@ -110,6 +110,13 @@ test("the store-documentation check only reads, and is staff-only through the co
   assert.ok(route.indexOf("const denied = await staffOnly(request);", route.indexOf("export async function POST")) < route.indexOf('if (body.action === "verify-store-docs")'));
 });
 
+test("files up to the storage plan's 50 MB ceiling are copied, not skipped", async () => {
+  /* 2026-10-04 (owner): two O&M manuals over 25 MB were skipped, leaving the
+     register two certificate files short of monday. */
+  const lib = await read("app/lib/monday-live-sync.ts");
+  assert.match(lib, /const MAX_FILE_BYTES = 50 \* 1024 \* 1024;/);
+});
+
 test("missing files are put back at the key the row already names — no row is written", async () => {
   const lib = await read("app/lib/monday-live-sync.ts");
   const fn = lib.slice(lib.indexOf("export async function repairMissingFiles"), lib.indexOf("/** The daily catch-up"));
