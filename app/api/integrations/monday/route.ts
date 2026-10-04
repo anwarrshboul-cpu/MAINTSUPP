@@ -1,6 +1,7 @@
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import {
+  boardItemIds,
   catchUpMondaySync,
   connectMondayWebhooks,
   listMondayWebhooks,
@@ -20,6 +21,13 @@ export const dynamic = "force-dynamic";
  *   POST { action: "connect" }           register the board's webhooks
  *   POST { action: "sync", days? }       catch up items changed in the last N days
  *   POST { action: "sync", itemIds }     sync these monday items now
+ *   POST { action: "import", board, page, size? }
+ *        every item of one board, a page at a time (size ≤ 40), so a full
+ *        import never runs into the function's time limit; `done` says when
+ *        the last page has been taken
+ *
+ * Every write is idempotent — matched on monday's item id, files on name and
+ * size — so any call can be repeated safely.
  */
 
 async function staffOnly(request: Request) {
@@ -41,7 +49,7 @@ export async function GET(request: Request) {
       configured: config.configured,
       tokenSet: Boolean(config.token),
       secretSet: Boolean(config.secret),
-      boardId: config.boardId,
+      boards: config.boards,
       organisationId: config.organisationId,
       webhooks: Array.isArray(webhooks) ? webhooks.map(({ id, event }) => ({ id, event })) : webhooks,
     });
@@ -61,17 +69,42 @@ export async function POST(request: Request) {
     if (!config.configured) {
       return Response.json({ error: "Set MONDAY_API_TOKEN in the Vercel environment first." }, { status: 409 });
     }
-    const body = (await request.json().catch(() => ({}))) as { action?: unknown; days?: unknown; itemIds?: unknown };
+    const body = (await request.json().catch(() => ({}))) as {
+      action?: unknown;
+      days?: unknown;
+      itemIds?: unknown;
+      board?: unknown;
+      page?: unknown;
+      size?: unknown;
+    };
     if (body.action === "connect") {
       return Response.json({ ok: true, ...(await connectMondayWebhooks(publicOrigin(request))) });
     }
     if (body.action === "sync") {
       const db = await getDb();
       if (Array.isArray(body.itemIds)) {
-        return Response.json({ ok: true, ...(await syncMondayItems(db, body.itemIds.slice(0, 200).map(String))) });
+        return Response.json({ ok: true, ...(await syncMondayItems(db, body.itemIds.slice(0, 40).map(String))) });
       }
       const days = typeof body.days === "number" ? body.days : 2;
       return Response.json({ ok: true, ...(await catchUpMondaySync(db, days)) });
+    }
+    if (body.action === "import") {
+      const board = config.boards.find((entry) => entry.key === body.board);
+      if (!board) return Response.json({ error: "Choose maintenance or store-documentation." }, { status: 400 });
+      const size = Math.min(Math.max(typeof body.size === "number" ? Math.floor(body.size) : 25, 1), 40);
+      const page = Math.max(typeof body.page === "number" ? Math.floor(body.page) : 0, 0);
+      const ids = await boardItemIds(board.mondayId, null);
+      const slice = ids.slice(page * size, page * size + size);
+      const db = await getDb();
+      const outcome = await syncMondayItems(db, slice);
+      return Response.json({
+        ok: true,
+        board: board.key,
+        page,
+        total: ids.length,
+        done: (page + 1) * size >= ids.length,
+        ...outcome,
+      });
     }
     return Response.json({ error: "Unknown action." }, { status: 400 });
   } catch (error) {
