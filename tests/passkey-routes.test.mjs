@@ -30,7 +30,9 @@ test("a valid passkey does not let a disabled account in", async () => {
   assert.match(login, /if \(!usable\) return Response\.json\(\{ error: REJECTED \}, \{ status: 401 \}\);/);
   /* The session is the same one a password makes. */
   assert.match(login, /createSession\(d1, \{/);
-  assert.match(login, /sessionCookie\(token, request\)/);
+  /* Re-pointed 2026-10-04: the cookie now carries the "Keep me signed in"
+     choice, exactly as the password route's does. */
+  assert.match(login, /sessionCookie\(token, request, \{ remember: body\.remember !== false \}\)/);
   assert.match(login, /safeRedirectPath\(body\.next\)/);
 });
 

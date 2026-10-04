@@ -19,7 +19,7 @@
  * new worker take over on the next load instead of waiting for every tab to
  * close.
  */
-const VERSION = "maintsupp-sw-1";
+const VERSION = "maintsupp-sw-2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -92,8 +92,21 @@ self.addEventListener("push", (event) => {
     renotify: Boolean(data.tag),
     data: { url: data.url || "/app?source=installed", version: VERSION },
   };
-  /* iOS and Chrome both require a visible notification for every push. */
-  event.waitUntil(self.registration.showNotification(title, options));
+  /*
+   * THE MAINTSUPP SOUND. A notification's own sound is the phone's: no browser
+   * lets a website choose it (the Notifications API has no working `sound`).
+   * So the open app is told, and plays the MAINTSUPP chime itself
+   * (app/pwa-register.tsx) — which is every alert that arrives while
+   * MAINTSUPP is on screen. With the app closed the phone's alert sound plays.
+   * iOS and Chrome both require a visible notification for every push.
+   */
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of windows) client.postMessage({ type: "maintsupp-alert" });
+      await self.registration.showNotification(title, options);
+    })(),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {

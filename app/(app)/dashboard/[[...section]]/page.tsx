@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { requireModuleAccess, requirePageSession } from "../../../lib/page-guard";
+import AlertsPrompt from "../../portal/alerts-prompt";
 import PortalApp, { type Section } from "../../portal/portal-app";
 
 export const dynamic = "force-dynamic";
@@ -181,6 +182,9 @@ export default async function DashboardPage({
   );
 
   return (
+    <>
+    {/* "Allow alerts" — one tap on a device that can take phone alerts. */}
+    <AlertsPrompt />
     <PortalApp
       userName={session.user.fullName?.trim() || session.user.email}
       userEmail={session.user.email}
@@ -189,5 +193,6 @@ export default async function DashboardPage({
       userTimeZone={session.user.timezone}
       initialSection={initialSection}
     />
+    </>
   );
 }

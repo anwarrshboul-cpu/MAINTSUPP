@@ -1,3 +1,4 @@
+import { anonymousRefusal } from "../../../../lib/tenant-db";
 import { eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../../db/init";
 import { getD1, getDb } from "../../../../../db";
@@ -32,6 +33,7 @@ async function handlePOST(request: Request) {
     authenticatorData?: unknown;
     signature?: unknown;
     next?: unknown;
+    remember?: unknown;
   };
   if (
     typeof body.id !== "string" ||
@@ -101,9 +103,14 @@ async function handlePOST(request: Request) {
     await recordLogin(d1, String(user.id)).catch(() => {});
 
     const response = Response.json({ ok: true, redirectTo: safeRedirectPath(body.next) });
-    response.headers.append("Set-Cookie", sessionCookie(token, request));
+    response.headers.append(
+      "Set-Cookie",
+      sessionCookie(token, request, { remember: body.remember !== false }),
+    );
     return response;
-  } catch {
+  } catch (failure) {
+    /* Anything unreadable is the same uniform refusal; nothing is logged. */
+    void failure;
     return Response.json({ error: REJECTED }, { status: 401 });
   }
 }
@@ -114,7 +121,10 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     return await handlePOST(request);
-  } catch {
+  } catch (error) {
+    /* An ended session is a sign-in prompt, not an outage. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     return Response.json(
       { error: "Sign-in with Face ID is unavailable right now. Use your password." },
       { status: 503 },

@@ -134,7 +134,7 @@ export async function registerThisDevice(): Promise<string> {
  * Signs in with whichever MAINTSUPP passkey the person picks.
  * Resolves with where to go next, or throws a message fit to show.
  */
-export async function signInWithThisDevice(next: string): Promise<string> {
+export async function signInWithThisDevice(next: string, remember = true): Promise<string> {
   const optionsResponse = await fetch("/api/auth/passkeys/options", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -171,6 +171,7 @@ export async function signInWithThisDevice(next: string): Promise<string> {
       authenticatorData: toB64(response.authenticatorData),
       signature: toB64(response.signature),
       next,
+      remember,
     }),
   });
   const result = await readJson(finish);

@@ -311,6 +311,92 @@ body:has(.mapp) {
   margin: 2px 0;
 }
 
+/* iPhone: the two taps, as pictures. */
+.mapp__picsteps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mapp__picsteps li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 12px;
+  background: var(--mapp-bg);
+  font-size: 17px;
+}
+
+.mapp__picsteps small {
+  display: block;
+  color: var(--mapp-muted);
+  font-size: 13px;
+}
+
+.mapp__picicon {
+  flex: 0 0 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--mapp-teal);
+  color: var(--mapp-on-teal);
+}
+
+.mapp__skip {
+  align-self: center;
+  padding: 8px;
+  font-size: 14px;
+}
+
+/* The pointer at Safari's toolbar. Fixed to the bottom of the screen, where
+   Safari draws Share; a tap hides it. */
+.mapp__pointer {
+  position: fixed;
+  left: 50%;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--mapp-teal);
+  font: 700 15px/1.2 system-ui, -apple-system, sans-serif;
+  animation: mapp-bounce 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.mapp__pointer span {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--mapp-teal);
+  color: var(--mapp-on-teal);
+}
+
+@keyframes mapp-bounce {
+  0%,
+  100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, 8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mapp__pointer {
+    animation: none;
+  }
+}
+
 @media (max-width: 640px) {
   /* The link box gets its own line; Add and Paste share the next. */
   .mapp__paste input {
