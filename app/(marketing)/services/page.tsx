@@ -221,7 +221,10 @@ export default async function ServicesPage() {
             </li>
           ))}
         </ul>
-        <p className="contactcard__links reveal">
+        {/* `.pagefaq` is only borrowed for its top margin, so the row of links
+            does not sit against the cards above it. */}
+        <div className="pagefaq reveal">
+        <p className="contactcard__links">
           <Link className="contactcard__link" href="/london">
             All London services
           </Link>
@@ -235,6 +238,7 @@ export default async function ServicesPage() {
             Brent Cross
           </Link>
         </p>
+        </div>
       </PageSection>
 
       <WhoWeHelp copy={home.copy.whoWeHelp} />

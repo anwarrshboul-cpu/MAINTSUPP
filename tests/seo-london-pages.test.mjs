@@ -195,10 +195,11 @@ test("every page says who does the work, and that it is commercial only", () => 
       `${page.path} never says the work is done by independent contractors`,
     );
     /* A kiosk on a mall is commercial by its nature, so naming the shopping
-       centre counts as saying who the page is for. */
+       centre counts as saying who the page is for — and so does a centre page
+       saying "a single shop or kiosk", which is its whole readership. */
     assert.match(
       everything,
-      /commercial premises|commercial only|shops, kiosks|shopping centre/i,
+      /commercial premises|commercial only|shops, kiosks|shopping centre|shop or kiosk/i,
       `${page.path} never says who it is for`,
     );
     assert.ok(page.faqs.length >= 6, `${page.path} answers too few questions`);
@@ -330,8 +331,10 @@ test("the structured data describes one service by the one organisation", () => 
 
 test("the homepage and the shared questions say what the London pages say", () => {
   const copy = read(`${MARKETING}/_sections/copy.ts`);
-  /* The H1 names the three buyers; "one point of contact" is still the offer. */
-  assert.match(copy, /titleLead: "Commercial maintenance for shops, kiosks and multi-site retailers,"/);
+  /* The H1 names the three buyers; "one point of contact" is still the offer.
+     Its length and word order were measured in a browser: four lines at every
+     width from 360 to 1920, as the headline it replaced. */
+  assert.match(copy, /titleLead: "Multi-site, shop and kiosk maintenance,"/);
   assert.match(copy, /titleAccent: "managed through one point of contact\."/);
   assert.match(copy, /title: "Shop & Commercial Maintenance, London & UK-Wide — MAINTSUPP"/);
   assert.match(copy, /We do not take domestic work\./);

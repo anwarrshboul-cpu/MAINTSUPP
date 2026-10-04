@@ -261,6 +261,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         a: "Yes. A multi-site closure runs through one coordinator, with the same evidence standard at every store and one report at the end.",
       },
       { q: "Who carries out the work?", a: WHO_ANSWER },
+      { q: "Do you strip out homes or flats?", a: DOMESTIC_ANSWER },
     ],
     related: [
       { href: "/london/kiosk-installation", label: "Kiosk dismantling and removal" },
@@ -368,6 +369,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         a: "Yes. Repairs can be booked one job at a time, and portfolios of five sites and above can go on a monthly coordination plan with published per-store pricing.",
       },
       { q: "Who carries out the work?", a: WHO_ANSWER },
+      { q: "Do you fit out homes?", a: DOMESTIC_ANSWER },
     ],
     related: [
       { href: "/london/kiosk-installation", label: "Kiosk installation" },

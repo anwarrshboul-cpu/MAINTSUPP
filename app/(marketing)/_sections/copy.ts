@@ -36,17 +36,27 @@ export const HOME_COPY = {
    * one-off jobs from single shops and kiosks in London's shopping centres, with
    * emergency call-outs at any hour. The H1 is what a search engine weighs most
    * on a page, so it now names the three buyers in the words they search by:
-   * shops, kiosks, multi-site retailers. The second half is unchanged, because
-   * "one point of contact" is still the whole offer.
+   * multi-site, shop, kiosk. The second half is unchanged, because "one point
+   * of contact" is still the whole offer.
+   *
+   * IT IS KEPT SHORT ON PURPOSE, and so is the paragraph under it. The first
+   * draft read "Commercial maintenance for shops, kiosks and multi-site
+   * retailers," and at 1280 pixels that ran to six lines of display type and
+   * pushed both buttons below the fold. Measured in a browser at 390, 768, 1280
+   * and 1440 pixels, this headline and this paragraph each break into exactly
+   * the number of lines the old ones did, so the buttons sit where they sat.
+   * "Commercial" is in the title tag and the paragraph instead. The word order
+   * is measured too: with "multi-site" later in the line it broke after its own
+   * hyphen at most widths ("multi- / site maintenance").
    *
    * The kicker carries the place and the hours rather than repeating the
    * headline's "commercial maintenance" a line above it.
    */
   hero: {
     kicker: "London and UK-wide · 24-hour emergency line",
-    titleLead: "Commercial maintenance for shops, kiosks and multi-site retailers,",
+    titleLead: "Multi-site, shop and kiosk maintenance,",
     titleAccent: "managed through one point of contact.",
-    lede: "MAINTSUPP coordinates repairs, planned maintenance, compliance and store works for retailers and commercial operators — from one kiosk install in a London shopping centre to a multi-site portfolio across the UK — through one managed contact and a vetted contractor network.",
+    lede: "MAINTSUPP coordinates repairs, planned maintenance, compliance and store works for commercial premises, from one kiosk in a London shopping centre to a portfolio across the UK, through one contact and a vetted contractor network.",
     pills: [
       "Vetted UK contractor network",
       "Evidence-based close-out",
