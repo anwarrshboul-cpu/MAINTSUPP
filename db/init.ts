@@ -489,6 +489,10 @@ async function applyMigrations(d1: D1DatabaseLike) {
      turned notifications on). See `ensurePushSubscriptions`. */
   await ensurePushSubscriptions(d1);
 
+  /* Face ID / fingerprint sign-in: passkeys (public keys only) and their
+     one-time challenges. Two guarded tables; no seed. See `ensurePasskeys`. */
+  await ensurePasskeys(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6444,6 +6448,41 @@ async function ensureNotificationPreferences(d1: D1DatabaseLike) {
     ),
     d1.prepare(
       "CREATE INDEX IF NOT EXISTS notification_cooldowns_last_idx ON notification_cooldowns(last_at)",
+    ),
+  ]);
+}
+
+/**
+ * FACE ID / FINGERPRINT SIGN-IN. See `passkeys` and `webauthnChallenges` in
+ * db/schema.ts. Additive: with no rows, everybody signs in with a password as
+ * before.
+ */
+async function ensurePasskeys(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS passkeys (
+         id TEXT PRIMARY KEY,
+         user_id TEXT NOT NULL,
+         public_key TEXT NOT NULL,
+         algorithm INTEGER NOT NULL,
+         sign_count BIGINT NOT NULL DEFAULT 0,
+         name TEXT,
+         transports TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         last_used_at TEXT
+       )`,
+    ),
+    d1.prepare("CREATE INDEX IF NOT EXISTS passkeys_user_idx ON passkeys(user_id)"),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS webauthn_challenges (
+         id TEXT PRIMARY KEY,
+         user_id TEXT,
+         purpose TEXT NOT NULL,
+         expires_at BIGINT NOT NULL
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS webauthn_challenges_expires_idx ON webauthn_challenges(expires_at)",
     ),
   ]);
 }

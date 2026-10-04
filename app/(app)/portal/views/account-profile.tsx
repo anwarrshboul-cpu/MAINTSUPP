@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../../components";
 import type { AccountSnapshot } from "../account-menu";
+import { AccountPasskeys } from "./account-passkeys";
 import {
   AccountCard,
   AccountEmpty,
@@ -401,6 +402,8 @@ export function AccountProfilePanel({
           </div>
         </form>
       </AccountCard>
+
+      <AccountPasskeys />
 
       <AccountCard
         title="Active sessions"

@@ -178,6 +178,9 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   /* 7 — `ensurePushSubscriptions`: the installed app's phone notifications,
      one new guarded table and three indexes. */
   "bddb6b7f",
+  /* 8 — `ensurePasskeys`: Face ID / fingerprint sign-in, two new guarded
+     tables and their indexes. */
+  "ec0fce8f",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */
