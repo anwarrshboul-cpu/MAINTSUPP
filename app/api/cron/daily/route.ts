@@ -13,6 +13,9 @@
  *   3. §35b webhook retries — `retryWebhookDeliveries`, the same claim-and-send
  *      the Retry button and the next event use, within a 20-second budget; it
  *      also prunes delivered rows older than 30 days. Never throws.
+ *   5. monday.com catch-up — `catchUpMondaySync`: Sunnamusk items changed on
+ *      monday in the last two days, in case a live webhook was missed
+ *      (owner, 2026-10-04). Skipped while MONDAY_API_TOKEN is unset.
  *   4. abandoned uploads — `expireUploadSessions`: every direct-upload session
  *      past its expiry is aborted in storage (its parts are discarded) and
  *      marked `expired`. No document row ever existed for one.
@@ -30,6 +33,7 @@ import { publicOrigin } from "../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../lib/report-delivery";
 import { retryWebhookDeliveries } from "../../../lib/integrations/webhooks";
 import { expireUploadSessions } from "../../../lib/upload-sessions";
+import { catchUpMondaySync } from "../../../lib/monday-live-sync";
 import { runComplianceDigestsForCron } from "../../notifications/compliance/route";
 import { dispatchDueRemindersDaily } from "../reminders/route";
 
@@ -72,6 +76,11 @@ export async function POST(request: Request) {
       console.error("[/api/cron/daily] reminders", error);
       return { error: true };
     });
+    /* monday.com → Sunnamusk workspace, anything a webhook missed. */
+    const monday = await catchUpMondaySync(db, 2).catch((error: unknown) => {
+      console.error("[/api/cron/daily] monday catch-up", error instanceof Error ? error.message : error);
+      return { error: true };
+    });
     /* Counts and ids only: this lands in platform logs. */
     return Response.json({
       ok: planned !== null && reports !== null,
@@ -83,6 +92,7 @@ export async function POST(request: Request) {
       uploads: uploads ?? { error: true },
       compliance,
       reminders,
+      monday,
       ranAt: new Date().toISOString(),
     }, { status: planned !== null && reports !== null ? 200 : 503 });
   } catch (error) {

@@ -170,7 +170,9 @@ function jobTypeKey(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function jobTypeMatcher(types: readonly JobType[]): (text: string) => JobTypeMatch {
+/* Exported for the live monday.com sync (app/lib/monday-live-sync.ts, 2026-10-04):
+   one mapping for the file import and the webhook, so the two cannot disagree. */
+export function jobTypeMatcher(types: readonly JobType[]): (text: string) => JobTypeMatch {
   const ordered = [...types].sort((left, right) => Number(right.active) - Number(left.active));
   return (text) => {
     const wanted = jobTypeKey(text);
@@ -237,7 +239,7 @@ function summarise(plan: ImportPlan) {
  * Writes the plan. Returns counts rather than the rows, because 744 rows back
  * through the response is no use to the screen that asked.
  */
-async function commit(
+export async function commit(
   db: Awaited<ReturnType<typeof scopedDb>>["db"],
   orgId: string,
   boardKey: string,
