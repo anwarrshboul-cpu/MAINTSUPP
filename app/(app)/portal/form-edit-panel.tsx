@@ -70,6 +70,102 @@ import {
  * twenty selects in the tab order between every pair of questions, which is a
  * worse keyboard experience than the one this control exists to provide.
  */
+/**
+ * The field types a NEW field can be created as from the form editor.
+ *
+ * The plain answer types a submitter types into. Choice columns (Status,
+ * Labels) are left to the board, because they need an option list before they
+ * can be asked; an existing one is still offered by the column picker.
+ */
+const NEW_FIELD_TYPES: ReadonlyArray<readonly [string, string]> = [
+  ["text", "Short text"],
+  ["long_text", "Long text"],
+  ["number", "Number"],
+  ["date", "Date"],
+  ["email", "Email"],
+];
+
+/**
+ * CREATE A NEW FIELD — the second half of the insertion control.
+ *
+ * A name and a type. Creating it makes the board column (through the shell's
+ * `createField`, because a panel may not fetch) and then puts its question on
+ * the form at this position, exactly as picking an existing column does.
+ */
+function NewFieldForm({
+  busy,
+  onCreate,
+  onCancel,
+}: {
+  busy: boolean;
+  onCreate: (title: string, type: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = React.useState("");
+  const [type, setType] = React.useState("text");
+  const [working, setWorking] = React.useState(false);
+  const nameId = React.useId();
+  const typeId = React.useId();
+
+  async function submit() {
+    const name = title.trim();
+    if (!name || working) return;
+    setWorking(true);
+    try {
+      await onCreate(name, type);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="form-edit__newfield">
+      <label htmlFor={nameId}>Field name</label>
+      <input
+        id={nameId}
+        type="text"
+        value={title}
+        maxLength={80}
+        placeholder="e.g. Company name"
+        autoFocus
+        disabled={busy || working}
+        onChange={(event) => setTitle(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void submit();
+          }
+        }}
+      />
+      <label htmlFor={typeId}>Answer type</label>
+      <select
+        id={typeId}
+        value={type}
+        disabled={busy || working}
+        onChange={(event) => setType(event.target.value)}
+      >
+        {NEW_FIELD_TYPES.map(([value, name]) => (
+          <option key={value} value={value}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="form-edit__newfieldadd"
+        disabled={busy || working || !title.trim()}
+        onClick={() => void submit()}
+      >
+        <Icon name="plus" size={13} />
+        {working ? "Adding…" : "Add field"}
+      </button>
+      <button type="button" className="form-edit__insertcancel" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
 function InsertRow({
   slotIndex,
   label,
@@ -80,6 +176,7 @@ function InsertRow({
   used,
   busy,
   onPick,
+  onCreate,
 }: {
   slotIndex: number;
   label: string;
@@ -90,22 +187,55 @@ function InsertRow({
   used: ReadonlySet<string>;
   busy: boolean;
   onPick: (column: BuilderColumn, slotIndex: number) => void;
+  onCreate: (title: string, type: string, slotIndex: number) => Promise<void>;
 }) {
+  /* Which half of the control is showing: a column the board already has, or
+     a brand-new field. New is the default — it is what "add a question"
+     means to somebody who has not met the board's columns. */
+  const [creatingNew, setCreatingNew] = React.useState(true);
   return (
     <div className={`form-edit__insert${openHere ? " is-open" : ""}`}>
       {openHere ? (
-        <FormFieldPicker
-          columns={columns}
-          usedQuestionIds={used}
-          busy={busy}
-          label={label}
-          placeholder="Which column should it fill?"
-          onPick={(column) => onPick(column, slotIndex)}
-        >
-          <button type="button" className="form-edit__insertcancel" onClick={onCancel}>
-            Cancel
-          </button>
-        </FormFieldPicker>
+        <div className="form-edit__insertpanel">
+          <div className="form-edit__inserttabs" role="group" aria-label="Add a question">
+            <button
+              type="button"
+              aria-pressed={creatingNew}
+              className={creatingNew ? "is-active" : undefined}
+              onClick={() => setCreatingNew(true)}
+            >
+              New field
+            </button>
+            <button
+              type="button"
+              aria-pressed={!creatingNew}
+              className={creatingNew ? undefined : "is-active"}
+              onClick={() => setCreatingNew(false)}
+            >
+              Existing column
+            </button>
+          </div>
+          {creatingNew ? (
+            <NewFieldForm
+              busy={busy}
+              onCreate={(title, type) => onCreate(title, type, slotIndex)}
+              onCancel={onCancel}
+            />
+          ) : (
+            <FormFieldPicker
+              columns={columns}
+              usedQuestionIds={used}
+              busy={busy}
+              label={label}
+              placeholder="Which column should it fill?"
+              onPick={(column) => onPick(column, slotIndex)}
+            >
+              <button type="button" className="form-edit__insertcancel" onClick={onCancel}>
+                Cancel
+              </button>
+            </FormFieldPicker>
+          )}
+        </div>
       ) : (
         <button
           type="button"
@@ -135,9 +265,15 @@ type EditPanelProps = {
    * every consumer here treats as "not known yet" rather than as "none".
    */
   columns: readonly BuilderColumn[];
+  /**
+   * Make a new board column for a field the board does not have yet, from the
+   * shell (a panel may not fetch). Resolves to the column, or null when the
+   * shell could not create it — it reports why itself.
+   */
+  createField?: (title: string, type: string) => Promise<BuilderColumn | null>;
 };
 
-export function FormEditPanel({ form, patch, busy, columns }: EditPanelProps) {
+export function FormEditPanel({ form, patch, busy, columns, createField }: EditPanelProps) {
   const config = form.config;
   const order = React.useMemo(() => fullOrder(config), [config]);
   const entries = React.useMemo(() => orderedEntries(config), [config]);
@@ -285,6 +421,17 @@ export function FormEditPanel({ form, patch, busy, columns }: EditPanelProps) {
     });
     setInserting(null);
     setOpen((current) => ({ ...current, [id]: true }));
+  }
+
+  /**
+   * A NEW FIELD at a chosen position: create its column, then bind it exactly
+   * as picking an existing column would — so it is required/optional, titled
+   * and moved like any other question, and its answers land in its own cell.
+   */
+  async function createAndAdd(title: string, type: string, slotIndex: number) {
+    if (!createField) return;
+    const column = await createField(title, type);
+    if (column) addColumn(column, slotIndex);
   }
 
   /**
@@ -557,6 +704,7 @@ export function FormEditPanel({ form, patch, busy, columns }: EditPanelProps) {
                       used={used}
                       busy={busy}
                       onPick={addColumn}
+                      onCreate={createAndAdd}
                     />
                     <div id={`form-card-${question.id}`}>
                       <FormQuestionCard
@@ -612,6 +760,7 @@ export function FormEditPanel({ form, patch, busy, columns }: EditPanelProps) {
                 used={used}
                 busy={busy}
                 onPick={addColumn}
+                onCreate={createAndAdd}
               />
             </section>
           );

@@ -1586,7 +1586,10 @@
   color: var(--muted-2);
   padding: 2px 8px;
   font-size: 11px;
-  opacity: 0;
+  /* Faint, not invisible. At 0 it existed only for a mouse that happened to
+     hover the gap, and on a touch screen not at all — which is how "Add a
+     question" came to look like a feature the editor did not have. */
+  opacity: 0.55;
   cursor: pointer;
   transition: opacity 120ms ease;
 }
@@ -1606,6 +1609,88 @@
   border-radius: var(--radius-sm);
   background: var(--surface-card-lo);
   padding: 8px;
+}
+
+/* The open insertion control: "New field" or "Existing column". */
+.form-edit__insertpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.form-edit__inserttabs {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.form-edit__inserttabs button {
+  border: 0;
+  background: var(--surface-card);
+  color: var(--muted);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-edit__inserttabs button + button {
+  border-left: 1px solid var(--line);
+}
+
+.form-edit__inserttabs button.is-active {
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+}
+
+.form-edit__newfield {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.form-edit__newfield label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.form-edit__newfield input,
+.form-edit__newfield select {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--ink);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-edit__newfield input {
+  flex: 1 1 180px;
+}
+
+.form-edit__newfieldadd {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--brand-solid);
+  border-radius: var(--radius-sm);
+  background: var(--brand-solid);
+  color: var(--on-brand-solid);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-edit__newfieldadd:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* ── The shared field picker ────────────────────────────── */
