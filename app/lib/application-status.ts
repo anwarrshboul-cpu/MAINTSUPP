@@ -71,9 +71,9 @@ export function applicationStatus(value: string | null | undefined): Application
 
 /** What this inbox deliberately does NOT do — printed on the screen, not restated there. */
 export const APPLICATION_OMISSIONS: readonly string[] = [
-  "Approving an application does not add the company to any workspace's contractor register. Which clients a contractor works for is a decision made in that workspace, not here.",
+  "Changing the status to Approved does not add the company to a contractor register on its own — use \"Add to Contractors register\" and choose the client workspace, which also marks it Approved.",
   "There is no notes field; the reason given when a status changes is recorded in the audit trail instead.",
   "An application cannot be assigned to a person, and there is no CSV export — the rows carry other companies' contact details.",
   "Deleting an application is not offered. Spam is a status, so nothing that arrived is silently gone.",
-  "Nothing is emailed to the applicant when a status changes.",
+  "Nothing is emailed to the applicant when a status changes. They receive a confirmation when they apply, and their app link only if you choose to send it when adding them to a register.",
 ];

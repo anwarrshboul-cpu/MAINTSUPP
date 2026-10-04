@@ -49,6 +49,8 @@ type Application = {
   createdAt: string;
   organisationId: string;
   workspaceName: string | null;
+  documents?: Array<{ id: string; name: string; size: number }>;
+  contractorId?: string | null;
 };
 
 type Payload = {
@@ -58,6 +60,7 @@ type Payload = {
   counts: Record<string, number>;
   open: number;
   omissions: string[];
+  registerWorkspaces?: Array<{ id: string; name: string }>;
 };
 
 function when(value: string): string {
@@ -73,6 +76,8 @@ export function ApplicationsInboxView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const [target, setTarget] = useState("");
+  const [sendAppLink, setSendAppLink] = useState(true);
 
   const statuses = useMemo(() => data?.statuses ?? [], [data]);
   const shown = useMemo(() => {
@@ -99,6 +104,29 @@ export function ApplicationsInboxView() {
       setReason("");
       await reload();
     }
+  };
+
+  /* Approve and add to a client workspace's Contractors register (2026-10-04). */
+  const addToRegister = async (entry: Application) => {
+    if (!target) {
+      setFlash({ ok: false, message: "Choose the client workspace first." });
+      return;
+    }
+    setBusy(entry.id);
+    const result = await adminWrite("/api/contractor-applications/inbox", "POST", {
+      action: "add_to_register",
+      id: entry.id,
+      organisationId: target,
+      sendAppLink,
+    });
+    setBusy(null);
+    setFlash({
+      ok: result.ok,
+      message: result.ok
+        ? `${entry.company} is now on the Contractors register${sendAppLink ? ", and their app link has been emailed" : ""}.`
+        : result.message,
+    });
+    if (result.ok) await reload();
   };
 
   if (loading && !data) return <AdminLoading label="Loading the contractor applications…" />;
@@ -267,6 +295,61 @@ export function ApplicationsInboxView() {
                     <dd>{entry.workspaceName ?? entry.organisationId}</dd>
                   </div>
                 </dl>
+
+                {entry.documents?.length ? (
+                  <>
+                    <h4>Documents</h4>
+                    <ul className="leads-admin__docs">
+                      {entry.documents.map((document) => (
+                        <li key={document.id}>
+                          <a
+                            href={`/api/contractor-applications/documents?application=${encodeURIComponent(entry.id)}&doc=${encodeURIComponent(document.id)}`}
+                          >
+                            <Icon name="download" size={14} /> {document.name}
+                          </a>{" "}
+                          <small>{Math.max(1, Math.round(document.size / 1024))} KB</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+
+                <h4>Contractors register</h4>
+                {entry.contractorId ? (
+                  <p className="leads-admin__hint">Added to a Contractors register. Find them under Contractors in that workspace.</p>
+                ) : (
+                  <div className="leads-admin__moves">
+                    <label className="admin-field">
+                      <span>Client workspace</span>
+                      <select value={target} onChange={(event) => setTarget(event.target.value)}>
+                        <option value="">Choose…</option>
+                        {(data.registerWorkspaces ?? []).map((workspace) => (
+                          <option key={workspace.id} value={workspace.id}>
+                            {workspace.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="admin-field">
+                      <span>
+                        <input
+                          type="checkbox"
+                          checked={sendAppLink}
+                          onChange={(event) => setSendAppLink(event.target.checked)}
+                        />{" "}
+                        Email them their app link
+                      </span>
+                    </label>
+                    <button
+                      className="primary-button admin-mini"
+                      disabled={busy === entry.id || !target}
+                      onClick={() => addToRegister(entry)}
+                      type="button"
+                    >
+                      Approve &amp; add to Contractors register
+                    </button>
+                  </div>
+                )}
 
                 {/* The applicant's own words, only ever rendered as text. */}
                 {entry.notes ? (

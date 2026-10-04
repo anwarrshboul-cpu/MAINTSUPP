@@ -934,11 +934,15 @@ test("the form posts to a route a logged-out visitor may actually use", async ()
 
   const route = await read("app/api/report-job/route.ts");
   assert.match(route, /allowAnonymous: true/, "a visitor has no session");
+  /* Re-pointed 2026-10-04 (owner decision): still pinned, now to one of TWO
+     server-chosen workspaces — the primary client when the typed site is one of
+     its stores, MAINTSUPP's Website Leads otherwise. Never the payload. */
   assert.match(
     route,
-    /const orgId = PRIMARY_ORGANISATION_ID/,
+    /const primaryOrgId = PRIMARY_ORGANISATION_ID/,
     "the tenant is pinned, never taken from the payload or a cookie",
   );
+  assert.match(route, /const orgId = site \? primaryOrgId : WEBSITE_LEADS_WORKSPACE_ID;/);
   assert.doesNotMatch(
     route,
     /payload\.(organisationId|orgId|tenant)/,

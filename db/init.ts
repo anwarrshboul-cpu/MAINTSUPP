@@ -498,6 +498,16 @@ async function applyMigrations(d1: D1DatabaseLike) {
      guarded column; no seed. See `ensureContractorApp`. */
   await ensureContractorApp(d1);
 
+  /* Contractor applications (2026-10-04): an upload key for the applicant's
+     documents, the documents themselves, and the register record an approved
+     application became. Guarded columns only. */
+  await addColumns(d1, "contractor_applications", [
+    ["upload_token_hash", "TEXT"],
+    ["upload_token_expires_at", "TEXT"],
+    ["documents", "TEXT"],
+    ["contractor_id", "TEXT"],
+  ]);
+
   await repairOrphanedSectionBoards(d1);
 
   /*

@@ -195,8 +195,13 @@ test("an Owner never holds platform billing or permanent delete, whatever the ma
   }
   // Everything an Admin holds by default, an Owner holds.
   const owner = permissions.effectiveCapabilities("owner", {});
-  for (const capability of ["users.invite", "users.edit", "users.deactivate", "settings.edit", "navigation.personalise"]) {
+  for (const capability of ["users.invite", "users.edit", "users.deactivate", "navigation.personalise"]) {
     assert.equal(owner[capability], true, capability);
+  }
+  /* Re-pointed 2026-10-04 (owner decision): a client Owner no longer changes
+     workspace settings or integrations by default — personal preferences only. */
+  for (const capability of ["settings.edit", "integrations.manage"]) {
+    assert.equal(owner[capability], false, capability);
   }
 });
 

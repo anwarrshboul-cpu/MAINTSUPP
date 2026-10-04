@@ -96,7 +96,10 @@ test("a screen sees at most the last four characters", () => {
 /* Token rules                                                         */
 /* ================================================================== */
 
-const admin = { role: "admin", capabilities: {} };
+/* Re-pointed 2026-10-04: `integrations.manage` is no longer in the Admin
+   default set (owner decision — clients do not manage integrations), so the
+   token creator here is an Admin a Super Admin opened it for. */
+const admin = { role: "admin", capabilities: { "integrations.manage": true } };
 const manager = { role: "manager", capabilities: {} };
 
 test("a token is mst_<12 hex>_<64 hex>, and only a well-formed bearer header is read", () => {
@@ -181,11 +184,14 @@ test("the platform route no longer describes a Worker, and promises no connectio
 /* The routes' guarantees, in their source                              */
 /* ================================================================== */
 
-test("integrations.manage is Owner/Admin by default and above a Manager's ceiling", async () => {
+test("integrations.manage is closed to Owner/Admin by default, can be opened per workspace, and is above a Manager's ceiling", async () => {
   const permissions = await import("../app/lib/permissions.ts");
   assert.ok(permissions.CAPABILITIES.includes("integrations.manage"));
-  assert.equal(permissions.can({ role: "owner", capabilities: {} }, "integrations.manage"), true);
-  assert.equal(permissions.can({ role: "admin", capabilities: {} }, "integrations.manage"), true);
+  /* Re-pointed 2026-10-04 (owner decision): off by default for client roles,
+     still grantable by a Super Admin through the matrix. */
+  assert.equal(permissions.can({ role: "owner", capabilities: {} }, "integrations.manage"), false);
+  assert.equal(permissions.can({ role: "admin", capabilities: {} }, "integrations.manage"), false);
+  assert.equal(permissions.can({ role: "admin", capabilities: { "integrations.manage": true } }, "integrations.manage"), true);
   assert.equal(permissions.can({ role: "super_admin", capabilities: {} }, "integrations.manage"), true);
   assert.equal(permissions.can({ role: "manager", capabilities: { "integrations.manage": true } }, "integrations.manage"), false, "a row cannot lift the ceiling");
   assert.equal(permissions.can({ role: "client", capabilities: {} }, "integrations.manage"), false);

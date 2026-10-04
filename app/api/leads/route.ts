@@ -25,6 +25,7 @@ import {
   tooManyAttempts,
 } from "../../lib/auth-session";
 import { LEAD_SUBMISSIONS } from "../../lib/form-throttle";
+import { notifyPlatformStaff } from "../../lib/push-notify";
 
 function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -490,6 +491,14 @@ export async function POST(request: Request) {
         notifyAttempts: 1,
       })
       .where(eq(leads.id, created.id));
+
+    /* A phone alert to MAINTSUPP staff as well (2026-10-04). */
+    await notifyPlatformStaff(db, {
+      title: `New enquiry · ${company}`,
+      body: `${name}${siteRange ? ` · ${siteRange}` : ""}`.slice(0, 160),
+      url: "/admin/leads",
+      tag: `lead-${created.id}`,
+    });
 
     return Response.json(
       {

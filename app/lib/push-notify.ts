@@ -29,6 +29,7 @@ import {
   jobAccessTokens,
   maintenanceRequests,
   memberships,
+  platformAdmins,
   pushSubscriptions,
   users,
 } from "../../db/schema";
@@ -546,4 +547,31 @@ export async function sendAnnouncement(
     devices += a.devices + b.devices;
   }
   return { sent, devices };
+}
+
+/* ── MAINTSUPP staff ─────────────────────────────────────────────────────── */
+
+/**
+ * A PHONE ALERT TO MAINTSUPP'S OWN STAFF (2026-10-04) — a new contractor
+ * application, a website enquiry, a job reported by a member of the public.
+ * Those land in MAINTSUPP's own intake, not in any client's workspace, so the
+ * people to tell are the active platform staff, on every phone they have
+ * switched alerts on. Never fails the write that called it.
+ */
+export async function notifyPlatformStaff(db: Database, message: PushMessage) {
+  if (!pushConfigured()) return;
+  try {
+    const staff = await db
+      .select({ userId: platformAdmins.userId })
+      .from(platformAdmins)
+      .where(eq(platformAdmins.status, "active"));
+    if (!staff.length) return;
+    const rows = await db
+      .select()
+      .from(pushSubscriptions)
+      .where(inArray(pushSubscriptions.userId, staff.map((row) => row.userId)));
+    await deliver(db, rows, message);
+  } catch (cause) {
+    console.error("[push] platform staff", cause);
+  }
 }

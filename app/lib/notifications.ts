@@ -906,6 +906,9 @@ export function invitationEmailTemplate(invite: {
 }) {
   const workspace = escapeHtml(invite.workspaceName);
   const url = escapeHtml(invite.inviteUrl);
+  /* The app is installed from the portal's own /app page (2026-10-04): every
+     invitation now carries it, because the phone is where alerts land. */
+  const appUrl = escapeHtml(appLinkFor(invite.inviteUrl));
   const expires = formatExpiry(invite.expiresAt);
   const inviter = invite.inviterName?.trim() || null;
   const lead = inviter
@@ -933,6 +936,11 @@ export function invitationEmailTemplate(invite: {
        If the button does not work, copy this link into your browser:<br>
        <span style="word-break:break-all">${url}</span>
      </p>
+     <div style="margin:18px 0;padding:14px 16px;border:1px solid #d6e7e5;border-radius:10px;background:#f3faf9">
+       <p style="font-size:14px;font-weight:700;margin:0 0 6px">Then get the MAINTSUPP app</p>
+       <p style="font-size:13px;line-height:1.5;margin:0 0 10px">Jobs, updates and alerts on your phone — no App Store or Google Play. Open this on your phone and add it to your home screen:</p>
+       <a href="${appUrl}" style="display:inline-block;padding:10px 18px;border-radius:8px;border:1px solid #12B4A8;color:#0b6f68;font-size:14px;font-weight:700;text-decoration:none">Download the app</a>
+     </div>
      <p style="font-size:12px;line-height:1.5;color:#6b7a83;margin:0">
        The link works once and expires on ${escapeHtml(expires)}. You will choose your own
        password when you open it. If you were not expecting this invitation you can
@@ -953,6 +961,9 @@ export function invitationEmailTemplate(invite: {
     "Accept the invitation:",
     invite.inviteUrl,
     "",
+    "Then get the MAINTSUPP app on your phone (no App Store needed):",
+    appLinkFor(invite.inviteUrl),
+    "",
     "The link works once. You will choose your own password when you open it.",
     "If you were not expecting this invitation you can ignore this email.",
   ].join("\n");
@@ -962,6 +973,15 @@ export function invitationEmailTemplate(invite: {
     body: html,
     text,
   };
+}
+
+/** The /app install page on the same site as the invitation link. */
+function appLinkFor(inviteUrl: string) {
+  try {
+    return new URL("/app", inviteUrl).toString();
+  } catch {
+    return "https://maintsupp.com/app";
+  }
 }
 
 /** "23 Sept 2026", in UK time — the same day the invite page shows. */

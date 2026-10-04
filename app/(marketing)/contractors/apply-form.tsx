@@ -98,6 +98,9 @@ export function ContractorApply() {
   const [fields, setFields] = useState<Fields>(EMPTY);
   const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
   const [submitting, setSubmitting] = useState(false);
+  /* Insurance and certificates (2026-10-04) — sent after the application, with
+     the one-hour key it answers with. */
+  const [files, setFiles] = useState<File[]>([]);
   const [status, setStatus] = useState<{ text: string; tone: "" | "is-ok" | "is-error" }>({
     text: "",
     tone: "",
@@ -140,15 +143,22 @@ export function ContractorApply() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(fields),
       });
-      const result = (await response.json()) as { ok?: boolean; error?: string };
+      const result = (await response.json()) as { ok?: boolean; error?: string; uploadToken?: string };
       if (!response.ok || !result.ok) {
         throw new Error(result.error || "The application could not be submitted.");
       }
+      let unsent: string[] = [];
+      if (files.length && result.uploadToken) {
+        setStatus({ text: "Application received. Attaching your documents…", tone: "" });
+        unsent = await uploadDocuments(result.uploadToken, files);
+      }
       setFields(EMPTY);
+      setFiles([]);
       setErrors({});
       setStatus({
-        text:
-          "Application received. We will review your details and come back to you — approval requires document checks before any work is assigned.",
+        text: unsent.length
+          ? `Application received. ${unsent.join(" ")} You can reply to our confirmation email with anything that did not attach.`
+          : "Application received. We have emailed you a confirmation and will review your details — approval requires document checks before any work is assigned.",
         tone: "is-ok",
       });
     } catch (error) {
@@ -363,6 +373,22 @@ export function ContractorApply() {
         />
       </div>
 
+      <div className="field">
+        <label htmlFor="documents">Insurance &amp; certificates</label>
+        <input
+          id="documents"
+          name="documents"
+          type="file"
+          multiple
+          accept="application/pdf,image/jpeg,image/png,image/webp"
+          onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 6))}
+        />
+        <p className="field__note">
+          Optional. Up to 6 files — PDFs or photos of your public liability insurance and
+          accreditations. Photos are resized automatically; PDFs up to 900 KB.
+        </p>
+      </div>
+
       <div className={fieldClass("consent")}>
         <label className="consent" htmlFor="consent">
           <input
@@ -401,4 +427,51 @@ export function ContractorApply() {
       </p>
     </form>
   );
+}
+
+/* ── Documents ───────────────────────────────────────────────────────────── */
+
+const MAX_DOCUMENT_BYTES = 900 * 1024;
+
+/** A phone photo is several megabytes; redrawn at 1800px as JPEG it fits. */
+async function shrinkPhoto(file: File): Promise<File> {
+  if (!file.type.startsWith("image/") || file.size <= MAX_DOCUMENT_BYTES) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1800 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    for (const quality of [0.82, 0.7, 0.55]) {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+      if (blob && blob.size <= MAX_DOCUMENT_BYTES) {
+        return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" });
+      }
+    }
+  } catch {
+    /* Fall through: the server will say it is too large. */
+  }
+  return file;
+}
+
+/** Uploads each file; answers one sentence per file that did not attach. */
+async function uploadDocuments(token: string, files: File[]): Promise<string[]> {
+  const problems: string[] = [];
+  for (const original of files) {
+    const file = await shrinkPhoto(original);
+    const body = new FormData();
+    body.set("token", token);
+    body.set("file", file);
+    try {
+      const response = await fetch("/api/contractor-applications/documents", { method: "POST", body });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        problems.push(`${original.name}: ${payload.error ?? "could not be attached."}`);
+      }
+    } catch {
+      problems.push(`${original.name}: could not be attached.`);
+    }
+  }
+  return problems;
 }

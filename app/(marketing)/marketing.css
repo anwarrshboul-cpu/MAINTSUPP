@@ -1849,6 +1849,10 @@ fieldset.field:focus{outline:none}
 .choice__list li{display:grid;grid-template-columns:20px minmax(0,1fr);gap:9px;align-items:start;color:#3B4C55}
 .choice__list .ic{color:var(--teal-text);margin-top:2px}
 .choice__note{margin-top:var(--gap-block)}
+.choice__join{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:var(--gap-block);padding:22px 24px;border:1px solid var(--line, rgba(127,127,127,.25));border-radius:14px}
+.choice__join h3{margin:0 0 6px}
+.choice__join p{margin:0;max-width:62ch}
+@media(max-width:640px){.choice__join{flex-direction:column;align-items:stretch}.choice__join .btn{text-align:center}}
 
 /* -------------------------------------------------------------- boundary */
 .boundary{display:flex;gap:15px;background:var(--steel-soft);border:1px solid #C9E6E8;border-radius:var(--r-lg);padding:21px}
