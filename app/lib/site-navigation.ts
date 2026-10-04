@@ -241,7 +241,7 @@ export const HOMEPAGE_ANCHORS: ReadonlyArray<{ id: string; label: string }> = [
   { id: "your-contractors", label: "Your Contractors or Ours" },
   { id: "pricing", label: "Pricing" },
   { id: "case-study", label: "Case Study" },
-  { id: "founder", label: "Who runs Maintsupp" },
+  { id: "founder", label: "Who runs MAINTSUPP" },
   { id: "portal", label: "Client portal" },
   { id: "faq", label: "FAQs" },
   { id: "trust", label: "Trust strip" },
