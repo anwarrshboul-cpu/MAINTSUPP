@@ -59,7 +59,7 @@ export async function subscriptionRowId(endpoint: string, subject: string) {
 
 /* ── Delivery ────────────────────────────────────────────────────────────── */
 
-async function deliver(db: Database, rows: SubscriptionRow[], message: PushMessage) {
+async function deliver(db: Database, rows: SubscriptionRow[], message: PushMessage, limit = MAX_PER_EVENT) {
   /* One phone subscribed twice (as a person AND to a job link) gets it once. */
   const seen = new Set<string>();
   const unique = rows.filter((row) => {
@@ -67,12 +67,14 @@ async function deliver(db: Database, rows: SubscriptionRow[], message: PushMessa
     seen.add(row.endpoint);
     return true;
   });
+  let sent = 0;
   await Promise.allSettled(
-    unique.slice(0, MAX_PER_EVENT).map(async (row) => {
+    unique.slice(0, limit).map(async (row) => {
       const result = await sendPush(
         { endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth },
         message,
       );
+      if (result.ok) sent += 1;
       try {
         if (result.gone) {
           await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, row.endpoint));
@@ -92,6 +94,7 @@ async function deliver(db: Database, rows: SubscriptionRow[], message: PushMessa
       }
     }),
   );
+  return { sent, devices: Math.min(unique.length, limit) };
 }
 
 /* ── Recipients ──────────────────────────────────────────────────────────── */
@@ -341,6 +344,48 @@ export async function notifyContractorReport(
 }
 
 /**
+ * A CONTRACTOR SUBMITS THE JOB AS COMPLETE — its own notification, distinct
+ * from "new job" and from ordinary updates (owner, 2026-10-04): the office is
+ * told the work is done and ready to review, and the contractor's own phones
+ * get a confirmation that the completion was received.
+ */
+export async function notifyContractorCompleted(db: Database, orgId: string, requestId: string) {
+  if (!pushConfigured()) return;
+  try {
+    const job = await loadJob(db, orgId, requestId);
+    if (!job) return;
+    const [people, phones, app] = await Promise.all([
+      userRecipients(db, orgId, job, { coordinatorsOnly: true }),
+      jobLinkRecipients(db, orgId, job.id),
+      contractorAppRecipients(db, job),
+    ]);
+    const place = shorten(job.location, 40);
+    await Promise.all([
+      deliver(db, people, {
+        title: `✅ Job completed · ${job.id}`,
+        body: `${place} — the contractor has submitted it as complete. Ready to review.`,
+        url: STAFF_URL,
+        tag: `completed-${job.id}`,
+      }),
+      deliver(db, phones, {
+        title: `✅ Completion sent · ${job.id}`,
+        body: `${place} — thank you. MAINTSUPP has received your completion.`,
+        url: contractorUrl(job),
+        tag: `completed-${job.id}`,
+      }),
+      deliver(db, app, {
+        title: `✅ Completion sent · ${job.id}`,
+        body: `${place} — thank you. MAINTSUPP has received your completion.`,
+        url: CONTRACTOR_APP_URL(job),
+        tag: `completed-${job.id}`,
+      }),
+    ]);
+  } catch (cause) {
+    console.error("[push] contractor completed", cause);
+  }
+}
+
+/**
  * A JOB GIVEN TO A CONTRACTOR — the fifth moment (2026-10-04). Their app
  * alert, plus email, text or WhatsApp — whichever is connected and on their
  * record (app/lib/contractor-messaging.ts). Runs whether or not push is set
@@ -402,4 +447,103 @@ export async function pushForEvents(ctx: AutomationContext, events: AutomationEv
       await notifyUpdate(ctx.db, ctx.orgId, event.requestId, exclude);
     }
   }
+}
+
+/* ── Announcements ───────────────────────────────────────────────────────── */
+
+export type AnnouncementAudience = "clients" | "contractors" | "both";
+
+/** Phones signed in to the contractor app as an ACTIVE contractor of this workspace. */
+async function workspaceContractorRecipients(db: Database, orgId: string) {
+  const active = await db
+    .select({ id: contractors.id })
+    .from(contractors)
+    .where(and(eq(contractors.organisationId, orgId), eq(contractors.active, true)));
+  if (!active.length) return [];
+  return db
+    .select()
+    .from(pushSubscriptions)
+    .where(inArray(pushSubscriptions.contractorId, active.map((row) => row.id)));
+}
+
+/** Contractor phones following any still-valid job link in this workspace. */
+async function workspaceJobLinkRecipients(db: Database, orgId: string) {
+  const rows = await db
+    .select()
+    .from(pushSubscriptions)
+    .where(and(eq(pushSubscriptions.organisationId, orgId), isNotNull(pushSubscriptions.jobTokenId)));
+  if (!rows.length) return [];
+  const tokens = await db
+    .select({ id: jobAccessTokens.id, expiresAt: jobAccessTokens.expiresAt, revokedAt: jobAccessTokens.revokedAt })
+    .from(jobAccessTokens)
+    .where(inArray(jobAccessTokens.id, rows.map((row) => row.jobTokenId as string)));
+  const now = Date.now();
+  const live = new Set(
+    tokens.filter((token) => !token.revokedAt && new Date(token.expiresAt).getTime() >= now).map((token) => token.id),
+  );
+  return rows.filter((row) => live.has(row.jobTokenId as string));
+}
+
+/**
+ * Who an announcement reaches, per phone. "Clients" is everybody signed in to
+ * this workspace's portal with alerts on (re-checked exactly as job alerts
+ * are); "Contractors" is the contractor app plus contractor job-link phones.
+ */
+export async function announcementRecipients(db: Database, orgId: string, audience: AnnouncementAudience) {
+  const rows: SubscriptionRow[] = [];
+  if (audience !== "contractors") rows.push(...(await userRecipients(db, orgId, null, { coordinatorsOnly: false })));
+  if (audience !== "clients") {
+    rows.push(...(await workspaceContractorRecipients(db, orgId)));
+    rows.push(...(await workspaceJobLinkRecipients(db, orgId)));
+  }
+  return rows;
+}
+
+export async function countAnnouncementReach(db: Database, orgId: string) {
+  const unique = (rows: SubscriptionRow[]) => new Set(rows.map((row) => row.endpoint)).size;
+  const [clients, contractorRows] = await Promise.all([
+    announcementRecipients(db, orgId, "clients"),
+    announcementRecipients(db, orgId, "contractors"),
+  ]);
+  return {
+    clients: unique(clients),
+    contractors: unique(contractorRows),
+    both: unique([...clients, ...contractorRows]),
+  };
+}
+
+/** Sends one announcement. Contractors open their jobs; everybody else the dashboard. */
+export async function sendAnnouncement(
+  db: Database,
+  orgId: string,
+  input: { audience: AnnouncementAudience; title: string; body: string },
+) {
+  const message = (url: string): PushMessage => ({
+    title: shorten(input.title, 80),
+    body: shorten(input.body, 240),
+    url,
+    tag: `announcement-${Date.now()}`,
+  });
+  let sent = 0;
+  let devices = 0;
+  if (input.audience !== "contractors") {
+    const people = await announcementRecipients(db, orgId, "clients");
+    const result = await deliver(db, people, message("/dashboard"), 2000);
+    sent += result.sent;
+    devices += result.devices;
+  }
+  if (input.audience !== "clients") {
+    const already = new Set<string>();
+    if (input.audience === "both") {
+      for (const row of await announcementRecipients(db, orgId, "clients")) already.add(row.endpoint);
+    }
+    const phones = (await announcementRecipients(db, orgId, "contractors")).filter((row) => !already.has(row.endpoint));
+    const appPhones = phones.filter((row) => row.contractorId);
+    const linkPhones = phones.filter((row) => !row.contractorId);
+    const a = await deliver(db, appPhones, message("/contractor"), 2000);
+    const b = await deliver(db, linkPhones, message("/app"), 2000);
+    sent += a.sent + b.sent;
+    devices += a.devices + b.devices;
+  }
+  return { sent, devices };
 }

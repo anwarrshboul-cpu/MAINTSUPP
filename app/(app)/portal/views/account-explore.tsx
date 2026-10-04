@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icon } from "../../../components";
 import { useCapability } from "../../../lib/client-capabilities";
+import { AccountAnnouncements } from "./account-announcements";
 import { assignableRoles, roleLabel } from "../../../lib/roles";
 import type { AccountSnapshot } from "../account-menu";
 import {
@@ -47,58 +48,35 @@ export function AccountMobilePanel() {
       <AccountHeading
         eyebrow="Explore"
         title="Mobile access"
-        lede="monday has native apps to download. MAINTSUPP has none — what it has is a layout built for a phone and two entry points that work without an account at all."
+        lede="The MAINTSUPP app installs straight from maintsupp.com/app — no App Store or Google Play — for clients and contractors alike."
       />
 
-      <AccountCard tone="notice" title="There is no app to install">
-        <p className="account-note">
-          No iOS or Android build exists, and there is no web app manifest, so the
-          browser will not offer to add this to a home screen either. Pointing you
-          at an app store would be pointing at nothing. What follows is what does
-          work on a phone today.
-        </p>
-      </AccountCard>
+      <AccountAnnouncements />
 
       <AccountCard
-        title="The dashboard on a phone"
-        description="Below 760px the portal switches to its own layout: a compact top bar, a slide-over navigation with a scrim, larger tap targets and full-width panels."
-      >
-        <dl className="account-definitions">
-          <div>
-            <dt>Address</dt>
-            <dd>
-              This same address, at <code>/dashboard</code>.
-            </dd>
-          </div>
-          <div>
-            <dt>Sign-in</dt>
-            <dd>The same as on a desktop — this is the same application.</dd>
-          </div>
-          <div>
-            <dt>Add to home screen</dt>
-            <dd>
-              Use your browser&rsquo;s own &ldquo;Add to home screen&rdquo;. It will
-              open as a normal tab: without a manifest there is no standalone mode.
-            </dd>
-          </div>
-        </dl>
-      </AccountCard>
-
-      <AccountCard
-        title="What a contractor uses instead"
-        description="Neither of these needs an account, which is the point: the person on site is not a member of the workspace."
+        title="The MAINTSUPP app"
+        description="One app, two doors: clients sign in to the portal, contractors sign in to their own jobs."
       >
         <div className="account-list">
           <div className="account-list__row">
             <div>
-              <strong>Contractor job link</strong>
+              <strong>Install link</strong>
+              <span>Send maintsupp.com/app to anyone. It shows the right install steps for iPhone, Android and desktop.</span>
+            </div>
+            <a className="secondary-button" href="/app" target="_blank" rel="noreferrer">
+              Open
+            </a>
+          </div>
+          <div className="account-list__row">
+            <div>
+              <strong>Contractors</strong>
               <span>
-                A scoped, expiring link to one job. Opens on any phone, allows
-                photos, comments and a completion request — nothing else.
+                Open a contractor in Contractors and press Send app link. They see only their own jobs,
+                without prices.
               </span>
             </div>
-            <Link className="secondary-button" href="/dashboard/jobs">
-              Issue a link
+            <Link className="secondary-button" href="/dashboard/contractors">
+              Contractors
             </Link>
           </div>
           <div className="account-list__row">

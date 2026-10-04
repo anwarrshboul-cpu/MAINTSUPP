@@ -103,3 +103,26 @@ test("the sign-in screen offers codes only when the server can send them, and al
   assert.match(app, /!codes \? null : !sent \?/);
   assert.match(app, /window\.location\.href = `\/c\/\$\{match\[1\]\.toLowerCase\(\)\}`/);
 });
+
+test("announcements: Owner/Admin only, three audiences, every recipient re-checked", async () => {
+  const route = await read("app/api/push/announce/route.ts");
+  assert.match(route, /scopedDbWithCapability\(request, "settings\.edit"\)/g);
+  assert.match(route, /new Set<AnnouncementAudience>\(\["clients", "contractors", "both"\]\)/);
+  assert.match(route, /action: "push\.announcement"/);
+  const push = await read("app/lib/push-notify.ts");
+  const recipients = push.slice(push.indexOf("export async function announcementRecipients"));
+  assert.match(recipients, /userRecipients\(db, orgId, null, \{ coordinatorsOnly: false \}\)/);
+  assert.match(push, /eq\(contractors\.organisationId, orgId\), eq\(contractors\.active, true\)/);
+  const panel = await read("app/(app)/portal/views/account-explore.tsx");
+  assert.match(panel, /<AccountAnnouncements \/>/);
+});
+
+test("a contractor's completion is its own notification: the office is told, the contractor gets a receipt", async () => {
+  const route = await read("app/api/job-link/[token]/route.ts");
+  assert.match(route, /await notifyContractorCompleted\(db, scope\.organisationId, scope\.requestId\);/);
+  const push = await read("app/lib/push-notify.ts");
+  const fn = push.slice(push.indexOf("export async function notifyContractorCompleted"));
+  assert.match(fn, /title: `✅ Job completed · \$\{job\.id\}`/);
+  assert.match(fn, /title: `✅ Completion sent · \$\{job\.id\}`/);
+  assert.match(fn, /tag: `completed-\$\{job\.id\}`/);
+});
