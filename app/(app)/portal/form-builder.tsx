@@ -374,6 +374,11 @@ export default function FormBuilder({
       setForm(payload.form);
       setGroups(payload.groups ?? []);
       setCreatable(false);
+      /* A NEW FORM OPENS ON ITS LINK AND QR CODE. The first thing anybody
+         does with a form they have just created is hand it out, so the Share
+         dialog — link, Copy, QR code, Download — is shown straight away
+         rather than left behind a button. Only where the link may be shown. */
+      if (payload.form.canShare) setSharing(true);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The form could not be created.");
     } finally {
