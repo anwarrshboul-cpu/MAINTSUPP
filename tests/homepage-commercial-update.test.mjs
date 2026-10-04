@@ -227,8 +227,25 @@ test("§4.2's new question is in the source, not only on a running server", asyn
      only there is a question nothing protects in CI. */
   const content = await read(`${SECTIONS}/content.ts`);
   assert.match(content, /"q": "What if we only have three or four sites\?"/);
-  assert.match(content, /better served calling trades directly/);
+  /*
+   * RE-POINTED (October 2026), on the owner's decision, not on a rewording.
+   *
+   * §4.2 had this answer send a reader with fewer than five sites away to "call
+   * trades directly". The owner has since begun taking one-off jobs in London
+   * from a single shop or kiosk, so that sentence would now turn away work the
+   * business sells. The two things §4.2 exists to protect are still asserted:
+   * the answer still declines the PLAN in plain words, and still states the
+   * minimum as five sites. What changed is the alternative it offers.
+   */
+  assert.match(content, /the monthly plan is not for you yet/);
+  assert.match(content, /we'd rather say so than take the fee/);
   assert.match(content, /Our minimum is five sites/);
+  assert.match(content, /one-off jobs, each quoted before work starts/);
+  assert.doesNotMatch(
+    content,
+    /better served calling trades directly/,
+    "the answer must not turn away the one-off job the business now takes",
+  );
   const costAt = content.indexOf('"q": "What does it cost?"');
   const newAt = content.indexOf('"q": "What if we only have three or four sites?"');
   assert.ok(costAt > 0, "the cost answer is still there");

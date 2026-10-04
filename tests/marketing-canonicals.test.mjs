@@ -168,7 +168,11 @@ test("the four pages this fixed are fixed, and named so a regression is obvious"
    * a count changing somewhere.
    */
   for (const [folder, route, title] of [
-    ["faqs", "/faqs", "FAQs"],
+    /* RE-POINTED (October 2026): the shipped title was the bare word "FAQs",
+       which rendered as "FAQs | MAINTSUPP" and told a searcher nothing about
+       the questions. It is still bare and still says its name once — which is
+       the rule this row holds — so the row follows the title. */
+    ["faqs", "/faqs", "FAQs: Commercial Maintenance, Contractors & Costs"],
     ["privacy", "/privacy", "Privacy notice"],
     ["terms", "/terms", "Terms"],
     ["cookies", "/cookies", "Cookies"],

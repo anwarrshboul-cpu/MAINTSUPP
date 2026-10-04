@@ -130,11 +130,24 @@ export const FOOTER_DEFAULTS: ReadonlyArray<{
   {
     id: "services",
     heading: "Services",
+    /*
+     * REBUILT IN OCTOBER 2026. The four links here all went to `/services` — four
+     * names for one address, which is four clicks that land in the same place and
+     * tell a crawler nothing. The services each have a page of their own now
+     * (`app/(marketing)/london/`), so the list names those, and every page on the
+     * site links to them from its footer. `ftr-reactive` keeps its id and becomes
+     * the one link to the overview, so a saved navigation that still names it
+     * still resolves.
+     */
     links: [
-      { id: "ftr-reactive", href: "/services", label: "Reactive Maintenance" },
-      { id: "ftr-planned", href: "/services", label: "Planned Maintenance" },
-      { id: "ftr-compliance", href: "/services", label: "Compliance Coordination" },
-      { id: "ftr-projects", href: "/services", label: "Projects & Store Works" },
+      { id: "ftr-reactive", href: "/services", label: "All Services" },
+      { id: "ftr-london", href: "/london", label: "London Shops & Kiosks" },
+      { id: "ftr-emergency", href: "/london/emergency-repairs", label: "24-Hour Emergency Repairs" },
+      { id: "ftr-kiosk", href: "/london/kiosk-installation", label: "Kiosk Installation & Removal" },
+      { id: "ftr-stripout", href: "/london/shop-strip-out", label: "Shop Strip-Out" },
+      { id: "ftr-fitout", href: "/london/shop-fit-out", label: "Shop Fit-Out" },
+      { id: "ftr-electrician", href: "/london/commercial-electrician", label: "Commercial Electrician" },
+      { id: "ftr-handyman", href: "/london/commercial-handyman", label: "Commercial Handyman" },
     ],
   },
   {
@@ -264,6 +277,25 @@ export const SITE_ROUTES: ReadonlyArray<{ path: string; label: string }> = [
   { path: "/terms", label: "Terms" },
   { path: "/cookies", label: "Cookie notice" },
   { path: "/portal", label: "Portal sign-in" },
+  /* The London pages (`app/(marketing)/london/`). Listed so a menu or footer
+     link may name any of them; a path that is not on this list is refused. */
+  { path: "/london", label: "London: shops and kiosks" },
+  { path: "/london/emergency-repairs", label: "London: 24-hour emergency repairs" },
+  { path: "/london/kiosk-installation", label: "London: kiosk installation and removal" },
+  { path: "/london/shop-strip-out", label: "London: shop strip-out" },
+  { path: "/london/shop-fit-out", label: "London: shop fit-out" },
+  { path: "/london/commercial-electrician", label: "London: commercial electrician" },
+  { path: "/london/commercial-handyman", label: "London: commercial handyman" },
+  { path: "/london/commercial-painters-decorators", label: "London: painters and decorators" },
+  { path: "/london/commercial-carpentry", label: "London: carpentry and joinery" },
+  { path: "/london/shop-maintenance", label: "London: retail and shop maintenance" },
+  { path: "/london/westfield-stratford-city", label: "Westfield Stratford City" },
+  { path: "/london/westfield-london-white-city", label: "Westfield London, White City" },
+  { path: "/london/brent-cross", label: "Brent Cross" },
+  { path: "/london/north-london", label: "North London" },
+  { path: "/london/east-london", label: "East London" },
+  { path: "/london/west-london", label: "West London" },
+  { path: "/london/south-london", label: "South London" },
 ];
 
 const SITE_HOSTS = new Set(["maintsupp.com", "www.maintsupp.com"]);

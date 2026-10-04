@@ -18,9 +18,9 @@ import { pageSocial } from "../../lib/page-social";
  * shows one stage at a time and this shows all at once.
  */
 
-const TITLE = "How It Works";
+const TITLE = "How Maintenance Coordination Works: 7 Stages";
 const DESCRIPTION =
-  "How Maintsupp runs a maintenance job from report to verified close-out: triage, approval, contractor assignment, attendance, photo evidence and monthly reporting.";
+  "How MAINTSUPP runs a maintenance job from report to verified close-out: triage, approval, contractor assignment, attendance, photo evidence and reporting.";
 
 export const metadata: Metadata = {
   title: TITLE,

@@ -90,3 +90,84 @@ Owner follow-up: supply official LinkedIn or other company profile URLs for same
 - [Google: breadcrumbs](https://developers.google.com/search/docs/appearance/structured-data/breadcrumb)
 - [Schema.org: ContactPoint](https://schema.org/ContactPoint)
 - [HSE: legionella responsibilities](https://www.hse.gov.uk/pubns/indg458.pdf) — source for future article research, not a substitute for reviewing the full legal context.
+
+---
+
+# October 2026 update: London, one-off jobs and the 24-hour line
+
+Research date: 4 October 2026. This section supersedes the audience line at the top of this file. The owner widened the proposition on that date:
+
+- **Both buyers.** The monthly coordination plans stay as they are, for portfolios of five sites and above. Beside them, a single shop, kiosk, restaurant or office in London can book a one-off job, quoted before work starts.
+- **Emergency call-outs at any hour**, for commercial premises in London. No arrival time is promised on any page.
+- **Commercial premises only.** No page targets a domestic search.
+- **Area order:** North London, then East, then West, then South. The three priority centres are Westfield Stratford City, Westfield London at White City, and Brent Cross. The owner confirmed that MAINTSUPP has coordinated real jobs inside all three, so those pages say so; no other centre is described as somewhere the company has worked.
+
+MAINTSUPP is still described everywhere as a coordinator of vetted independent contractors. It is not an approved, nominated or authorised contractor of any centre and no page says so.
+
+## Evidence and limits (October 2026)
+
+Still no paid keyword-volume export: no monthly volume, CPC or difficulty figure was available or invented. Three kinds of evidence were used instead.
+
+1. **Google autocomplete**, 99 seed phrases plus a deeper pass on 12. Autocomplete shows that a phrase is typed; it gives no volume, and an empty result means only that Google holds no stored completion.
+2. **Competitor pages**, read for title, H1, headings, locations and proof: 15 kiosk firms, 20 strip-out and fit-out firms, 22 retail and commercial maintenance firms, and the ranking pages for each commercial trade.
+3. **The live site**, read page by page before the change.
+
+What that evidence changed:
+
+- **Bare "kiosk" is polluted.** "kiosk installation", "kiosk removal" and "kiosk install and derig" return self-service terminals, kiosk-mode software, DVD kiosks and electrical enclosures. The kiosk page always says *retail* kiosk and names the shopping centre. "stall" and "RMU" are both typed ("westfield stratford stall hire", "rmu space in shopping centre") and both appear on it.
+- **Nobody sells labour-only kiosk work in London.** Every kiosk-ranking competitor is a design-and-build manufacturer based outside London. No page found sells dismantling, removal or relocation of an existing retail kiosk. That is the clearest gap in the research.
+- **Strip-out is searched by trade, not by "shop".** "strip out contractors london" and "retail strip out" are completed; "shop strip out london" is not. The title leads with the first.
+- **"shop electrician" is a trap**: its completions are car and bike electricians. "commercial electrician london" and "retail electrician" are the clean terms. "commercial carpenter london" is rewritten by Google to "commercial carpentry london" and "commercial joinery london", so the page is named for those.
+- **"shop repairs london" is consumer repair shops.** Not targeted.
+- **No competitor has a landing page for a named London shopping centre.** The only centre-specific pages found are case studies and one Cardiff manufacturer's Westfield page.
+- **No competitor title uses the word "coordination".** The homepage title no longer leads with the brand and that word.
+- **Competitors sell against subcontracting** ("no subcontractors", "directly employed"). Every London page says plainly who does the work, because a buyer told up front is choosing accountability and one who finds out later is a complaint.
+
+## Page ownership: the London pages (all live)
+
+One primary query per page. The primary belongs to its page; other pages mention it briefly and link to the owner.
+
+| Route | Primary query | Secondary phrases |
+| --- | --- | --- |
+| `/london` | commercial property maintenance London | building maintenance London; shop and kiosk maintenance London |
+| `/london/kiosk-installation` | retail kiosk installation London | kiosk dismantling and removal; RMU and stall installation; kiosk relocation |
+| `/london/shop-strip-out` | strip out contractors London (retail) | shop strip out London; retail unit strip out; shop fitting removal |
+| `/london/shop-fit-out` | shop fit out London | new shop opening works; small shop fit out; out-of-hours shop fit out |
+| `/london/commercial-electrician` | commercial electrician London | retail electrician; emergency commercial electrician; shop lighting repair |
+| `/london/commercial-handyman` | commercial handyman London | handyman for shops; commercial property handyman |
+| `/london/commercial-painters-decorators` | commercial painters and decorators London | shop painting out of hours; commercial decorators London |
+| `/london/commercial-carpentry` | commercial carpentry London | commercial joinery London; shop counter repair; fire door repair |
+| `/london/emergency-repairs` | 24 hour emergency commercial repairs London | emergency maintenance London; emergency shop front and shutter repair |
+| `/london/shop-maintenance` | retail maintenance London | shop maintenance London; reactive maintenance London |
+| `/london/westfield-stratford-city` | Westfield Stratford shop and kiosk maintenance | kiosk installation Westfield Stratford; Westfield Stratford contractor |
+| `/london/westfield-london-white-city` | Westfield London (White City) shop and kiosk works | kiosk Westfield White City; shop fit out Westfield London |
+| `/london/brent-cross` | Brent Cross shop and kiosk maintenance | Brent Cross shopping centre kiosk; shop repairs Brent Cross |
+| `/london/north-london` | shop and commercial maintenance North London | Wood Green, Edgware, Barnet, Enfield, Harrow, Wembley |
+| `/london/east-london` | shop and commercial maintenance East London | Stratford, Canary Wharf, Ilford, Romford, Walthamstow |
+| `/london/west-london` | shop and commercial maintenance West London | White City, Hammersmith, Ealing, Uxbridge |
+| `/london/south-london` | shop and commercial maintenance South London | Battersea, Kingston, Croydon, Bromley, Lewisham |
+
+Existing pages, changed in the same release: the homepage title and H1 now name shops, kiosks and London; `/services` links to the London pages; `/pricing` has a description again and quotes the two entry rates by interpolation from `rates.ts`; `/faqs` has a title that says what the questions are about; the shared FAQ list gained two questions (one-off jobs, the 24-hour line) and lost the answer that sent a reader with fewer than five sites to "call trades directly".
+
+The `/locations/...` and `/sectors/...` routes planned in the table above are superseded for London by `/london/...`. The other cities stay on hold for the reason already given: no page without local evidence.
+
+## Rules these pages are held to
+
+`tests/seo-london-pages.test.mjs` enforces each of these.
+
+- Title plus the template's suffix: at most 60 characters. Description: 110 to 160.
+- Titles, H1s and descriptions are unique across the seventeen pages.
+- Only the public telephone number appears anywhere under `app/(marketing)`.
+- No "approved", "authorised", "nominated", "accredited" or "preferred" contractor claim.
+- No promised arrival time.
+- Every page says the work is done by independent contractors and who the page is for.
+- A photograph's alt text describes the photograph, and never names a centre the picture is not of.
+- Every internal link lands on a page that exists; the hub reaches all sixteen.
+
+## Not done here, and why
+
+- **No Google Business Profile, Search Console, directory or social changes.** They need the owner's own sign-in.
+- **No `sameAs`.** The owner has LinkedIn, Facebook and TikTok pages; the URLs have not been supplied.
+- **No prices for one-off jobs.** The owner chose "quoted per job". Competitors that publish an hourly rate and a call-out fee are named in the October 2026 research, and price words are heavily typed ("day rate london", "cost", "rates"), so this is the first thing to revisit.
+- **No review or accreditation claims.** None has been supplied.
+- **The enquiry form has no field for describing a job.** The London pages use a telephone link and an email link with a subject line instead. A "what do you need?" field needs a column and a migration.

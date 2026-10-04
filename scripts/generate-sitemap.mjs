@@ -62,6 +62,29 @@ const ROUTES = [
   { path: "/privacy",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/privacy/page.tsx", "app/(marketing)/_components"] },
   { path: "/terms",       changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/terms/page.tsx", "app/(marketing)/_components"] },
   { path: "/cookies",     changefreq: "yearly",  priority: "0.3", sources: ["app/(marketing)/cookies/page.tsx", "app/(marketing)/_components"] },
+  /* The London pages. Each route file is a few lines; what the page says is in
+     `_landing/`, so that folder is part of what every one of them is made of —
+     and an edit to one page's words re-dates all seventeen, which is the honest
+     cost of keeping them in two files rather than seventeen. The order is the
+     owner's: the hub, the services, the three priority centres, then North,
+     East, West and South. */
+  { path: "/london", changefreq: "monthly", priority: "0.9", sources: ["app/(marketing)/london/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/emergency-repairs", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/emergency-repairs/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/kiosk-installation", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/kiosk-installation/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/shop-strip-out", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/shop-strip-out/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/shop-fit-out", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/shop-fit-out/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/commercial-electrician", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/commercial-electrician/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/commercial-handyman", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/commercial-handyman/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/commercial-painters-decorators", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/commercial-painters-decorators/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/commercial-carpentry", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/commercial-carpentry/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/shop-maintenance", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/shop-maintenance/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/westfield-stratford-city", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/westfield-stratford-city/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/westfield-london-white-city", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/westfield-london-white-city/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/brent-cross", changefreq: "monthly", priority: "0.8", sources: ["app/(marketing)/london/brent-cross/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/north-london", changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/london/north-london/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/east-london", changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/london/east-london/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/west-london", changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/london/west-london/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
+  { path: "/london/south-london", changefreq: "monthly", priority: "0.7", sources: ["app/(marketing)/london/south-london/page.tsx", "app/(marketing)/_landing", "app/(marketing)/_components"] },
 ];
 
 /**

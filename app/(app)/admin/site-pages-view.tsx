@@ -400,6 +400,8 @@ export function SitePagesView() {
                   <td>
                     {page.words === "fixed" ? (
                       "Legal notice"
+                    ) : page.words === "build" ? (
+                      "Site build"
                     ) : (
                       <a href="/admin/copy">
                         {page.words === "copy" ? "Website copy" : "Website copy · Home page"}
