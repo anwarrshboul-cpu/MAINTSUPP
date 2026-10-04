@@ -379,8 +379,10 @@ test("the strip removes nothing: six cards, and one control that is new", async 
      * is that all six meters still render in both pinned states, and there are
      * still six. The label changed because the old one averaged the TARGETS on
      * the rows and measured nothing about performance — dashboard brief §4.4.
+     * Re-pointed again 2026-10-04 (owner audit): "Closed on time", because the
+     * Overview's "SLA met" measures open jobs and the two read as conflicting.
      */
-    "SLA met",
+    "Closed on time",
   ]) {
     assert.ok(section.includes(`label="${label}"`), `${label} must still be one of the meters`);
   }

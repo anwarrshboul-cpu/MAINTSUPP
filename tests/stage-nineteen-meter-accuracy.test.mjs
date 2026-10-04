@@ -604,7 +604,10 @@ test("no meter sniffs a status for a substring any more", async () => {
    */
   assert.match(
     board,
-    /label="SLA met"[\s\S]{0,320}\$\{jobAnalytics\.sla\.metSample\} closed job\$\{jobAnalytics\.sla\.metSample === 1 \? "" : "s"\} with a due date/,
+    /* Re-pointed 2026-10-04 (owner audit): renamed "Closed on time" — the
+       Overview's "SLA met" measures OPEN jobs within target, and two different
+       measures under one name read as a contradiction (97% beside 100%). */
+    /label="Closed on time"[\s\S]{0,320}\$\{jobAnalytics\.sla\.metSample\} closed job\$\{jobAnalytics\.sla\.metSample === 1 \? "" : "s"\} with a due date/,
   );
   assert.match(
     board,

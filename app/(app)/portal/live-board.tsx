@@ -784,6 +784,7 @@ export function LiveMaintenanceBoard({
     () =>
       requests.filter(
         (request) =>
+          !request.archived && /* archived lives in Account → Archive (audit 2026-10-04) */
           (placementsLoaded ? placement.has(request.id) : !loadingBoard) &&
           (portfolio === "all" ||
             request.siteId === portfolio ||
@@ -3231,7 +3232,7 @@ export function LiveMaintenanceBoard({
             as one that never missed. `slaMet` in dashboard-meters.ts answers the
             performance question instead; a dash when no closed job in view
             carries a due date, because that is not the same fact as 0%. */}
-        <AnalyticsMetricCard label="SLA met" value={jobAnalytics.sla.metPercent === null ? "—" : `${jobAnalytics.sla.metPercent}%`} detail={jobAnalytics.sla.metSample ? `${jobAnalytics.sla.metSample} closed job${jobAnalytics.sla.metSample === 1 ? "" : "s"} with a due date` : "No closed job in view carries a due date"} icon="clock" tone="blue" trend={jobAnalytics.sla.trend} trendLabel={jobMeterTrendLabels.sla} />
+        <AnalyticsMetricCard label="Closed on time" value={jobAnalytics.sla.metPercent === null ? "—" : `${jobAnalytics.sla.metPercent}%`} detail={jobAnalytics.sla.metSample ? `${jobAnalytics.sla.metSample} closed job${jobAnalytics.sla.metSample === 1 ? "" : "s"} with a due date` : "No closed job in view carries a due date"} icon="clock" tone="blue" trend={jobAnalytics.sla.trend} trendLabel={jobMeterTrendLabels.sla} />
         <JobsMeterToggle collapsed={meters.collapsed} onToggle={meters.toggle} />
       </section>
       )}
