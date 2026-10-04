@@ -86,7 +86,10 @@ export function jobChipStyle(value: string | null | undefined): JobChipStyle {
  * would put the same work in three colours on one screen.
  */
 function statusKey(value: string | null | undefined): string {
-  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  /* Every dash is one dash (audit, 2026-10-04): the seeded map says "Blocked –
+     Awaiting Response" with an en dash and monday writes a hyphen, so 32 jobs
+     drew grey under an "unmapped status" warning for a status that IS mapped. */
+  return (value ?? "").trim().toLowerCase().replace(/[‐-―−]/g, "-").replace(/\s+/g, " ");
 }
 
 /** Index a mapping list once, for repeated lookups while drawing a month. */
