@@ -56,13 +56,12 @@ test("the live site shows calm text, not an error wall, where a tool is off by d
   assert.match(register, /if \(owner\?\.startsWith\("contractor-link:"\)\) return "Contractor \(job link\)";/);
 });
 
-test("the hourly trigger has a key of its own that opens the reminders endpoint only", async () => {
+test("reminders run on the daily check only — no separate hourly key (owner, 2026-10-04)", async () => {
+  /* The cadence is the agreed 90/60/30/14/7/0/overdue ladder, checked once a
+     day; an hourly scheduler and its key were withdrawn the same afternoon. */
   const route = await read("app/api/cron/reminders/route.ts");
-  assert.match(route, /const expected = process\.env\.REMINDER_TRIGGER_SECRET\?\.trim\(\) \?\? "";\s*if \(expected\.length < 32\) return false;/, "an unset or short key never matches");
-  assert.match(route, /triggerKeyMatches\(request\)\s*\? null\s*: authoriseCron\(request, "reminders", await resolveCronSecret\(\)\)/);
-  for (const other of ["app/api/cron/daily/route.ts", "app/api/cron/retention/route.ts"]) {
-    assert.doesNotMatch(await read(other), /REMINDER_TRIGGER_SECRET/, `${other} must not accept the reminders key`);
-  }
+  assert.doesNotMatch(route, /REMINDER_TRIGGER_SECRET/);
+  assert.match(route, /const refusal = authoriseCron\(request, "reminders", await resolveCronSecret\(\)\);/);
 });
 
 test("reminder recipients: Client contact and calendar certificates resolve", async () => {

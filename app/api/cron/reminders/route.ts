@@ -56,7 +56,7 @@ import {
   sites,
   users,
 } from "../../../../db/schema";
-import { authoriseCron, resolveCronSecret, secretMatches } from "../../../lib/cron-auth";
+import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
 import { emailDeliveryStatus, sendNotification } from "../../../lib/notifications";
 import type { RecipientContext, RecipientPerson } from "../../../lib/reminders/recipients";
 import { resolveRecipients } from "../../../lib/reminders/recipients";
@@ -566,23 +566,8 @@ export async function dispatchDueRemindersDaily() {
   return runDispatch(new Date().toISOString());
 }
 
-/**
- * THE HOURLY TRIGGER'S OWN KEY (2026-10-04). Production is called hourly by a
- * Supabase pg_cron job (see docs/REMINDERS-HOURLY.md) holding
- * REMINDER_TRIGGER_SECRET — a key that opens this endpoint and nothing else,
- * so the scheduler never holds CRON_SECRET, which also opens retention and the
- * daily run. Either key is accepted; an unset key never matches.
- */
-function triggerKeyMatches(request: Request) {
-  const expected = process.env.REMINDER_TRIGGER_SECRET?.trim() ?? "";
-  if (expected.length < 32) return false;
-  return secretMatches(request.headers.get("x-cron-secret") ?? "", expected);
-}
-
 export async function POST(request: Request) {
-  const refusal = triggerKeyMatches(request)
-    ? null
-    : authoriseCron(request, "reminders", await resolveCronSecret());
+  const refusal = authoriseCron(request, "reminders", await resolveCronSecret());
   if (refusal) return refusal;
   try {
     const outcome = await runDispatch(new Date().toISOString());
