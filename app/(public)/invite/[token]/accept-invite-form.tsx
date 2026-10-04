@@ -97,14 +97,14 @@ export default function AcceptInviteForm({
 
       // Full navigation: a session cookie has just been issued and the whole
       // dashboard has to be rendered with it.
-      /* On a phone, the next step is the app (2026-10-04): the install page,
-         which then opens the portal signed in. Already inside the installed
-         app, or on a computer, straight to the dashboard as before. */
-      const onPhone = /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+      /* ONE BUTTON, BOTH STEPS (owner, 2026-10-04): the invitation's single
+         "Accept & download the app" lands everyone on the app page — install steps
+         on a phone, a QR code and "Open the client portal" on a computer.
+         Already inside the installed app, straight to the dashboard. */
       const installed =
         window.matchMedia?.("(display-mode: standalone)").matches ||
         (navigator as Navigator & { standalone?: boolean }).standalone === true;
-      window.location.assign(onPhone && !installed ? "/app?welcome=1" : (payload.redirectTo ?? "/dashboard"));
+      window.location.assign(installed ? (payload.redirectTo ?? "/dashboard") : "/app?welcome=1");
     } catch {
       setError("Could not reach the server. Check your connection and try again.");
       setPending(false);
@@ -192,7 +192,7 @@ export default function AcceptInviteForm({
       />
 
       <button className="invite__submit" type="submit" disabled={pending || !hydrated}>
-        {pending ? "Setting up…" : "Accept invitation"}
+        {pending ? "Setting up…" : "Accept & download the app"}
       </button>
     </form>
   );

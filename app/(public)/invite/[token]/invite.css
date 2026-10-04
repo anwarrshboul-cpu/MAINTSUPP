@@ -63,6 +63,24 @@
   color: #b8c8ce;
 }
 
+.invite__app {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(18, 180, 168, 0.55);
+  border-radius: 12px;
+  background: rgba(18, 180, 168, 0.12);
+  color: #d8eef0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.invite__app strong {
+  color: #f5fafc;
+  font-size: 14px;
+}
+
 .invite__facts {
   display: grid;
   grid-template-columns: auto 1fr;

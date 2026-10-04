@@ -168,6 +168,7 @@ export default function AppHome() {
   const [pointer, setPointer] = useState(true);
   const [copied, setCopied] = useState(false);
   const [installed, setInstalled] = useState(false);
+  const [welcome, setWelcome] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
   const [saved, setSaved] = useState<SavedJob[]>([]);
   const [live, setLive] = useState<Record<string, LiveJob>>({});
@@ -184,6 +185,8 @@ export default function AppHome() {
     setInApp(detectInAppBrowser());
     setInstalled(detectInstalled());
     setSaved(readSavedJobs());
+    /* Arrived straight from accepting an invitation (owner, 2026-10-04). */
+    setWelcome(new URL(window.location.href).searchParams.get("welcome") === "1");
     setReady(true);
     /* eslint-enable react-hooks/set-state-in-effect */
     const onPrompt = (event: Event) => {
@@ -614,6 +617,11 @@ export default function AppHome() {
       ) : (
         <>
           <section className="mapp__hero">
+            {welcome ? (
+              <p className="mapp__welcome">
+                You&rsquo;re in &mdash; your account is ready. One last step: add the app to your phone.
+              </p>
+            ) : null}
             <h1>Get the MAINTSUPP app</h1>
             <p>Free. No app store. Report and follow jobs, with alerts on your phone.</p>
           </section>

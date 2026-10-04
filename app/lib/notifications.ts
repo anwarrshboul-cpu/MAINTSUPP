@@ -906,9 +906,6 @@ export function invitationEmailTemplate(invite: {
 }) {
   const workspace = escapeHtml(invite.workspaceName);
   const url = escapeHtml(invite.inviteUrl);
-  /* The app is installed from the portal's own /app page (2026-10-04): every
-     invitation now carries it, because the phone is where alerts land. */
-  const appUrl = escapeHtml(appLinkFor(invite.inviteUrl));
   const expires = formatExpiry(invite.expiresAt);
   const inviter = invite.inviterName?.trim() || null;
   const lead = inviter
@@ -916,35 +913,44 @@ export function invitationEmailTemplate(invite: {
     : `You have been invited to join <strong>${workspace}</strong> on MAINTSUPP.`;
   const note = invite.message?.trim() || null;
 
+  /*
+   * THE APP IS THE HEADLINE (owner, 2026-10-04). An invitation is the one
+   * moment everybody is guaranteed to read, and the phone is where jobs and
+   * alerts land — so the email leads with the app and has ONE button that
+   * does both steps: set a password, then install. No second link to choose.
+   */
+  const step = (n: number, text: string) =>
+    `<tr><td style="padding:6px 12px 6px 0;vertical-align:top"><span style="display:inline-block;width:24px;height:24px;border-radius:12px;background:#12B4A8;color:#06221f;font-size:13px;font-weight:800;text-align:center;line-height:24px">${n}</span></td><td style="padding:6px 0;font-size:14px;line-height:1.5">${text}</td></tr>`;
   const html = SHELL(
-    `Join ${workspace}`,
+    "Get the MAINTSUPP app",
     `<p style="font-size:14px;line-height:1.55;margin:0 0 14px">${lead}</p>
-     <table style="border-collapse:collapse;margin:0 0 14px">
-       ${row("Workspace", invite.workspaceName)}
-       ${row("Your role", invite.roleLabel)}
-       ${row("Link expires", expires)}
+     <p style="font-size:16px;line-height:1.5;margin:0 0 6px;font-weight:700">Your jobs, updates and alerts — in the MAINTSUPP app on your phone.</p>
+     <p style="font-size:13px;line-height:1.5;margin:0 0 16px;color:#4b5a63">Free, and no App Store or Google Play needed.</p>
+     <p style="margin:6px 0 18px;text-align:center">
+       <a href="${url}" style="display:inline-block;padding:16px 30px;border-radius:12px;background:#12B4A8;color:#06221f;font-size:17px;font-weight:800;text-decoration:none">Accept &amp; download the app</a>
+     </p>
+     <table style="border-collapse:collapse;margin:0 0 16px">
+       ${step(1, "Tap <strong>Accept &amp; download the app</strong> — ideally on your phone.")}
+       ${step(2, "Set your password (or sign in, if you already have a MAINTSUPP account).")}
+       ${step(3, "Add MAINTSUPP to your home screen: tap <strong>Install</strong> on Android, or <strong>Share → Add to Home Screen</strong> on iPhone. On a computer you will see a code to scan with your phone.")}
      </table>
      ${
        note
          ? `<p style="font-size:14px;line-height:1.55;margin:0 0 14px;padding:10px 12px;border-left:3px solid #12B4A8;background:#f3faf9">${escapeHtml(note)}</p>`
          : ""
      }
-     <p style="margin:20px 0">
-       <a href="${url}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#12B4A8;color:#06221f;font-size:15px;font-weight:700;text-decoration:none">Accept invitation</a>
-     </p>
+     <table style="border-collapse:collapse;margin:0 0 14px">
+       ${row("Workspace", invite.workspaceName)}
+       ${row("Your role", invite.roleLabel)}
+       ${row("Link expires", expires)}
+     </table>
      <p style="font-size:12px;line-height:1.5;color:#6b7a83;margin:0 0 10px">
-       If the button does not work, copy this link into your browser:<br>
+       If the button does not work, copy this link into your phone's browser:<br>
        <span style="word-break:break-all">${url}</span>
      </p>
-     <div style="margin:18px 0;padding:14px 16px;border:1px solid #d6e7e5;border-radius:10px;background:#f3faf9">
-       <p style="font-size:14px;font-weight:700;margin:0 0 6px">Then get the MAINTSUPP app</p>
-       <p style="font-size:13px;line-height:1.5;margin:0 0 10px">Jobs, updates and alerts on your phone — no App Store or Google Play. Open this on your phone and add it to your home screen:</p>
-       <a href="${appUrl}" style="display:inline-block;padding:10px 18px;border-radius:8px;border:1px solid #12B4A8;color:#0b6f68;font-size:14px;font-weight:700;text-decoration:none">Download the app</a>
-     </div>
      <p style="font-size:12px;line-height:1.5;color:#6b7a83;margin:0">
-       The link works once and expires on ${escapeHtml(expires)}. You will choose your own
-       password when you open it. If you were not expecting this invitation you can
-       ignore this email — nothing happens unless the link is used.
+       The link works once and expires on ${escapeHtml(expires)}. If you were not expecting
+       this invitation you can ignore this email — nothing happens unless the link is used.
      </p>`,
   );
 
@@ -958,30 +964,20 @@ export function invitationEmailTemplate(invite: {
     `Link expires: ${expires}`,
     ...(note ? ["", note] : []),
     "",
-    "Accept the invitation:",
-    invite.inviteUrl,
+    "Get the MAINTSUPP app — your jobs, updates and alerts on your phone (free, no App Store needed).",
     "",
-    "Then get the MAINTSUPP app on your phone (no App Store needed):",
-    appLinkFor(invite.inviteUrl),
+    "Accept & download the app (open this on your phone):",
+    invite.inviteUrl,
     "",
     "The link works once. You will choose your own password when you open it.",
     "If you were not expecting this invitation you can ignore this email.",
   ].join("\n");
 
   return {
-    subject: `You're invited to join ${invite.workspaceName} on MAINTSUPP`,
+    subject: `You're invited to join ${invite.workspaceName} — get the MAINTSUPP app`,
     body: html,
     text,
   };
-}
-
-/** The /app install page on the same site as the invitation link. */
-function appLinkFor(inviteUrl: string) {
-  try {
-    return new URL("/app", inviteUrl).toString();
-  } catch {
-    return "https://maintsupp.com/app";
-  }
 }
 
 /** "23 Sept 2026", in UK time — the same day the invite page shows. */
