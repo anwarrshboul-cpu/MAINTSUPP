@@ -160,6 +160,9 @@ export async function POST(request: Request) {
     // ours. Never reflected back unsanitised — see `safeRedirectPath`.
     redirectTo: safeRedirectPath(payload.next),
   });
-  response.headers.append("Set-Cookie", sessionCookie(token, request));
+  response.headers.append(
+    "Set-Cookie",
+    sessionCookie(token, request, { remember: payload.remember !== false }),
+  );
   return response;
 }

@@ -183,9 +183,22 @@ function isSecureRequest(request: Request) {
  * sign-in appear to succeed and then silently do nothing. Conditioning it on
  * the scheme keeps production strict without making localhost unusable.
  */
-export function sessionCookie(token: string, request: Request) {
-  const maxAge = Math.floor(ABSOLUTE_LIFETIME_MS / 1000);
+export function sessionCookie(
+  token: string,
+  request: Request,
+  options: { remember?: boolean } = {},
+) {
   const secure = isSecureRequest(request) ? "; Secure" : "";
+  /*
+   * "KEEP ME SIGNED IN" (on by default). Unticked, the cookie carries no
+   * Max-Age and the browser drops it when it closes — the right choice on a
+   * shared computer. The server-side session keeps its own idle and absolute
+   * limits either way; this only decides whether the browser remembers it.
+   */
+  if (options.remember === false) {
+    return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax${secure}`;
+  }
+  const maxAge = Math.floor(ABSOLUTE_LIFETIME_MS / 1000);
   return `${SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
 }
 

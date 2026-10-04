@@ -1,3 +1,4 @@
+import { anonymousRefusal } from "../../../../lib/tenant-db";
 import { ensureDatabase } from "../../../../../db/init";
 import { getDb } from "../../../../../db";
 import { passkeys } from "../../../../../db/schema";
@@ -81,7 +82,8 @@ async function handlePOST(request: Request) {
       request,
     }).catch(() => {});
     return Response.json({ ok: true, name });
-  } catch {
+  } catch (failure) {
+    void failure;
     return Response.json({ error: "Face ID could not be set up right now. Try again." }, { status: 400 });
   }
 }
@@ -92,7 +94,10 @@ export async function POST(request: Request) {
   try {
     await ensureDatabase();
     return await handlePOST(request);
-  } catch {
+  } catch (error) {
+    /* An ended session is a sign-in prompt, not an outage. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     return Response.json(
       { error: "Sign-in with Face ID is unavailable right now. Use your password." },
       { status: 503 },

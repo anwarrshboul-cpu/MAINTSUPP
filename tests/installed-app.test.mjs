@@ -59,3 +59,35 @@ test("a contractor subscribes only through a job link that still opens", async (
   const route = await read("app/api/push/route.ts");
   assert.match(route, /const scope = await resolveJobToken\(db, token\);\s*if \(!scope\) continue;/);
 });
+
+test("an alert while the app is open plays the MAINTSUPP sound, and respects mute", async () => {
+  const sw = await read("public/sw.js");
+  assert.match(sw, /client\.postMessage\(\{ type: "maintsupp-alert" \}\)/);
+  const register = await read("app/pwa-register.tsx");
+  assert.match(register, /new Audio\("\/assets\/sounds\/maintsupp-notification\.mp3"\)/);
+  assert.match(register, /"maintsupp:chime:muted"/, "the portal bell's mute switch is honoured");
+  await readFile(new URL("../public/assets/sounds/maintsupp-notification.mp3", import.meta.url));
+});
+
+test("alerts are on by default once a phone has allowed them, off only by choice", async () => {
+  const client = await read("app/lib/push-client.ts");
+  assert.match(client, /if \(alertSupport\(\) !== "ready" \|\| alertsTurnedOff\(\)\) return false;\s*if \(Notification\.permission !== "granted"\) return false;/);
+  const prompt = await read("app/(app)/portal/alerts-prompt.tsx");
+  assert.match(prompt, /await keepAlertsOn\(\);/);
+  const page = await read("app/(app)/dashboard/[[...section]]/page.tsx");
+  assert.match(page, /<AlertsPrompt \/>/);
+});
+
+test("Keep me signed in is on by default and only ever shortens the cookie", async () => {
+  const session = await read("app/lib/auth-session.ts");
+  assert.match(session, /if \(options\.remember === false\) \{\s*return `\$\{SESSION_COOKIE\}=\$\{encodeURIComponent\(token\)\}; Path=\/; HttpOnly; SameSite=Lax\$\{secure\}`;/);
+  const form = await read("app/(app)/login/sign-in-form.tsx");
+  assert.match(form, /const \[remember, setRemember\] = useState\(true\);/);
+  assert.doesNotMatch(form, /localStorage\.setItem\([^)]*password/i, "the password is never remembered");
+});
+
+test("inside WhatsApp and similar, the install page offers to open a real browser", async () => {
+  const page = await read("app/(public)/app/app-home.tsx");
+  assert.match(page, /\[\/WhatsApp\/i, "WhatsApp"\]/);
+  assert.match(page, /intent:\/\/maintsupp\.com\/app#Intent;scheme=https;package=com\.android\.chrome;end/);
+});

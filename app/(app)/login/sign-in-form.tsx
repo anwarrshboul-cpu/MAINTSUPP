@@ -28,8 +28,12 @@ import { useHydrated } from "../../lib/use-hydrated";
  *     site; trusting the unsanitised one here would reintroduce the open
  *     redirect that `safeRedirectPath` exists to prevent.
  */
+const REMEMBERED_EMAIL = "maintsupp:sign-in-email";
+
 export default function SignInForm({ next }: { next: string }) {
   const [email, setEmail] = useState("");
+  /* "Keep me signed in" — on by default; see `sessionCookie`. */
+  const [remember, setRemember] = useState(true);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -43,6 +47,15 @@ export default function SignInForm({ next }: { next: string }) {
   const [unlock, setUnlock] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
+    /* The address this browser signed in with last time, when it was asked
+       to remember — one less thing to type. Never the password. */
+    try {
+      const saved = window.localStorage.getItem(REMEMBERED_EMAIL);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser storage only exists after mount
+      if (saved) setEmail(saved);
+    } catch {
+      /* Storage refused: nothing to prefill. */
+    }
     void deviceUnlockAvailable().then((available) => {
       if (active && available) setUnlock(unlockLabel());
     });
@@ -56,7 +69,7 @@ export default function SignInForm({ next }: { next: string }) {
     setPending(true);
     setError(null);
     try {
-      window.location.assign(await signInWithThisDevice(next));
+      window.location.assign(await signInWithThisDevice(next, remember));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Face ID sign-in didn't work.");
       setPending(false);
@@ -73,7 +86,7 @@ export default function SignInForm({ next }: { next: string }) {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password, next }),
+        body: JSON.stringify({ email, password, next, remember }),
       });
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -85,6 +98,13 @@ export default function SignInForm({ next }: { next: string }) {
         setPassword("");
         setPending(false);
         return;
+      }
+
+      try {
+        if (remember) window.localStorage.setItem(REMEMBERED_EMAIL, email.trim());
+        else window.localStorage.removeItem(REMEMBERED_EMAIL);
+      } catch {
+        /* Storage refused: the address is simply not remembered. */
       }
 
       // A full navigation rather than a client-side route change: the session
@@ -139,6 +159,16 @@ export default function SignInForm({ next }: { next: string }) {
           onChange={(event) => setPassword(event.target.value)}
         />
       </div>
+
+      <label className="login-form__remember">
+        <input
+          type="checkbox"
+          checked={remember}
+          disabled={pending}
+          onChange={(event) => setRemember(event.target.checked)}
+        />
+        Keep me signed in
+      </label>
 
       <button className="login-form__submit" type="submit" disabled={pending || !hydrated}>
         {pending ? "Signing in…" : "Sign in"}

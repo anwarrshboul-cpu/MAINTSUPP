@@ -10,6 +10,7 @@ import {
   tokenFromLink,
   type SavedJob,
 } from "../../lib/saved-jobs";
+import { keepAlertsOn, sendTestAlert, turnOffAlerts, turnOnAlerts } from "../../lib/push-client";
 
 /**
  * The MAINTSUPP app's front door — see ./page.tsx for what this page is.
@@ -64,18 +65,39 @@ function detectPlatform(): Platform {
   return "desktop";
 }
 
+/**
+ * The app a link was opened INSIDE, when it was — WhatsApp, Instagram,
+ * Facebook, LinkedIn and the rest open links in their own built-in browser,
+ * where nothing can be installed. That is the commonest reason "install"
+ * seems not to work, so it is detected and answered with one button.
+ */
+function detectInAppBrowser(): string | null {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent;
+  const known: Array<[RegExp, string]> = [
+    [/WhatsApp/i, "WhatsApp"],
+    [/Instagram/i, "Instagram"],
+    [/FBAN|FBAV|FB_IAB|FBIOS/i, "Facebook"],
+    [/Messenger/i, "Messenger"],
+    [/LinkedInApp/i, "LinkedIn"],
+    [/Snapchat/i, "Snapchat"],
+    [/musical_ly|TikTok|BytedanceWebview/i, "TikTok"],
+    [/\bLine\//i, "LINE"],
+    [/GSA\//i, "the Google app"],
+    [/Twitter/i, "X"],
+  ];
+  for (const [pattern, name] of known) if (pattern.test(ua)) return name;
+  /* Android's generic in-app browser: a WebView marks itself "; wv)". */
+  if (/Android/.test(ua) && /; wv\)/.test(ua)) return "this app";
+  return null;
+}
+
 function detectInstalled(): boolean {
   if (typeof window === "undefined") return false;
   return (
     window.matchMedia?.("(display-mode: standalone)").matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   );
-}
-
-function urlKey(base64: string) {
-  const padded = base64.replace(/-/g, "+").replace(/_/g, "/");
-  const raw = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(raw, (char) => char.charCodeAt(0));
 }
 
 /* ── The brand ───────────────────────────────────────────────────────────── */
@@ -141,6 +163,10 @@ export default function AppHome() {
      them during render would be a hydration mismatch. */
   const [ready, setReady] = useState(false);
   const [platform, setPlatform] = useState<Platform>("desktop");
+  const [inApp, setInApp] = useState<string | null>(null);
+  /* The iPhone pointer, until it is dismissed. */
+  const [pointer, setPointer] = useState(true);
+  const [copied, setCopied] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
   const [saved, setSaved] = useState<SavedJob[]>([]);
@@ -155,6 +181,7 @@ export default function AppHome() {
        that only exist in the browser is the external synchronisation an effect
        is for; there is no render-time source for any of them. */
     setPlatform(detectPlatform());
+    setInApp(detectInAppBrowser());
     setInstalled(detectInstalled());
     setSaved(readSavedJobs());
     setReady(true);
@@ -174,6 +201,13 @@ export default function AppHome() {
       window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
+
+  /* The iPhone pointer has done its job after a few seconds. */
+  useEffect(() => {
+    if (!pointer) return;
+    const timer = window.setTimeout(() => setPointer(false), 12000);
+    return () => window.clearTimeout(timer);
+  }, [pointer]);
 
   /* A notification for a contractor names the job, never its link: find it. */
   useEffect(() => {
@@ -285,7 +319,10 @@ export default function AppHome() {
         tellServer(existing)
           .then((note) => active && setPushNote(note))
           .catch(() => {});
-      } else {
+      } else if (await keepAlertsOn(readSavedJobs().map((job) => job.token))) {
+        /* Allowed before and not switched off: on by default, no tap. */
+        if (active) setPush("on");
+      } else if (active) {
         setPush("off");
       }
     })();
@@ -294,44 +331,28 @@ export default function AppHome() {
     };
   }, [ready, platform, installed, subscriptionNow, tellServer]);
 
+  /* The same switch the portal's banner and Account use (app/lib/push-client.ts),
+     so "off" chosen anywhere stays off everywhere on this phone. */
   async function enableAlerts() {
     setPush("working");
     setPushNote(null);
     try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        setPush(permission === "denied" ? "blocked" : "off");
-        return;
-      }
-      const config = (await (await fetch("/api/push")).json()) as { publicKey: string | null };
-      if (!config.publicKey) throw new Error("Notifications are not set up yet.");
-      const registration = await navigator.serviceWorker.ready;
-      const subscription =
-        (await registration.pushManager.getSubscription()) ??
-        (await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlKey(config.publicKey),
-        }));
-      setPushNote(await tellServer(subscription));
+      const result = await turnOnAlerts(readSavedJobs().map((job) => job.token));
+      const parts: string[] = [];
+      if (result.account) parts.push("your workspace");
+      if (result.jobs) parts.push(`${result.jobs} job${result.jobs === 1 ? "" : "s"}`);
+      setPushNote(parts.length ? `Alerts on for ${parts.join(" and ")}.` : "Alerts on.");
       setPush("on");
     } catch (caught) {
       setPushNote(caught instanceof Error ? caught.message : "Alerts could not be switched on.");
-      setPush("off");
+      setPush(Notification.permission === "denied" ? "blocked" : "off");
     }
   }
 
   async function disableAlerts() {
     setPush("working");
     try {
-      const subscription = await subscriptionNow();
-      if (subscription) {
-        await fetch("/api/push", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint: subscription.endpoint }),
-        });
-        await subscription.unsubscribe();
-      }
+      await turnOffAlerts();
       setPushNote("Alerts are off on this phone.");
     } finally {
       setPush("off");
@@ -339,14 +360,8 @@ export default function AppHome() {
   }
 
   async function testAlert() {
-    const subscription = await subscriptionNow().catch(() => null);
-    if (!subscription) return;
-    const response = await fetch("/api/push?test=1", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subscription: subscription.toJSON() }),
-    });
-    setPushNote(response.ok ? "Test sent — it should arrive in a few seconds." : "The test could not be sent.");
+    const sent = await sendTestAlert().catch(() => false);
+    setPushNote(sent ? "Test sent — it should arrive in a few seconds." : "The test could not be sent.");
   }
 
   /* ── Jobs ──────────────────────────────────────────────────────────────── */
@@ -393,6 +408,21 @@ export default function AppHome() {
   function remove(token: string) {
     forgetJob(token);
     setSaved(readSavedJobs());
+  }
+
+  /* Android: an intent link opens this page in Chrome, which can install it. */
+  const chromeIntent =
+    "intent://maintsupp.com/app#Intent;scheme=https;package=com.android.chrome;end";
+  /* iPhone (iOS 17+): this scheme hands the page to Safari from inside an app. */
+  const safariLink = "x-safari-https://maintsupp.com/app";
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(APP_URL);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
   }
 
   async function install() {
@@ -565,60 +595,105 @@ export default function AppHome() {
       ) : (
         <>
           <section className="mapp__hero">
-            <h1>The MAINTSUPP app</h1>
-            <p>
-              Report and follow maintenance jobs from your phone, with alerts when they move. Free, and
-              no app store needed — it installs straight from this page.
-            </p>
+            <h1>Get the MAINTSUPP app</h1>
+            <p>Free. No app store. Report and follow jobs, with alerts on your phone.</p>
           </section>
 
           <section className="mapp__card mapp__install" aria-labelledby="mapp-install">
-            <h2 id="mapp-install">Install it</h2>
-            {platform === "ios" ? (
-              <ol className="mapp__steps">
-                <li>
-                  Open this page in <strong>Safari</strong>.
-                </li>
-                <li>
-                  Tap the <strong>Share</strong> button{" "}
-                  <span className="mapp__glyph" aria-hidden="true">
-                    ⬆︎
-                  </span>{" "}
-                  at the bottom of the screen.
-                </li>
-                <li>
-                  Choose <strong>Add to Home Screen</strong>, then <strong>Add</strong>.
-                </li>
-                <li>Open MAINTSUPP from the new icon and turn on alerts.</li>
-              </ol>
+            {inApp ? (
+              /* Inside WhatsApp & co nothing can be installed: one way out. */
+              <>
+                <h2 id="mapp-install">
+                  Open in {platform === "ios" ? "Safari" : "Chrome"} to install
+                </h2>
+                <p className="mapp__muted">
+                  You opened this inside {inApp}, which can&rsquo;t install apps.
+                </p>
+                <a
+                  className="mapp__btn mapp__btn--big"
+                  href={platform === "ios" ? safariLink : chromeIntent}
+                >
+                  Open in {platform === "ios" ? "Safari" : "Chrome"}
+                </a>
+                <button type="button" className="mapp__btn mapp__btn--ghost" onClick={copyLink}>
+                  {copied ? "Link copied — paste it in your browser" : "Copy the link instead"}
+                </button>
+              </>
+            ) : platform === "ios" ? (
+              /* Apple allows no install button: two taps, shown, not described. */
+              <>
+                <h2 id="mapp-install">Add it in two taps</h2>
+                <ol className="mapp__picsteps">
+                  <li>
+                    <span className="mapp__picicon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3v12" />
+                        <path d="m7 8 5-5 5 5" />
+                        <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+                      </svg>
+                    </span>
+                    <span>
+                      Tap <strong>Share</strong>
+                      <small>at the bottom of Safari (or ⋯ then Share)</small>
+                    </span>
+                  </li>
+                  <li>
+                    <span className="mapp__picicon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="4" />
+                        <path d="M12 8v8" />
+                        <path d="M8 12h8" />
+                      </svg>
+                    </span>
+                    <span>
+                      Tap <strong>Add to Home Screen</strong>
+                      <small>then Add — done</small>
+                    </span>
+                  </li>
+                </ol>
+              </>
             ) : installPrompt ? (
               <>
-                <p className="mapp__muted">One tap — it goes on your home screen like any app.</p>
+                <h2 id="mapp-install">Install in one tap</h2>
                 <button type="button" className="mapp__btn mapp__btn--big" onClick={install}>
                   Install MAINTSUPP
                 </button>
               </>
             ) : platform === "android" ? (
-              <ol className="mapp__steps">
-                <li>
-                  Open this page in <strong>Chrome</strong>.
-                </li>
-                <li>
-                  Tap the <strong>⋮</strong> menu, then <strong>Add to Home screen</strong> or{" "}
-                  <strong>Install app</strong>.
-                </li>
-                <li>Open MAINTSUPP from the new icon and turn on alerts.</li>
-              </ol>
-            ) : (
-              <div className="mapp__desk">
-                <QrCode text={APP_URL} label="QR code that opens maintsupp.com/app" />
+              <>
+                <h2 id="mapp-install">Install in one tap</h2>
                 <p className="mapp__muted">
-                  Scan with your phone&rsquo;s camera to install it there. On this computer, Chrome and
-                  Edge show an install icon in the address bar.
+                  Tap <strong>⋮</strong> at the top of Chrome, then <strong>Install app</strong>.
                 </p>
-              </div>
+              </>
+            ) : (
+              <>
+                <h2 id="mapp-install">Scan to get it on your phone</h2>
+                <div className="mapp__desk">
+                  <QrCode text={APP_URL} label="QR code that opens maintsupp.com/app" />
+                  <p className="mapp__muted">
+                    Point your phone&rsquo;s camera at the code. On this computer, Chrome and Edge show
+                    an install icon in the address bar.
+                  </p>
+                </div>
+              </>
             )}
+            <a className="mapp__skip" href="#mapp-clients">
+              Not now — use it in the browser
+            </a>
           </section>
+
+          {platform === "ios" && !inApp && pointer && (
+            /* Points at Safari's toolbar, where Share is. Decorative and
+               click-through, so it never covers a button; gone after 12s. */
+            <div className="mapp__pointer" aria-hidden="true">
+              <span>Tap Share below</span>
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 4v16" />
+                <path d="m5 13 7 7 7-7" />
+              </svg>
+            </div>
+          )}
 
           {doors}
           {alerts}

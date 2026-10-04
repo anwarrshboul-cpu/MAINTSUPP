@@ -21,12 +21,33 @@ export default function PwaRegister() {
         /* An app that cannot install is still a working website. */
       });
     };
+    /*
+     * An alert arriving while MAINTSUPP is open plays the MAINTSUPP sound —
+     * the same chime and the same mute switch as the portal's bell
+     * (app/(app)/portal/use-notification-chime.ts).
+     */
+    const onMessage = (event: MessageEvent) => {
+      if (!event.data || event.data.type !== "maintsupp-alert") return;
+      try {
+        if (window.localStorage.getItem("maintsupp:chime:muted") === "1") return;
+      } catch {
+        /* No storage: not muted. */
+      }
+      const audio = new Audio("/assets/sounds/maintsupp-notification.mp3");
+      audio.volume = 0.6;
+      audio.play().catch(() => {});
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+
     if (document.readyState === "complete") {
       register();
-      return;
+      return () => navigator.serviceWorker.removeEventListener("message", onMessage);
     }
     window.addEventListener("load", register, { once: true });
-    return () => window.removeEventListener("load", register);
+    return () => {
+      window.removeEventListener("load", register);
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+    };
   }, []);
   return null;
 }

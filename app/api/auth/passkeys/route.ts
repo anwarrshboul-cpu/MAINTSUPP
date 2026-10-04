@@ -1,3 +1,4 @@
+import { anonymousRefusal } from "../../../lib/tenant-db";
 import { ensureDatabase } from "../../../../db/init";
 import { getDb } from "../../../../db";
 import { recordAudit } from "../../../lib/audit";
@@ -53,7 +54,10 @@ export async function GET(request: Request) {
   try {
     await ensureDatabase();
     return await handleGET(request);
-  } catch {
+  } catch (error) {
+    /* An ended session is a sign-in prompt, not an outage. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     return Response.json(
       { error: "Sign-in with Face ID is unavailable right now. Use your password." },
       { status: 503 },
@@ -67,7 +71,10 @@ export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
     return await handleDELETE(request);
-  } catch {
+  } catch (error) {
+    /* An ended session is a sign-in prompt, not an outage. */
+    const refusal = anonymousRefusal(error);
+    if (refusal) return refusal;
     return Response.json(
       { error: "Sign-in with Face ID is unavailable right now. Use your password." },
       { status: 503 },
