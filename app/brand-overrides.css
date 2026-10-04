@@ -5222,7 +5222,8 @@ body[data-theme="dark"] .detail-drawer__body .activity-dot {
 
 .fix-tracker__tabs {
   display: flex;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 4px 18px;
   border-bottom: 1px solid var(--line);
 }
 

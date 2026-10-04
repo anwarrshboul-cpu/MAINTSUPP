@@ -470,7 +470,17 @@ export async function commit(
       group?.stageKey ??
       (completedAt || DONE_STATUSES.has((item.values.status ?? "").trim())
         ? "Completed"
-        : "Incoming");
+        : /*
+           * Open work filed in a group that is not a working stage — On Hold,
+           * or a store's own group — is parked, not newly arrived (owner,
+           * 2026-10-04). Calling it Incoming put 57 such jobs on the Fix
+           * Tracker's Incoming Requests tab beside the 8 that are actually in
+           * the "Incoming requests" group. Only a row with no group at all is
+           * Incoming by default.
+           */
+          group
+          ? "Attention"
+          : "Incoming");
     const fields = {
       title: name,
       description: item.values.description ?? "",
