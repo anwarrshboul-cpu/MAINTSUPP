@@ -43,17 +43,20 @@
  *                             variable is all the setup needs
  *   MONDAY_SYNC_ORGANISATION_ID  defaults to the primary (Sunnamusk) workspace
  */
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../../db";
+import { storeDocumentationCertificates } from "../../db/monday-board-spec";
 import {
   attachments,
   itemUpdates,
+  maintenanceBoardCells,
   maintenanceBoardColumns,
   maintenanceGroupItems,
   maintenanceRequests,
 } from "../../db/schema";
 import { commit, jobTypeMatcher } from "../api/import/route";
 import { kindForColumnKey, reconcileAttachmentCounts } from "./attachment-counts";
+import { dateOnlyValue } from "./expiry-status";
 import { listJobTypes } from "./job-types";
 import { planImport, type ImportBoardKey } from "./monday-import";
 import { notifyPlatformStaff } from "./push-notify";
@@ -126,9 +129,15 @@ export async function mondayQuery<T>(query: string, variables: Record<string, un
 }
 
 type MondayPerson = { name?: string | null; email?: string | null } | null;
-type MondayReply = { id: string; text_body?: string | null; created_at?: string | null; creator?: MondayPerson };
-type MondayUpdate = MondayReply & { updated_at?: string | null; replies?: MondayReply[] | null };
 type MondayAsset = { id: string; name?: string | null; file_size?: number | null; public_url?: string | null };
+type MondayReply = {
+  id: string;
+  text_body?: string | null;
+  created_at?: string | null;
+  creator?: MondayPerson;
+  assets?: MondayAsset[] | null;
+};
+type MondayUpdate = MondayReply & { updated_at?: string | null; replies?: MondayReply[] | null };
 export type MondayItem = {
   id: string;
   name: string;
@@ -150,7 +159,8 @@ const ITEM_FIELDS = `
   assets { id name file_size public_url }
   updates(limit: 100) {
     id text_body created_at updated_at creator { name email }
-    replies { id text_body created_at creator { name email } }
+    assets { id name file_size public_url }
+    replies { id text_body created_at creator { name email } assets { id name file_size public_url } }
   }`;
 
 export async function fetchMondayItems(ids: string[]): Promise<MondayItem[]> {
@@ -239,6 +249,7 @@ export type MondaySyncResult = {
   filesAlreadyHere: number;
   filesPending: number;
   filesSkipped: number;
+  expiryDatesSet: number;
   ignored: number;
 };
 
@@ -317,7 +328,15 @@ async function copyMondayFiles(
   deadline: number,
   result: MondaySyncResult,
 ) {
-  const work: Array<{ requestId: string; siteId: string | null; columnId: string; columnKey: string; asset: MondayAsset }> = [];
+  /* A file on a board column (`columnId`), or on a comment (`updateId`). */
+  const work: Array<{
+    requestId: string;
+    siteId: string | null;
+    columnId: string | null;
+    columnKey: string | null;
+    updateId: string | null;
+    asset: MondayAsset;
+  }> = [];
   const columns = await db
     .select({
       id: maintenanceBoardColumns.id,
@@ -345,7 +364,23 @@ async function copyMondayFiles(
       }
       for (const file of files) {
         const asset = file.assetId != null ? assetById.get(String(file.assetId)) : undefined;
-        if (asset?.name) work.push({ requestId: request.id, siteId: request.siteId, columnId: column.id, columnKey: column.key, asset });
+        if (asset?.name) {
+          work.push({ requestId: request.id, siteId: request.siteId, columnId: column.id, columnKey: column.key, updateId: null, asset });
+        }
+      }
+    }
+    /* Files posted on a comment or a reply belong to that comment. */
+    for (const update of item.updates ?? []) {
+      const comments: Array<[string, MondayAsset[]]> = [
+        [`monday-update-${update.id}`, update.assets ?? []],
+        ...(update.replies ?? []).map((reply): [string, MondayAsset[]] => [`monday-reply-${reply.id}`, reply.assets ?? []]),
+      ];
+      for (const [updateId, assets] of comments) {
+        for (const asset of assets) {
+          if (asset?.name) {
+            work.push({ requestId: request.id, siteId: request.siteId, columnId: null, columnKey: null, updateId, asset });
+          }
+        }
       }
     }
   }
@@ -356,13 +391,17 @@ async function copyMondayFiles(
     .select({
       requestId: attachments.requestId,
       columnId: attachments.boardColumnId,
+      updateId: attachments.updateId,
       name: attachments.originalName,
       size: attachments.byteSize,
     })
     .from(attachments)
     .where(and(eq(attachments.organisationId, orgId), inArray(attachments.requestId, requestIds)));
-  const ledger = new Set(existing.map((row) => `${row.requestId}|${row.columnId}|${row.name}|${row.size}`));
-  const namesHere = new Set(existing.map((row) => `${row.requestId}|${row.columnId}|${row.name}`));
+  /* Where a file sits: its column, or — for a comment's file — the comment. */
+  const slotOf = (row: { columnId: string | null; updateId: string | null }) =>
+    row.updateId ? `update:${row.updateId}` : `column:${row.columnId}`;
+  const ledger = new Set(existing.map((row) => `${row.requestId}|${slotOf(row)}|${row.name}|${row.size}`));
+  const namesHere = new Set(existing.map((row) => `${row.requestId}|${slotOf(row)}|${row.name}`));
 
   const { env } = await import("cloudflare:workers");
   const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
@@ -370,9 +409,10 @@ async function copyMondayFiles(
   for (const entry of work) {
     const name = entry.asset.name as string;
     const size = entry.asset.file_size ?? null;
+    const slot = slotOf(entry);
     const sameFile = size != null
-      ? ledger.has(`${entry.requestId}|${entry.columnId}|${name}|${size}`)
-      : namesHere.has(`${entry.requestId}|${entry.columnId}|${name}`);
+      ? ledger.has(`${entry.requestId}|${slot}|${name}|${size}`)
+      : namesHere.has(`${entry.requestId}|${slot}|${name}`);
     if (sameFile) {
       result.filesAlreadyHere += 1;
       continue;
@@ -397,12 +437,12 @@ async function copyMondayFiles(
     }
     /* Checked again with the real size, so a file monday reported without one
        is not stored twice either. */
-    if (ledger.has(`${entry.requestId}|${entry.columnId}|${name}|${bytes.byteLength}`)) {
+    if (ledger.has(`${entry.requestId}|${slot}|${name}|${bytes.byteLength}`)) {
       result.filesAlreadyHere += 1;
       continue;
     }
     const id = crypto.randomUUID();
-    const kind = kindForColumnKey(entry.columnKey);
+    const kind = entry.columnKey ? kindForColumnKey(entry.columnKey) : "general";
     const cleanName = cleanFileName(name);
     const contentType = contentTypeFor(name, bytes);
     const key = `${orgId}/maintenance/${entry.requestId}/${kind}/${id}-${cleanName}`;
@@ -411,7 +451,8 @@ async function copyMondayFiles(
       customMetadata: {
         requestId: entry.requestId,
         kind,
-        boardColumnId: entry.columnId,
+        ...(entry.columnId ? { boardColumnId: entry.columnId } : {}),
+        ...(entry.updateId ? { updateId: entry.updateId } : {}),
         uploadedBy: "monday.com",
         originalName: name,
         mondayAssetId: String(entry.asset.id),
@@ -424,6 +465,7 @@ async function copyMondayFiles(
       siteId: entry.siteId,
       kind,
       boardColumnId: entry.columnId,
+      updateId: entry.updateId,
       objectKey: key,
       originalName: name,
       contentType,
@@ -432,13 +474,70 @@ async function copyMondayFiles(
       isCurrent: true,
       uploadedByEmail: "monday.com",
     });
-    ledger.add(`${entry.requestId}|${entry.columnId}|${name}|${bytes.byteLength}`);
-    namesHere.add(`${entry.requestId}|${entry.columnId}|${name}`);
+    ledger.add(`${entry.requestId}|${slot}|${name}|${bytes.byteLength}`);
+    namesHere.add(`${entry.requestId}|${slot}|${name}`);
     touched.add(entry.requestId);
     result.files += 1;
   }
   /* Counters recounted from the rows, the way every upload does it. */
   for (const requestId of touched) await reconcileAttachmentCounts(db, orgId, requestId);
+}
+
+/**
+ * CERTIFICATE EXPIRY ON THE FILES (owner, 2026-10-04).
+ *
+ * Each Store Documentation certificate has its expiry in a date column beside
+ * its file column (`storeDocumentationCertificates`). The register reads that
+ * cell; the files themselves carried no date, so the document list showed every
+ * certificate as undated. Every live file in a certificate's column now carries
+ * the date its row holds — the cell as stored here, which is monday's value
+ * after the sync, or a date someone entered in MAINTSUPP where monday has none.
+ * A blank cell clears nothing: a date somebody set on a file by hand stays.
+ */
+async function applyCertificateExpiry(db: Database, orgId: string, requestIds: string[]) {
+  if (!requestIds.length) return 0;
+  const columns = await db
+    .select({ id: maintenanceBoardColumns.id, key: maintenanceBoardColumns.key })
+    .from(maintenanceBoardColumns)
+    .where(and(eq(maintenanceBoardColumns.organisationId, orgId), eq(maintenanceBoardColumns.boardId, "store-documentation")));
+  const columnIdByKey = new Map(columns.map((column) => [column.key, column.id]));
+  const cells = await db
+    .select({ requestId: maintenanceBoardCells.requestId, columnId: maintenanceBoardCells.columnId, value: maintenanceBoardCells.value })
+    .from(maintenanceBoardCells)
+    .where(
+      and(
+        eq(maintenanceBoardCells.organisationId, orgId),
+        eq(maintenanceBoardCells.boardId, "store-documentation"),
+        inArray(maintenanceBoardCells.requestId, requestIds),
+      ),
+    );
+  const cellValue = new Map(cells.map((cell) => [`${cell.requestId}|${cell.columnId}`, cell.value]));
+  let changed = 0;
+  for (const slot of storeDocumentationCertificates) {
+    if (!slot.expiryColumn) continue;
+    const fileColumnId = columnIdByKey.get(slot.fileColumn);
+    const expiryColumnId = columnIdByKey.get(slot.expiryColumn);
+    if (!fileColumnId || !expiryColumnId) continue;
+    for (const requestId of requestIds) {
+      const date = dateOnlyValue(cellValue.get(`${requestId}|${expiryColumnId}`));
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const updated = await db
+        .update(attachments)
+        .set({ expiryDate: date, metadataUpdatedAt: new Date().toISOString(), metadataUpdatedBy: "monday.com" })
+        .where(
+          and(
+            eq(attachments.organisationId, orgId),
+            eq(attachments.requestId, requestId),
+            eq(attachments.boardColumnId, fileColumnId),
+            isNull(attachments.archivedAt),
+            or(isNull(attachments.expiryDate), ne(attachments.expiryDate, date)),
+          ),
+        )
+        .returning({ id: attachments.id });
+      changed += updated.length;
+    }
+  }
+  return changed;
 }
 
 /**
@@ -457,7 +556,7 @@ export async function syncMondayItems(
   const unique = [...new Set(ids.map(String).filter((id) => /^\d{1,20}$/.test(id)))];
   const result: MondaySyncResult = {
     items: 0, created: 0, updated: 0, linked: 0, comments: 0,
-    files: 0, filesAlreadyHere: 0, filesPending: 0, filesSkipped: 0, ignored: 0,
+    files: 0, filesAlreadyHere: 0, filesPending: 0, filesSkipped: 0, expiryDatesSet: 0, ignored: 0,
   };
   if (!unique.length) return result;
 
@@ -530,7 +629,9 @@ export async function syncMondayItems(
     for (const update of item.updates ?? []) {
       const body = cleanBody(update.text_body);
       const replies = update.replies ?? [];
-      if (!body && !replies.length) continue;
+      /* A picture with no caption is still a comment (as the historical
+         import decided): monday shows it as a card that IS the picture. */
+      if (!body && !replies.length && !(update.assets ?? []).length) continue;
       const parentId = `monday-update-${update.id}`;
       const rows = [
         {
@@ -549,8 +650,9 @@ export async function syncMondayItems(
             author: reply.creator,
             createdAt: reply.created_at,
             editedAt: null as string | null,
+            hasFiles: (reply.assets ?? []).length > 0,
           }))
-          .filter((reply) => reply.body),
+          .filter((reply) => reply.body || reply.hasFiles),
       ];
       for (const row of rows) {
         await db
@@ -592,6 +694,16 @@ export async function syncMondayItems(
   }
 
   await copyMondayFiles(db, orgId, items, requestByExternal, started + (options.budgetMs ?? 35_000), result);
+
+  /* After the files, so a certificate copied in this run gets its date too. */
+  result.expiryDatesSet = await applyCertificateExpiry(
+    db,
+    orgId,
+    items
+      .filter((entry) => entry.board.key === "store-documentation")
+      .map((entry) => requestByExternal.get(String(entry.item.id))?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
 
   /* A brand-new maintenance request is worth a tap on the office's phones. */
   const fresh = items
