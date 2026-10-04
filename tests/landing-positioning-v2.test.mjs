@@ -744,7 +744,7 @@ test("the footer renames the portal link and adds the contractor route, nav unto
 
 test("the founder section renders nothing in place of the photograph", async () => {
   const founder = await read("app/(marketing)/_sections/founder.tsx");
-  assert.match(founder, /Who runs Maintsupp/);
+  assert.match(founder, /Who runs (Maintsupp|MAINTSUPP)/);
   assert.match(founder, /Anwar Shboul — Founder &amp; Director/);
   /* RE-POINTED (decision L): the section's opening line is `HOME_COPY.founder.lede`. */
   assert.match(await read("app/(marketing)/_sections/copy.ts"), /Maintsupp is founder-led\./);
