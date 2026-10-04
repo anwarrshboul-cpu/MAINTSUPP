@@ -1,0 +1,89 @@
+.announce {
+  display: grid;
+  gap: 14px;
+}
+
+.announce__audience {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.announce__audience legend {
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.announce__audience label {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.announce__audience label.is-on {
+  border-color: #12b4a8;
+  box-shadow: inset 0 0 0 1px #12b4a8;
+}
+
+.announce__audience input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.announce__audience span {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.announce__field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.announce__field input,
+.announce__field textarea {
+  font: inherit;
+  font-weight: 400;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  background: transparent;
+  color: inherit;
+}
+
+.announce__count {
+  justify-self: end;
+  font-weight: 400;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.announce__error {
+  color: #d9534f;
+}
+
+.announce button[type="submit"] {
+  justify-self: start;
+}
+
+@media (max-width: 640px) {
+  .announce__audience {
+    grid-template-columns: 1fr;
+  }
+
+  .announce button[type="submit"] {
+    justify-self: stretch;
+    min-height: 44px;
+  }
+}

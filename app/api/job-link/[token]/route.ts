@@ -1,4 +1,4 @@
-import { notifyContractorReport } from "../../../lib/push-notify";
+import { notifyContractorCompleted, notifyContractorReport } from "../../../lib/push-notify";
 import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { getDb } from "../../../../db";
@@ -867,7 +867,7 @@ export async function POST(
       await recordContractorHandling(db, scope, by, "completion");
       await recordTokenUse(db, scope.id);
       await notifyCoordinator(db, scope, "completion", by || null, note || null, null);
-      await notifyContractorReport(db, scope.organisationId, scope.requestId, "Work completed — ready to review");
+      await notifyContractorCompleted(db, scope.organisationId, scope.requestId);
       return Response.json({
         ok: true,
         recorded: "completion-requested",
