@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../../components";
 import type { BuilderForm } from "./form-builder-model";
+import FormQrCode from "./form-qr";
 import { useDialogBehaviour } from "./overlay/dialog-behaviour";
 
 /**
@@ -106,6 +107,9 @@ export default function FormShareDialog({
             {copied ? "Copied" : "Copy link"}
           </button>
         </div>
+
+        {/* The same link as a QR code — for a card, a poster or another store. */}
+        <FormQrCode url={form.presentedUrl} title={form.title} />
 
         <section className="form-share__settings">
           <h3>

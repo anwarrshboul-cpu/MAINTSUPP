@@ -653,6 +653,16 @@ export default function FormBuilder({
           <Icon name={copied ? "check" : "share"} size={15} />
           {copied ? "Link copied" : "Share link"}
         </button>
+        {/* The QR code lives in the Share dialog, which the phone strip
+            otherwise has no way to open. */}
+        <button
+          type="button"
+          className="form-builder__mshare-btn"
+          onClick={() => setSharing(true)}
+        >
+          <Icon name="download" size={15} />
+          QR code
+        </button>
       </div>
       )}
 

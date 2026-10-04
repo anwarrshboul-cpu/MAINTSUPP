@@ -20,6 +20,7 @@ import {
   requestIp,
   tooManyAttempts,
 } from "../../../../lib/auth-session";
+import { listRetailSites } from "../../../../lib/sites-repository";
 import { FORM_LOOKUP_MISSES, FORM_SUBMISSIONS } from "../../../../lib/form-throttle";
 import { dispatchAutomationEvents, itemCreatedEvent } from "../../../../lib/automations";
 /*
@@ -365,8 +366,22 @@ export async function POST(request: Request, context: { params: Promise<{ token:
         organisationId: record.organisationId,
         location,
       });
-      if (!matchedSite) return failure("Choose a location from the list.");
-      matchedSiteId = matchedSite.id;
+      if (matchedSite) {
+        matchedSiteId = matchedSite.id;
+      } else {
+        /*
+         * A WORKSPACE WITH NO LOCATIONS ACCEPTS A TYPED ONE.
+         *
+         * Its form asks Location as free text (`formOptionOverrides` sends an
+         * empty list and the projection turns the dropdown into a text box),
+         * so there is nothing to match against and refusing the answer would
+         * make the form impossible to submit. The job keeps the typed location
+         * and no site, exactly as a job whose site is not yet known. Where the
+         * workspace DOES have locations, an unmatched name is still refused.
+         */
+        const estate = await listRetailSites(db, record.organisationId);
+        if (estate.length) return failure("Choose a location from the list.");
+      }
     }
 
     /*
