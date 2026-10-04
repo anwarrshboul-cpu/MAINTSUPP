@@ -34,7 +34,7 @@ export default function PwaRegister() {
         /* No storage: not muted. */
       }
       const audio = new Audio("/assets/sounds/maintsupp-notification.mp3");
-      audio.volume = 0.6;
+      audio.volume = 1; /* Full volume (owner, 2026-10-04): the alert must be heard. */
       audio.play().catch(() => {});
     };
     navigator.serviceWorker.addEventListener("message", onMessage);

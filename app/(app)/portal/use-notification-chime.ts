@@ -18,7 +18,7 @@ export const NOTIFICATION_CHIME_SRC = "/assets/sounds/maintsupp-notification.mp3
 const SEEN_KEY = "maintsupp:chime:seen";
 const MUTED_KEY = "maintsupp:chime:muted";
 const SEEN_LIMIT = 500;
-const CHIME_VOLUME = 0.6;
+const CHIME_VOLUME = 1; // full volume (owner, 2026-10-04)
 
 function readSeen(): string[] | null {
   try {
