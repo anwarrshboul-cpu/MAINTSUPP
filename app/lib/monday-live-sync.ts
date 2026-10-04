@@ -720,6 +720,144 @@ export async function syncMondayItems(
   return result;
 }
 
+/* ── restoring files whose bytes never reached storage ───────────────────── */
+
+export type MondayRepairResult = {
+  items: number;
+  checked: number;
+  present: number;
+  restored: number;
+  notOnMonday: number;
+  tooLarge: number;
+  failed: number;
+  pending: number;
+};
+
+/**
+ * FILES THE DATABASE NAMES BUT STORAGE DOES NOT HOLD (audit, 2026-10-04).
+ *
+ * The historical import wrote 2,970 attachment rows for Sunnamusk while the
+ * bytes stayed in a local bucket, so in Production the rows exist and
+ * `/api/files/<id>` answers 404 for every one. This puts the bytes back:
+ * for each live attachment of these monday items whose object is missing, the
+ * same file is found on monday — its column (by title) or the comment it was
+ * posted on, then its name, then its size — downloaded, and stored at the
+ * object key the row ALREADY names. No row is inserted, changed or removed, so
+ * nothing can be duplicated and every link the portal holds starts working.
+ */
+export async function repairMissingFiles(
+  db: Database,
+  ids: string[],
+  options: { budgetMs?: number } = {},
+): Promise<MondayRepairResult> {
+  const started = Date.now();
+  const deadline = started + (options.budgetMs ?? 35_000);
+  const config = mondaySyncConfig();
+  const orgId = config.organisationId;
+  const result: MondayRepairResult = {
+    items: 0, checked: 0, present: 0, restored: 0, notOnMonday: 0, tooLarge: 0, failed: 0, pending: 0,
+  };
+  const unique = [...new Set(ids.map(String).filter((id) => /^\d{1,20}$/.test(id)))];
+  if (!unique.length) return result;
+  const items = (await fetchMondayItems(unique)).filter((item) => syncedBoardFor(item.board?.id));
+  result.items = items.length;
+  if (!items.length) return result;
+
+  const requests = await db
+    .select({ id: maintenanceRequests.id, externalId: maintenanceRequests.externalId })
+    .from(maintenanceRequests)
+    .where(and(eq(maintenanceRequests.organisationId, orgId), inArray(maintenanceRequests.externalId, items.map((item) => String(item.id)))));
+  const requestByExternal = new Map(requests.map((row) => [String(row.externalId), row.id]));
+  const requestIds = requests.map((row) => row.id);
+  if (!requestIds.length) return result;
+
+  const rows = await db
+    .select({
+      id: attachments.id,
+      requestId: attachments.requestId,
+      columnTitle: maintenanceBoardColumns.title,
+      updateId: attachments.updateId,
+      name: attachments.originalName,
+      size: attachments.byteSize,
+      contentType: attachments.contentType,
+      objectKey: attachments.objectKey,
+    })
+    .from(attachments)
+    .leftJoin(maintenanceBoardColumns, eq(maintenanceBoardColumns.id, attachments.boardColumnId))
+    .where(and(eq(attachments.organisationId, orgId), inArray(attachments.requestId, requestIds), isNull(attachments.archivedAt)));
+
+  const { env } = await import("cloudflare:workers");
+  const bucket = (env as unknown as { BUCKET?: R2Bucket }).BUCKET;
+  if (!bucket) throw new Error("File storage is unavailable.");
+
+  for (const item of items) {
+    const requestId = requestByExternal.get(String(item.id));
+    if (!requestId) continue;
+    const assetById = new Map((item.assets ?? []).map((asset) => [String(asset.id), asset]));
+    /* monday's files by where they sit: a column title, or a comment id. */
+    const bySlot = new Map<string, MondayAsset[]>();
+    const add = (slot: string, asset: MondayAsset | undefined) => {
+      if (!asset?.name) return;
+      bySlot.set(slot, [...(bySlot.get(slot) ?? []), asset]);
+    };
+    for (const value of item.column_values ?? []) {
+      if (value.type !== "file" || !value.value) continue;
+      try {
+        const files = (JSON.parse(value.value) as { files?: Array<{ assetId?: number | string }> }).files ?? [];
+        for (const file of files) add(`column:${(value.column?.title ?? "").trim().toLowerCase()}`, assetById.get(String(file.assetId)));
+      } catch {
+        /* an unreadable cell holds no files */
+      }
+    }
+    for (const update of item.updates ?? []) {
+      for (const asset of update.assets ?? []) add(`update:monday-update-${update.id}`, asset);
+      for (const reply of update.replies ?? []) for (const asset of reply.assets ?? []) add(`update:monday-reply-${reply.id}`, asset);
+    }
+
+    for (const row of rows.filter((entry) => entry.requestId === requestId)) {
+      result.checked += 1;
+      if (await bucket.head(row.objectKey)) {
+        result.present += 1;
+        continue;
+      }
+      const slot = row.updateId ? `update:${row.updateId}` : `column:${(row.columnTitle ?? "").trim().toLowerCase()}`;
+      const candidates = (bySlot.get(slot) ?? []).filter((asset) => asset.name === row.name);
+      const asset = candidates.find((entry) => entry.file_size === row.size) ?? (candidates.length === 1 ? candidates[0] : undefined);
+      if (!asset?.public_url) {
+        result.notOnMonday += 1;
+        continue;
+      }
+      if ((asset.file_size ?? 0) > MAX_FILE_BYTES) {
+        result.tooLarge += 1;
+        continue;
+      }
+      if (Date.now() > deadline) {
+        result.pending += 1;
+        continue;
+      }
+      const response = await fetch(asset.public_url).catch(() => null);
+      if (!response || !response.ok) {
+        result.failed += 1;
+        continue;
+      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (!bytes.byteLength || bytes.byteLength > MAX_FILE_BYTES) {
+        result.failed += 1;
+        continue;
+      }
+      await bucket.put(row.objectKey, bytes, {
+        httpMetadata: {
+          contentType: row.contentType || contentTypeFor(row.name, bytes),
+          contentDisposition: `inline; filename="${cleanFileName(row.name)}"`,
+        },
+        customMetadata: { requestId, restoredFrom: "monday.com", mondayAssetId: String(asset.id) },
+      });
+      result.restored += 1;
+    }
+  }
+  return result;
+}
+
 /** The daily catch-up: everything on both boards changed in the last `days`. */
 export async function catchUpMondaySync(db: Database, days = 2, options: { budgetMs?: number } = {}) {
   const config = mondaySyncConfig();

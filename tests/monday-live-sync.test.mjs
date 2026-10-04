@@ -99,3 +99,11 @@ test("each certificate file carries its row's expiry date; a blank date clears n
   assert.match(fn, /if \(!\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test\(date\)\) continue;/);
   assert.match(fn, /eq\(attachments\.boardColumnId, fileColumnId\),\s*isNull\(attachments\.archivedAt\),/);
 });
+
+test("missing files are put back at the key the row already names — no row is written", async () => {
+  const lib = await read("app/lib/monday-live-sync.ts");
+  const fn = lib.slice(lib.indexOf("export async function repairMissingFiles"), lib.indexOf("/** The daily catch-up"));
+  assert.match(fn, /if \(await bucket\.head\(row\.objectKey\)\) \{\s*result\.present \+= 1;/);
+  assert.match(fn, /await bucket\.put\(row\.objectKey, bytes,/);
+  assert.doesNotMatch(fn, /db\s*\.\s*(insert|update|delete)\(/, "the repair never touches a row");
+});
