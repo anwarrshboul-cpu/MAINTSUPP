@@ -29,7 +29,8 @@ export const dynamic = "force-dynamic";
  *
  *   POST { action: "repair-files", board, page, size? }
  *        puts back the bytes of files the database names but storage does not
- *        hold, from monday, at the object key each row already names
+ *        hold, from monday, at the object key each row already names;
+ *        or { action: "repair-files", itemIds } for up to 10 named items
  *
  * Every write is idempotent — matched on monday's item id, files on name and
  * size — so any call can be repeated safely.
@@ -94,6 +95,11 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, ...(await catchUpMondaySync(db, days)) });
     }
     if (body.action === "repair-files") {
+      /* Named items (≤ 10 a call) — e.g. the open jobs first, inside a storage
+         plan that cannot hold every historical photograph at once. */
+      if (Array.isArray(body.itemIds)) {
+        return Response.json({ ok: true, ...(await repairMissingFiles(await getDb(), body.itemIds.slice(0, 10).map(String))) });
+      }
       const board = config.boards.find((entry) => entry.key === body.board);
       if (!board) return Response.json({ error: "Choose maintenance or store-documentation." }, { status: 400 });
       const size = Math.min(Math.max(typeof body.size === "number" ? Math.floor(body.size) : 25, 1), 40);
