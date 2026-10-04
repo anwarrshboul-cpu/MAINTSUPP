@@ -91,3 +91,8 @@ test("inside WhatsApp and similar, the install page offers to open a real browse
   assert.match(page, /\[\/WhatsApp\/i, "WhatsApp"\]/);
   assert.match(page, /intent:\/\/maintsupp\.com\/app#Intent;scheme=https;package=com\.android\.chrome;end/);
 });
+
+test("the portal sign-in page offers the app download", async () => {
+  const form = await readFile(new URL("../app/(app)/login/sign-in-form.tsx", import.meta.url), "utf8");
+  assert.match(form, /<a className="login-form__download" href="\/app">[\s\S]*?Download the app/);
+});

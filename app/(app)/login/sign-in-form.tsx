@@ -191,6 +191,13 @@ export default function SignInForm({ next }: { next: string }) {
         </button>
       )}
 
+      <a className="login-form__download" href="/app">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Download the app
+      </a>
+
       <Link className="login-form__contractor" href="/contractor">
         Contractor? Sign in to your jobs
       </Link>

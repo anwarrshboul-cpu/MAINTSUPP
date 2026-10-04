@@ -90,6 +90,22 @@
 
 .login-form__unlock:disabled { cursor: progress; opacity: 0.7; }
 
+/* The MAINTSUPP app — installs from maintsupp.com/app, no app store. */
+.login-form__download {
+  display: inline-flex;
+  min-height: 50px;
+  padding: 0 22px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--brand-primary);
+  border-radius: 10px;
+  color: var(--brand-primary);
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
 /* The contractors' door — same app, their own sign-in. */
 .login-form__contractor {
   justify-self: center;
