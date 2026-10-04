@@ -721,3 +721,25 @@ test("teardown: every document this file created is removed", async (t) => {
     "this file left QA residue behind",
   );
 });
+
+test("a public form's upload token names its workspace through the job that holds it", async () => {
+  /*
+   * 2026-10-04, MN-9099: a phone photo attached through a SECOND workspace's
+   * public form answered 404 "Work order not found" on the multipart path,
+   * because a request-row token left the tenant at the ambient (primary)
+   * organisation and the job was looked up there. The tenant now comes from
+   * the job whose `public_upload_token_hash` matches the token.
+   */
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../app/api/files/upload-authority.ts", import.meta.url),
+    "utf8",
+  );
+  const body = source.slice(source.indexOf("export async function resolveUploadTenant"));
+  assert.match(
+    body,
+    /eq\(maintenanceRequests\.publicUploadTokenHash, await sha256\(uploadToken\)\)/,
+    "the request-row token is resolved to the job that holds it",
+  );
+  assert.match(body, /orgId: holder\?\.organisationId \?\? ambientOrgId/);
+});

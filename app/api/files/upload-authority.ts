@@ -120,14 +120,30 @@ export async function resolveUploadTenant(
 ): Promise<{ orgId: string; token: TokenScope | null }> {
   if (!uploadToken) return { orgId: ambientOrgId, token: null };
   const token = await resolveJobToken(db, uploadToken);
+  if (token) return { orgId: token.organisationId, token };
   /*
-   * A token that does not resolve leaves the ambient organisation alone rather
-   * than refusing here. It may still be a legacy request-row token, which is
-   * verified against the job itself and therefore cannot be checked until the
-   * job has been found — and the job is found in the ambient tenant, which is
-   * correct for that flow because a request-row token names its own job.
+   * A REQUEST-ROW TOKEN NAMES ITS TENANT TOO — through the job that holds it.
+   *
+   * This used to leave the ambient organisation in place, on the reasoning
+   * that "a request-row token names its own job". It does, but the job was
+   * then looked up in the AMBIENT tenant, and for an anonymous caller that is
+   * always the primary organisation. So a photo attached to the public form of
+   * any OTHER workspace was looked up in the wrong one and answered 404 "Work
+   * order not found" — the "1 file did not upload" every second-tenant form
+   * showed for a phone photograph (MN-9099, Westfiled mall, 2026-10-04).
+   *
+   * The job holding this token's hash is found directly. That is no wider a
+   * grant: the token is a 128-bit secret minted for that one job, it is still
+   * verified against that job's hash and expiry in `resolveUploadAuthority`,
+   * and it only ever opens issue evidence on that job. A token matching no job
+   * leaves the ambient organisation alone and is refused there, as before.
    */
-  return { orgId: token ? token.organisationId : ambientOrgId, token };
+  const [holder] = await db
+    .select({ organisationId: maintenanceRequests.organisationId })
+    .from(maintenanceRequests)
+    .where(eq(maintenanceRequests.publicUploadTokenHash, await sha256(uploadToken)))
+    .limit(1);
+  return { orgId: holder?.organisationId ?? ambientOrgId, token: null };
 }
 
 /**
