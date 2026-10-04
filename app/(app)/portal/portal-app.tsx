@@ -2298,7 +2298,14 @@ export default function PortalApp({
            * across the whole workspace and offers a purge, so it belongs to
            * whoever administers it rather than to anyone who can read a board.
            */
-          return runtimeContext?.capabilities?.["settings.edit"] === true;
+          /* MAINTSUPP staff only (2026-10-04): it is an internal data harness
+             that never runs on the live database, so a client Owner — who
+             holds settings.edit in their own workspace — met a tool that is
+             not theirs in their sidebar. */
+          return (
+            runtimeContext?.identity?.platformAdmin === true &&
+            runtimeContext?.capabilities?.["settings.edit"] === true
+          );
         }
         if (entry.key !== "audit") return true;
         return runtimeContext?.capabilities?.["audit.read"] === true;
