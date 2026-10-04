@@ -256,7 +256,12 @@ export function documentThumbnailUrl(file: {
  * rather than blamed on anybody.
  */
 export function documentOwner(file: Pick<FileRecord, "uploadedByEmail">) {
-  return file.uploadedByEmail?.trim() || "Not recorded";
+  const owner = file.uploadedByEmail?.trim();
+  /* A contractor working from a job link is recorded by the link's id
+     (`contractor-link:<id>`, see app/api/files/route.ts) — a fact for the
+     audit trail, not a name. The register says who it was in words. */
+  if (owner?.startsWith("contractor-link:")) return "Contractor (job link)";
+  return owner || "Not recorded";
 }
 
 /**

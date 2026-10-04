@@ -54,7 +54,7 @@ import {
   users,
 } from "../../../../db/schema";
 import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
-import { sendNotification } from "../../../lib/notifications";
+import { emailDeliveryStatus, sendNotification } from "../../../lib/notifications";
 import type { RecipientContext, RecipientPerson } from "../../../lib/reminders/recipients";
 import { resolveRecipients } from "../../../lib/reminders/recipients";
 import {
@@ -499,6 +499,21 @@ async function runDispatch(nowIso: string): Promise<DispatchOutcome> {
   }
 
   return outcome;
+}
+
+/**
+ * THE DAILY SAFETY NET (2026-10-04). Production has no hourly trigger — the
+ * plan allows daily crons only, and the GitHub workflow drives Preview — so
+ * `/api/cron/daily` calls this: a due reminder goes out that morning instead of
+ * never. An hourly trigger, if added, keeps the per-row send time exact; the
+ * claim is a UNIQUE insert, so the two never double-send.
+ *
+ * Not run while email cannot be delivered: the dispatcher advances a rule once
+ * its send is recorded, so running it now would use the reminder up unsent.
+ */
+export async function dispatchDueRemindersDaily() {
+  if (!emailDeliveryStatus().deliverable) return { skipped: "email is not deliverable on this deployment" };
+  return runDispatch(new Date().toISOString());
 }
 
 export async function POST(request: Request) {

@@ -4,6 +4,7 @@ import {
 } from "../../lib/mock-data";
 import type { RequestActivityEntry } from "../../lib/types";
 import { exposeRequest } from "../../lib/request-payload";
+import { followStageToGroup } from "../../lib/board-mutations";
 import {
   attachmentCountsByRequest,
   pictureColumnsFor,
@@ -1056,6 +1057,10 @@ export async function PATCH(request: Request) {
           ),
         )
         .returning();
+    }
+    /* The board row follows a drawer stage change into its stage's group. */
+    if (stage && updated) {
+      await followStageToGroup(db, orgId, id, stage);
     }
     if (note) {
       [updated] = await db

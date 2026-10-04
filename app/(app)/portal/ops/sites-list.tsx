@@ -599,7 +599,9 @@ export function SitesList({
           /* Only blame the data when the data is short. With every site located
              (a new workspace typed in properly) "add locations to enable it" sent
              people to fix records that were already complete. */
-          coverage.total > 0 && coverage.withCoordinates >= coverage.total ? (
+          /* No sites at all: the empty register below already says so, and a
+             "map unavailable" line on top of it reads like a fault. */
+          coverage.total === 0 ? null : coverage.withCoordinates >= coverage.total ? (
             <p className="ops-card__note">
               All {coverage.total} sites have coordinates. A map view is not part of this page yet.
             </p>

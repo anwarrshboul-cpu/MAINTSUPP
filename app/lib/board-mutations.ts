@@ -355,6 +355,55 @@ export async function createBoardItem(
   return { request: created, item, group };
 }
 
+/**
+ * A STAGE CHANGE FROM THE DRAWER TAKES THE ROW TO ITS GROUP (2026-10-04).
+ *
+ * "Advance request" writes `stage` through PATCH /api/maintenance, while the
+ * board draws rows by their group placement — so the toast said "moved to Jobs
+ * booked" and the row stayed under Incoming requests. When the row sits in a
+ * STAGE group, it now follows its stage into that board's group for the new
+ * stage. A row in a group of the owner's own (no stage key) stays where they
+ * put it, and the status is left alone, exactly as a stage-only PATCH leaves it.
+ */
+export async function followStageToGroup(
+  db: BoardDatabase,
+  orgId: string,
+  requestId: string,
+  stage: string,
+) {
+  const [placement] = await db
+    .select()
+    .from(maintenanceGroupItems)
+    .where(and(eq(maintenanceGroupItems.requestId, requestId), eq(maintenanceGroupItems.organisationId, orgId)))
+    .limit(1);
+  if (!placement) return;
+  const [current] = await db
+    .select({ stageKey: maintenanceGroups.stageKey })
+    .from(maintenanceGroups)
+    .where(and(eq(maintenanceGroups.id, placement.groupId), eq(maintenanceGroups.organisationId, orgId)))
+    .limit(1);
+  if (!current?.stageKey || current.stageKey === stage) return;
+  const [target] = await db
+    .select({ id: maintenanceGroups.id })
+    .from(maintenanceGroups)
+    .where(
+      and(
+        eq(maintenanceGroups.organisationId, orgId),
+        eq(maintenanceGroups.boardId, placement.boardId),
+        eq(maintenanceGroups.stageKey, stage),
+        eq(maintenanceGroups.archived, false),
+        isNull(maintenanceGroups.deletedAt),
+      ),
+    )
+    .orderBy(asc(maintenanceGroups.position))
+    .limit(1);
+  if (!target) return;
+  await db
+    .update(maintenanceGroupItems)
+    .set({ groupId: target.id, position: await nextPosition(db, orgId, target.id), updatedAt: new Date().toISOString() })
+    .where(and(eq(maintenanceGroupItems.requestId, requestId), eq(maintenanceGroupItems.organisationId, orgId)));
+}
+
 export type MoveOutcome = {
   group: GroupRow;
   items: ItemRow[];

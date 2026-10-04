@@ -30,6 +30,8 @@ import { publicOrigin } from "../../../lib/public-origin";
 import { deliverScheduledReports } from "../../../lib/report-delivery";
 import { retryWebhookDeliveries } from "../../../lib/integrations/webhooks";
 import { expireUploadSessions } from "../../../lib/upload-sessions";
+import { runComplianceDigestsForCron } from "../../notifications/compliance/route";
+import { dispatchDueRemindersDaily } from "../reminders/route";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +61,17 @@ export async function POST(request: Request) {
       console.error("[/api/cron/daily] upload sessions", error);
       return null;
     });
+    /* Compliance expiry warnings — 90/60/30/14/7/0 days and overdue — to the
+       operations inbox, once per stage per certificate. */
+    const compliance = await runComplianceDigestsForCron(request).catch((error: unknown) => {
+      console.error("[/api/cron/daily] compliance digest", error);
+      return { error: true };
+    });
+    /* Reminder rules that are due — see dispatchDueRemindersDaily. */
+    const reminders = await dispatchDueRemindersDaily().catch((error: unknown) => {
+      console.error("[/api/cron/daily] reminders", error);
+      return { error: true };
+    });
     /* Counts and ids only: this lands in platform logs. */
     return Response.json({
       ok: planned !== null && reports !== null,
@@ -68,6 +81,8 @@ export async function POST(request: Request) {
         : { error: true },
       webhooks,
       uploads: uploads ?? { error: true },
+      compliance,
+      reminders,
       ranAt: new Date().toISOString(),
     }, { status: planned !== null && reports !== null ? 200 : 503 });
   } catch (error) {
