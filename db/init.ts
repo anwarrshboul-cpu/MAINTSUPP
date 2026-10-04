@@ -493,6 +493,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
      one-time challenges. Two guarded tables; no seed. See `ensurePasskeys`. */
   await ensurePasskeys(d1);
 
+  /* The contractor app: sessions, invite links and one-time codes, plus the
+     contractor a phone's alerts belong to. Three guarded tables and one
+     guarded column; no seed. See `ensureContractorApp`. */
+  await ensureContractorApp(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -6450,6 +6455,67 @@ async function ensureNotificationPreferences(d1: D1DatabaseLike) {
       "CREATE INDEX IF NOT EXISTS notification_cooldowns_last_idx ON notification_cooldowns(last_at)",
     ),
   ]);
+}
+
+/**
+ * THE CONTRACTOR APP. See `contractorSessions` in db/schema.ts. Additive:
+ * with no rows, contractors use their job links exactly as before.
+ */
+async function ensureContractorApp(d1: D1DatabaseLike) {
+  await d1.batch([
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_sessions (
+         id TEXT PRIMARY KEY,
+         token_hash TEXT NOT NULL,
+         contractor_id TEXT NOT NULL,
+         organisation_id TEXT NOT NULL,
+         identity TEXT,
+         issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         expires_at TEXT NOT NULL,
+         last_seen_at TEXT,
+         revoked_at TEXT,
+         user_agent TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS contractor_sessions_token_idx ON contractor_sessions(token_hash)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_sessions_contractor_idx ON contractor_sessions(contractor_id)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_invites (
+         id TEXT PRIMARY KEY,
+         token_hash TEXT NOT NULL,
+         contractor_id TEXT NOT NULL,
+         organisation_id TEXT NOT NULL,
+         created_by TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         expires_at BIGINT NOT NULL,
+         used_at TEXT
+       )`,
+    ),
+    d1.prepare(
+      "CREATE UNIQUE INDEX IF NOT EXISTS contractor_invites_token_idx ON contractor_invites(token_hash)",
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_invites_contractor_idx ON contractor_invites(contractor_id)",
+    ),
+    d1.prepare(
+      `CREATE TABLE IF NOT EXISTS contractor_login_codes (
+         id TEXT PRIMARY KEY,
+         identity TEXT NOT NULL,
+         code_hash TEXT NOT NULL,
+         expires_at BIGINT NOT NULL,
+         attempts INTEGER NOT NULL DEFAULT 0,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       )`,
+    ),
+    d1.prepare(
+      "CREATE INDEX IF NOT EXISTS contractor_login_codes_identity_idx ON contractor_login_codes(identity)",
+    ),
+  ]);
+  await addColumns(d1, "push_subscriptions", [["contractor_id", "TEXT"]]);
 }
 
 /**

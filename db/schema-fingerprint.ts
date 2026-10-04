@@ -181,6 +181,9 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   /* 8 — `ensurePasskeys`: Face ID / fingerprint sign-in, two new guarded
      tables and their indexes. */
   "ec0fce8f",
+  /* 9 — `ensureContractorApp`: contractor sessions, invites and one-time
+     codes, and the contractor a phone's alerts belong to. */
+  "aa309e45",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

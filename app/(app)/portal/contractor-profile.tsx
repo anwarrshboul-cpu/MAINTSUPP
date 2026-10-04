@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "../../components";
+import { ContractorAppInvite } from "./contractor-app-invite";
 import { uploadEvidenceFile, describeUploadStage } from "../../lib/client-upload";
 import { formatDate as sharedFormatDate } from "../../lib/format-date";
 /*
@@ -633,6 +634,7 @@ export function ContractorProfile({
             </button>
           </div>
         </div>
+        <ContractorAppInvite contractorId={contractor.id} contractorName={contractor.name} active={contractor.active} />
         {/*
           The strip sits BETWEEN the header and the scrolling body rather than
           inside it, so it does not scroll away under a fifty-row job table.

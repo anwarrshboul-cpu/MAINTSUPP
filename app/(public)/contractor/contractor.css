@@ -1,0 +1,231 @@
+/*
+ * The contractor's view — built on the /app stylesheet (app-home.css), which
+ * the page loads first, and laid out like the office Fix Tracker: tabs with
+ * counts, a search, and cards that open the job.
+ */
+
+.ctr__title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.ctr__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ctr__form label {
+  font-size: 14px;
+  color: var(--mapp-muted);
+}
+
+.ctr__form input:not([type="checkbox"]),
+.ctr__search {
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 10px;
+  background: var(--mapp-bg);
+  color: var(--mapp-ink);
+  font: inherit;
+  font-size: 17px;
+}
+
+.ctr__code {
+  letter-spacing: 0.4em;
+  font-size: 24px !important;
+  text-align: center;
+}
+
+.ctr__remember {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.ctr__remember input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--mapp-teal);
+}
+
+.ctr__hint {
+  font-size: 14px;
+}
+
+.ctr__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ctr__hello {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.ctr__out {
+  min-height: 40px;
+  padding: 6px 14px;
+}
+
+.ctr__alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--mapp-teal);
+  border-radius: 12px;
+  background: var(--mapp-card);
+}
+
+.ctr__tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 12px;
+  background: var(--mapp-card);
+}
+
+.ctr__tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--mapp-muted);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ctr__tabs button.is-active {
+  background: var(--mapp-teal);
+  color: var(--mapp-on-teal);
+}
+
+.ctr__tabs em {
+  font-style: normal;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.ctr__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ctr__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid var(--mapp-line);
+  border-radius: 14px;
+  background: var(--mapp-card);
+  color: var(--mapp-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctr__card:focus-visible {
+  outline: 3px solid var(--mapp-teal);
+  outline-offset: 2px;
+}
+
+.ctr__cardhead,
+.ctr__cardfoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ctr__cardtitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.ctr__cardmeta,
+.ctr__cardfoot {
+  font-size: 13px;
+  color: var(--mapp-muted);
+}
+
+.ctr__chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--mapp-line);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ctr__chip--urgent {
+  background: #ff8f87;
+  color: #2b0806;
+}
+
+.ctr__chip--medium {
+  background: #f4c76b;
+  color: #2a1d02;
+}
+
+.ctr__chip--low {
+  background: #8fd6a6;
+  color: #062312;
+}
+
+.ctr__opening {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgb(16 25 32 / 0.8);
+  font-weight: 700;
+}
+
+.ctr__empty {
+  text-align: center;
+  padding: 24px 8px;
+}
+
+.ctr__alertsline {
+  text-align: center;
+  font-size: 13px;
+}
+
+.ctr__link {
+  border: 0;
+  background: none;
+  color: var(--mapp-teal);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ctr__welcome {
+  margin-top: 18vh;
+  text-align: center;
+  align-items: center;
+}

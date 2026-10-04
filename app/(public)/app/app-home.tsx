@@ -209,6 +209,19 @@ export default function AppHome() {
     return () => window.clearTimeout(timer);
   }, [pointer]);
 
+  /* A contractor signed in to the app goes straight to their jobs. */
+  useEffect(() => {
+    let active = true;
+    fetch("/api/contractor/me", { headers: { Accept: "application/json" } })
+      .then((response) => {
+        if (active && response.ok) window.location.replace("/contractor");
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   /* A notification for a contractor names the job, never its link: find it. */
   useEffect(() => {
     if (!ready) return;
@@ -507,6 +520,12 @@ export default function AppHome() {
 
       <section className="mapp__card" aria-labelledby="mapp-jobs">
         <h2 id="mapp-jobs">Contractors — my jobs</h2>
+        <p className="mapp__muted">Sign in with your email or mobile to see the jobs assigned to you.</p>
+        <div className="mapp__row">
+          <a className="mapp__btn" href="/contractor">
+            Contractor sign-in
+          </a>
+        </div>
         {saved.length === 0 ? (
           <p className="mapp__muted">
             Jobs arrive as links from your coordinator. Open a link here, or paste it below, and it

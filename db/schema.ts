@@ -2150,6 +2150,70 @@ export const webauthnChallenges = sqliteTable(
   (table) => [index("webauthn_challenges_expires_idx").on(table.expiresAt)],
 );
 
+/**
+ * THE CONTRACTOR APP — sign-in without an account.
+ *
+ * A contractor is a row in `contractors`, not a user. They sign in with a
+ * personal invite link the office sends them (`contractor_invites`) or, once a
+ * provider is connected, a one-time code to their email or mobile
+ * (`contractor_login_codes`). Either ends in a `contractor_sessions` row whose
+ * hashed token is the `maintsupp_contractor` cookie. What a session can see is
+ * re-derived on every request from `contractor_id` and `identity` — the jobs
+ * assigned to that contractor (and to the same person's record in another
+ * workspace, matched by the same email or mobile) — so archiving the
+ * contractor or changing their email ends their access at once.
+ */
+export const contractorSessions = sqliteTable(
+  "contractor_sessions",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull(),
+    contractorId: text("contractor_id").notNull(),
+    organisationId: text("organisation_id").notNull(),
+    identity: text("identity"),
+    issuedAt: text("issued_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text("expires_at").notNull(),
+    lastSeenAt: text("last_seen_at"),
+    revokedAt: text("revoked_at"),
+    userAgent: text("user_agent"),
+  },
+  (table) => [
+    uniqueIndex("contractor_sessions_token_idx").on(table.tokenHash),
+    index("contractor_sessions_contractor_idx").on(table.contractorId),
+  ],
+);
+
+export const contractorInvites = sqliteTable(
+  "contractor_invites",
+  {
+    id: text("id").primaryKey(),
+    tokenHash: text("token_hash").notNull(),
+    contractorId: text("contractor_id").notNull(),
+    organisationId: text("organisation_id").notNull(),
+    createdBy: text("created_by"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: integer("expires_at").notNull(),
+    usedAt: text("used_at"),
+  },
+  (table) => [
+    uniqueIndex("contractor_invites_token_idx").on(table.tokenHash),
+    index("contractor_invites_contractor_idx").on(table.contractorId),
+  ],
+);
+
+export const contractorLoginCodes = sqliteTable(
+  "contractor_login_codes",
+  {
+    id: text("id").primaryKey(),
+    identity: text("identity").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("contractor_login_codes_identity_idx").on(table.identity)],
+);
+
 export const pushSubscriptions = sqliteTable(
   "push_subscriptions",
   {
@@ -2158,6 +2222,8 @@ export const pushSubscriptions = sqliteTable(
     userId: text("user_id"),
     jobTokenId: text("job_token_id"),
     requestId: text("request_id"),
+    /* A signed-in contractor's phone (the contractor app). */
+    contractorId: text("contractor_id"),
     endpoint: text("endpoint").notNull(),
     p256dh: text("p256dh").notNull(),
     auth: text("auth").notNull(),

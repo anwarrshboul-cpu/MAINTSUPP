@@ -1,0 +1,49 @@
+.contractor-app-invite {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 20px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 10px;
+}
+
+.contractor-app-invite__text {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 220px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.contractor-app-invite__text span {
+  opacity: 0.75;
+}
+
+.contractor-app-invite__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.contractor-app-invite__actions a {
+  text-decoration: none;
+}
+
+.contractor-app-invite__note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .contractor-app-invite {
+    margin: 0 12px 10px;
+  }
+
+  .contractor-app-invite__actions > * {
+    min-height: 42px;
+  }
+}

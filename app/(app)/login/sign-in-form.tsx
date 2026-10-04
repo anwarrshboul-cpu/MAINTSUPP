@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import {
@@ -7,6 +8,7 @@ import {
   signInWithThisDevice,
   unlockLabel,
 } from "../../lib/passkey-client";
+import { askAlertPermissionNow } from "../../lib/push-client";
 import { useHydrated } from "../../lib/use-hydrated";
 
 /**
@@ -66,6 +68,7 @@ export default function SignInForm({ next }: { next: string }) {
 
   async function signInWithUnlock() {
     if (pending) return;
+    void askAlertPermissionNow();
     setPending(true);
     setError(null);
     try {
@@ -79,6 +82,9 @@ export default function SignInForm({ next }: { next: string }) {
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pending) return;
+    /* Alerts on by default: the phone's one-time Allow rides on this tap
+       (app/lib/push-client.ts); after sign-in the dashboard subscribes silently. */
+    void askAlertPermissionNow();
     setPending(true);
     setError(null);
 
@@ -184,6 +190,10 @@ export default function SignInForm({ next }: { next: string }) {
           Sign in with {unlock}
         </button>
       )}
+
+      <Link className="login-form__contractor" href="/contractor">
+        Contractor? Sign in to your jobs
+      </Link>
     </form>
   );
 }

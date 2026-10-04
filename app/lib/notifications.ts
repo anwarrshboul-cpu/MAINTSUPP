@@ -599,6 +599,9 @@ export async function replayFailed(db: Database, organisationId: string, limit =
 
 /* ── Templates ───────────────────────────────────────────────────────────── */
 
+/** The branded email frame every MAINTSUPP email uses. */
+export const emailShell = (title: string, body: string) => SHELL(title, body);
+
 const SHELL = (title: string, body: string) => `
 <div style="font-family:Inter,Arial,sans-serif;color:#101820;max-width:560px">
   <p style="font-size:18px;font-weight:700;margin:0 0 4px">

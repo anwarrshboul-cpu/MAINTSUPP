@@ -158,3 +158,19 @@ export async function sendTestAlert() {
   });
   return response.ok;
 }
+
+/**
+ * Ask the phone for permission INSIDE a tap the person is already making —
+ * "Sign in", "Open my jobs" — so the only thing they ever see about alerts is
+ * the phone's own one-time Allow. Must be called synchronously from the tap
+ * handler (before any await), or iPhone ignores it. Not awaited by callers.
+ */
+export function askAlertPermissionNow(): Promise<NotificationPermission | null> {
+  try {
+    if (alertSupport() !== "ready" || alertsTurnedOff()) return Promise.resolve(null);
+    if (Notification.permission !== "default") return Promise.resolve(Notification.permission);
+    return Notification.requestPermission();
+  } catch {
+    return Promise.resolve(null);
+  }
+}
