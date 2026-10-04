@@ -829,7 +829,7 @@ export default function ContractorJobView({ token }: { token: string }) {
 
       <footer className="job-link__foot">
         {expires && <p>This link works until {expires}.</p>}
-        <p>Maintsupp · +44 7852 224644 · Mon–Fri 8:30am–5:30pm</p>
+        <p>MAINTSUPP · +44 7852 224644 · Mon–Fri 8:30am–5:30pm</p>
         <p>
           <a href="/app">Get the MAINTSUPP app</a> — all your jobs in one place, with alerts.
         </p>

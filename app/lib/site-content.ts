@@ -194,7 +194,7 @@ const HOME_SECTIONS: readonly SectionDefinition[] = [
   { key: "yourContractors", label: "Your contractors or ours", anchor: "your-contractors" },
   { key: "pricing", label: "Pricing", anchor: "pricing" },
   { key: "caseStudy", label: "Case study", anchor: "case-study" },
-  { key: "founder", label: "Who runs Maintsupp", anchor: "founder" },
+  { key: "founder", label: "Who runs MAINTSUPP", anchor: "founder" },
   { key: "portal", label: "Client portal", anchor: "portal" },
   { key: "faq", label: "Questions", anchor: "faq" },
   {

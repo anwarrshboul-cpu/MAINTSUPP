@@ -99,7 +99,7 @@ export const HOME_COPY = {
 
   /* Who runs Maintsupp */
   founder: {
-    heading: "Who runs Maintsupp",
+    heading: "Who runs MAINTSUPP",
     lede: "Maintsupp is founder-led. Anwar has over five years’ experience in facilities management for commercial stores across the UK — intake, triage, contractor management and verified close-out, day in, day out. Every client portfolio gets one named coordinator who owns each job until it’s verified complete. You deal with a person accountable for the outcome, not a ticket queue.",
   },
 

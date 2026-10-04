@@ -487,6 +487,7 @@ export function LiveMaintenanceBoard({
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupColor, setNewGroupColor] = useState(groupColors[0]);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [freshItemId, setFreshItemId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rowMenuId, setRowMenuId] = useState<string | null>(null);
@@ -1076,6 +1077,7 @@ export function LiveMaintenanceBoard({
         throw new Error(payload.error || "The item could not be created.");
       }
       setItems((current) => [...current, payload.item!]);
+      setFreshItemId(payload.request.id);
       onRequestCreated(payload.request);
 
       if (anchor) {
@@ -2554,6 +2556,7 @@ export function LiveMaintenanceBoard({
         throw new Error(payload.error || "The item could not be created.");
       }
       setItems((current) => [...current, payload.item!]);
+      setFreshItemId(payload.request.id);
       onRequestCreated(payload.request);
       onNotify(`${payload.request.id} added to the live board.`);
     } catch (error) {
@@ -4195,6 +4198,7 @@ export function LiveMaintenanceBoard({
                           <Fragment key={request.id}>
                           <BoardRow
                             boardId={boardId}
+                            autoEditName={request.id === freshItemId}
                             storeDocumentation={isStoreDocumentation}
                             request={request}
                             groups={groups}
@@ -4654,6 +4658,7 @@ export function LiveMaintenanceBoard({
 
 function BoardRow({
   boardId,
+  autoEditName,
   storeDocumentation,
   request,
   groups,
@@ -4699,6 +4704,7 @@ function BoardRow({
   canConvertToSubitem,
 }: {
   boardId: string;
+  autoEditName?: boolean;
   /* Whether this row belongs to a compliance register — the canonical one or a
      Documents-template section's own. Passed down rather than re-derived from
      the key, which differs between the two and made an instance's date columns
@@ -4882,6 +4888,7 @@ function BoardRow({
                 value={itemName}
                 onSave={(value) => onSaveCustom(column, value)}
                 onOpen={onOpen}
+                autoEditId={autoEditName ? request.id : undefined}
               />
               <button
                 className="sheet-open-item"

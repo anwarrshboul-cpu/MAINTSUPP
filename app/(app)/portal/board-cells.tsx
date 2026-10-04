@@ -53,20 +53,32 @@ import {
   TimelineDurationLine,
   TimelineRangeButton,
 } from "./timeline-tooltip";
+/* Item ids whose name editor has already auto-opened once, so a virtualised row
+   that remounts on scroll does not reopen it. */
+const autoEdited = new Set<string>();
+
 export function ItemNameEditor({
   value,
   onSave,
   onOpen,
+  autoEditId,
 }: {
   value: string;
   onSave: (value: string) => void;
+  /* Set on the row just created by "Add item": its name opens ready to type,
+     so what the user types next names the item instead of being lost. */
+  autoEditId?: string;
   /* On a phone a tap on the name opens the job (where the name is still
      editable) — a "Rename item" sheet was the wrong answer to "show me this". */
   onOpen?: () => void;
 }) {
   const mobile = useContext(MobileBoardContext);
   const canEdit = useContext(BoardEditContext);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(() => {
+    if (!autoEditId || autoEdited.has(autoEditId)) return false;
+    autoEdited.add(autoEditId);
+    return true;
+  });
   const [draft, setDraft] = useState(value);
 
   const commit = () => {
@@ -99,6 +111,7 @@ export function ItemNameEditor({
         aria-label={`Rename item ${value}`}
         maxLength={120}
         onChange={(event) => setDraft(event.target.value)}
+        onFocus={(event) => event.currentTarget.select()}
         onBlur={commit}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
