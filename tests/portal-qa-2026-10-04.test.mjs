@@ -55,3 +55,19 @@ test("the live site shows calm text, not an error wall, where a tool is off by d
   const register = await read("app/(app)/portal/views/document-register.ts");
   assert.match(register, /if \(owner\?\.startsWith\("contractor-link:"\)\) return "Contractor \(job link\)";/);
 });
+
+test("the hourly trigger has a key of its own that opens the reminders endpoint only", async () => {
+  const route = await read("app/api/cron/reminders/route.ts");
+  assert.match(route, /const expected = process\.env\.REMINDER_TRIGGER_SECRET\?\.trim\(\) \?\? "";\s*if \(expected\.length < 32\) return false;/, "an unset or short key never matches");
+  assert.match(route, /triggerKeyMatches\(request\)\s*\? null\s*: authoriseCron\(request, "reminders", await resolveCronSecret\(\)\)/);
+  for (const other of ["app/api/cron/daily/route.ts", "app/api/cron/retention/route.ts"]) {
+    assert.doesNotMatch(await read(other), /REMINDER_TRIGGER_SECRET/, `${other} must not accept the reminders key`);
+  }
+});
+
+test("reminder recipients: Client contact and calendar certificates resolve", async () => {
+  const route = await read("app/api/cron/reminders/route.ts");
+  assert.match(route, /groups\["client-contact"\] = owners\.length \? owners\.map\(asPerson\) : null;/);
+  assert.match(route, /eq\(clientCompanyMembers\.status, "active"\)/);
+  assert.match(route, /\.from\(calendarEvents\)\s*\.where\(and\(eq\(calendarEvents\.id, subjectId\), eq\(calendarEvents\.organisationId, organisationId\)\)\)/);
+});

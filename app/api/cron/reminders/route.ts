@@ -47,13 +47,16 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import {
+  calendarEvents,
+  clientCompanyMembers,
   complianceDocuments,
   maintenanceRequests,
   memberships,
+  organisations,
   sites,
   users,
 } from "../../../../db/schema";
-import { authoriseCron, resolveCronSecret } from "../../../lib/cron-auth";
+import { authoriseCron, resolveCronSecret, secretMatches } from "../../../lib/cron-auth";
 import { emailDeliveryStatus, sendNotification } from "../../../lib/notifications";
 import type { RecipientContext, RecipientPerson } from "../../../lib/reminders/recipients";
 import { resolveRecipients } from "../../../lib/reminders/recipients";
@@ -128,6 +131,32 @@ async function buildContext(
     "internal-team": internal,
   };
 
+  /*
+   * CLIENT CONTACT (2026-10-04) — "the contact held against the client the site
+   * belongs to": the active owners of this workspace's client company. It was
+   * offered in the picker and in the default ladder but never resolved, so a
+   * step naming it reached nobody.
+   */
+  const [workspace] = await db
+    .select({ clientCompanyId: organisations.clientCompanyId })
+    .from(organisations)
+    .where(eq(organisations.id, organisationId))
+    .limit(1);
+  if (workspace?.clientCompanyId) {
+    const owners = await db
+      .select({ id: users.id, email: users.email, name: users.fullName })
+      .from(clientCompanyMembers)
+      .innerJoin(users, eq(users.id, clientCompanyMembers.userId))
+      .where(
+        and(
+          eq(clientCompanyMembers.clientCompanyId, workspace.clientCompanyId),
+          eq(clientCompanyMembers.status, "active"),
+          eq(users.active, true),
+        ),
+      );
+    groups["client-contact"] = owners.length ? owners.map(asPerson) : null;
+  }
+
   if (subjectType === "certificate") {
     const [record] = await db
       .select()
@@ -166,6 +195,27 @@ async function buildContext(
          * treating either as an address would post reminders at a phone number
          * and record a delivery failure nobody caused.
          */
+        const contact = site?.managerEmail ?? null;
+        groups["site-contact"] = contact && contact.includes("@") ? { email: contact } : null;
+      }
+    } else {
+      /*
+       * A certificate reminder made on the CALENDAR (manual-event-dialog.tsx)
+       * names the calendar event, not a register row, so the lookup above finds
+       * nothing and its site contact used to resolve to nobody. The event
+       * carries the site; read the contact from there.
+       */
+      const [event] = await db
+        .select({ siteId: calendarEvents.siteId })
+        .from(calendarEvents)
+        .where(and(eq(calendarEvents.id, subjectId), eq(calendarEvents.organisationId, organisationId)))
+        .limit(1);
+      if (event?.siteId) {
+        const [site] = await db
+          .select({ managerEmail: sites.managerEmail })
+          .from(sites)
+          .where(and(eq(sites.id, event.siteId), eq(sites.organisationId, organisationId)))
+          .limit(1);
         const contact = site?.managerEmail ?? null;
         groups["site-contact"] = contact && contact.includes("@") ? { email: contact } : null;
       }
@@ -516,8 +566,23 @@ export async function dispatchDueRemindersDaily() {
   return runDispatch(new Date().toISOString());
 }
 
+/**
+ * THE HOURLY TRIGGER'S OWN KEY (2026-10-04). Production is called hourly by a
+ * Supabase pg_cron job (see docs/REMINDERS-HOURLY.md) holding
+ * REMINDER_TRIGGER_SECRET — a key that opens this endpoint and nothing else,
+ * so the scheduler never holds CRON_SECRET, which also opens retention and the
+ * daily run. Either key is accepted; an unset key never matches.
+ */
+function triggerKeyMatches(request: Request) {
+  const expected = process.env.REMINDER_TRIGGER_SECRET?.trim() ?? "";
+  if (expected.length < 32) return false;
+  return secretMatches(request.headers.get("x-cron-secret") ?? "", expected);
+}
+
 export async function POST(request: Request) {
-  const refusal = authoriseCron(request, "reminders", await resolveCronSecret());
+  const refusal = triggerKeyMatches(request)
+    ? null
+    : authoriseCron(request, "reminders", await resolveCronSecret());
   if (refusal) return refusal;
   try {
     const outcome = await runDispatch(new Date().toISOString());
