@@ -100,6 +100,16 @@ test("each certificate file carries its row's expiry date; a blank date clears n
   assert.match(fn, /eq\(attachments\.boardColumnId, fileColumnId\),\s*isNull\(attachments\.archivedAt\),/);
 });
 
+test("the store-documentation check only reads, and is staff-only through the control route", async () => {
+  const lib = await read("app/lib/monday-verify.ts");
+  assert.doesNotMatch(lib, /db\s*\.\s*(insert|update|delete)\(/, "the check never writes a row");
+  assert.doesNotMatch(lib, /bucket\.(put|delete)\(/, "the check never writes to storage");
+  assert.match(lib, /if \(mondayDate !== hereDate\) differences\.push\(/);
+  const route = await read("app/api/integrations/monday/route.ts");
+  assert.match(route, /if \(body\.action === "verify-store-docs"\) \{/);
+  assert.ok(route.indexOf("const denied = await staffOnly(request);", route.indexOf("export async function POST")) < route.indexOf('if (body.action === "verify-store-docs")'));
+});
+
 test("missing files are put back at the key the row already names — no row is written", async () => {
   const lib = await read("app/lib/monday-live-sync.ts");
   const fn = lib.slice(lib.indexOf("export async function repairMissingFiles"), lib.indexOf("/** The daily catch-up"));
