@@ -138,6 +138,14 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         q: "How much does kiosk installation or removal cost?",
         a: "It depends on the unit, the centre, the access window and whether electrics, flooring or disposal are involved. Each job is quoted individually, and you have the price in writing before anything is booked.",
       },
+      {
+        q: "Do you install pop-up shops and promotional stands?",
+        a: "Yes. A pop-up shop, a promotional stand or a seasonal stall is installed and de-rigged the same way as a kiosk: in a booked slot outside trading hours, under the centre’s permit. Tell us the dates the space is yours, and the install and the de-rig are planned around them.",
+      },
+      {
+        q: "Do you fit out a kiosk as well as install it?",
+        a: "Yes. A kiosk fit-out — the lighting and power, counters, graphics and signage that finish a unit — runs through the same coordinator as the installation, and is quoted with it.",
+      },
       { q: "Which shopping centres do you cover?", a: CENTRES_ANSWER.replace(/^Yes\. /, "Any shopping centre in London. ") },
       { q: "Who carries out the work?", a: WHO_ANSWER },
     ],
@@ -189,7 +197,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "Making good",
-          body: "Fixing holes filled, walls and ceilings repaired and decorated, and floors made good, so the unit matches what the lease requires.",
+          body: "Fixing holes filled, walls and ceilings repaired and decorated, and floors made good, so the unit matches what the lease requires — back to shell, where that is what it asks for.",
         },
         {
           title: "Services made safe",
@@ -237,7 +245,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     faqs: [
       {
         q: "What is a shop strip-out?",
-        a: "The removal of what a tenant added to a unit — fixtures, fittings and signage, and sometimes partitions, flooring and services — so the unit can be handed back to the landlord or fitted out again. A soft strip removes the non-structural items only.",
+        a: "The removal of what a tenant added to a unit — fixtures, fittings and signage, and sometimes partitions, flooring and services — so the unit can be handed back to the landlord or fitted out again. A soft strip removes the non-structural items only. Some firms call the same job shop fitting removal, or a shop clearance.",
       },
       {
         q: "What has to be removed when a shop lease ends?",
@@ -254,11 +262,11 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       { q: "How much does a shop strip-out cost in London?", a: `It depends on the size of the unit, what has to be removed, the making good and the access hours. ${PRICE_ANSWER}` },
       {
         q: "Can you carry out the dilapidations repairs as well?",
-        a: "Making good, decorating, flooring repairs and electrical remedial works can be part of the same job. Structural works, and anything that needs a surveyor’s sign-off, are scoped separately.",
+        a: "Yes, as part of an end-of-lease strip-out: making good, decorating, flooring repairs and electrical remedial works can be in the same job. Structural works, and anything that needs a surveyor’s sign-off, are scoped separately.",
       },
       {
         q: "Can you close several stores at once?",
-        a: "Yes. A multi-site closure runs through one coordinator, with the same evidence standard at every store and one report at the end.",
+        a: "Yes. A store closure programme across several sites runs through one coordinator, with the same evidence standard at every store and one report at the end.",
       },
       { q: "Who carries out the work?", a: WHO_ANSWER },
       { q: "Do you strip out homes or flats?", a: DOMESTIC_ANSWER },
@@ -342,14 +350,14 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "Works, snagging, photographs",
-          body: "The trades are sequenced and followed, the snag list is closed, and you receive photographs and certificates before opening.",
+          body: "The trades are sequenced and followed, the snag list is closed, and at handover you receive the photographs and certificates, before opening day.",
         },
       ],
     },
     faqs: [
       {
         q: "Are you shopfitters?",
-        a: "We coordinate the trades a fit-out needs; we do not design and manufacture shop interiors. If you need a bespoke interior designed and built, you want a design-and-build shopfitter. If you have the layout and need the unit made ready — electrics, decorating, fixtures fitted, signs up, snags closed — that is this service. We also work alongside your shopfitter on the trades they do not cover.",
+        a: "We coordinate the trades a fit-out needs; we do not design and manufacture shop interiors. If you need a bespoke interior designed and built, you want a design-and-build shopfitter — some call them shop fitters, or retail fit-out contractors. If you have the layout and need the unit made ready — electrics, decorating, fixtures fitted, signs up, snags closed — that is this service. We also work alongside your shopfitter on the trades they do not cover.",
       },
       {
         q: "Do you fit out small shops and kiosks?",
@@ -362,6 +370,10 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       {
         q: "Do I need the landlord’s approval to fit out a shop?",
         a: "Usually, for alterations. Many leases require a licence for alterations, and shopping centres publish their own fit-out rules. Check your lease and ask centre management early. We supply the contractor paperwork they ask for; we do not give legal advice.",
+      },
+      {
+        q: "Do you take on a shop refit or refurbishment?",
+        a: "Yes. A refit or refurbishment of a shop that is already trading is planned in sections and done out of hours, so the shop opens as normal between visits. The same goes for a rebrand, or for a commercial unit you have just taken on.",
       },
       { q: "How much does a shop fit-out cost in London?", a: `It depends on the size of the unit, the finish and how many trades are involved. ${PRICE_ANSWER}` },
       {
@@ -404,6 +416,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     cards: {
       eyebrow: "What we do",
       heading: "Electrical work for retail and commercial premises",
+      lede: "A retail electrician is booked around the shop: before the doors open, after they close, or overnight inside a centre.",
       items: [
         {
           title: "Faults and call-outs",
@@ -486,7 +499,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     crumb: "Commercial handyman",
     title: "Commercial Handyman London | Shops & Offices",
     description:
-      "Commercial handyman services for shops, kiosks and offices in London. Doors, shelving, ceilings, signs and snag lists, done around your trading hours. Insured.",
+      "Commercial handyman services for shops, kiosks and offices in London. Doors, shelving, ceilings, signs and snag lists, out of hours. Vetted, insured trades.",
     eyebrow: "Commercial handyman",
     h1: "Commercial handyman services for shops and offices in London",
     lede: "The small jobs that keep a shop presentable and safe — a door that will not close, a loose shelf, a stained ceiling tile, a sign that needs fixing — handled by vetted, insured tradespeople who work around your trading hours. One job or a list of them, anywhere in London.",
@@ -547,7 +560,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       },
       {
         q: "Can the work be done outside opening hours?",
-        a: "Yes. Early mornings, evenings and overnight visits are normal for retail, and inside a shopping centre they are usually required.",
+        a: "Yes. Out-of-hours visits — early mornings, evenings and overnight — are normal for retail, and inside a shopping centre they are usually required.",
       },
       {
         q: "Do you provide RAMS and insurance documents?",
@@ -681,6 +694,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     cards: {
       eyebrow: "What we do",
       heading: "Carpentry and joinery for retail and commercial premises",
+      lede: "A shop carpenter for the repair in front of you, and shop joinery built to match what is already there.",
       items: [
         {
           title: "Counters and till points",
@@ -775,26 +789,27 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     cards: {
       eyebrow: "What we attend",
       heading: "The faults that cannot wait until morning",
+      lede: "Emergency maintenance is reactive maintenance at its most urgent: the first visit makes the site safe, and the repair is finished after it.",
       items: [
         {
           title: "Shutters and doors",
-          body: "Shutters stuck open or closed, doors that will not lock, failed closers and damaged entrances secured.",
+          body: "Roller shutters stuck open or closed, doors that will not lock, failed closers and damaged entrances secured, and the shutter repair followed through.",
         },
         {
           title: "Electrical faults",
-          body: "Loss of power, tripping boards, burning smells and failed lighting made safe by qualified electrical contractors.",
+          body: "Loss of power, tripping boards, burning smells, failed lighting and unsafe illuminated signs made safe by qualified electrical contractors.",
         },
         {
           title: "Leaks and floods",
-          body: "Leaks through ceilings, burst pipes, and blocked toilets and drains contained and repaired.",
+          body: "Leaks through ceilings, burst pipes, and blocked toilets and drains contained and repaired by a commercial plumber.",
         },
         {
           title: "Glazing and shopfronts",
-          body: "Smashed or cracked glass boarded up and made safe, with the replacement glazing arranged once it is measured.",
+          body: "Smashed or cracked shopfront glass made safe by emergency boarding up, with a glazier arranged to replace the pane once it is measured.",
         },
         {
           title: "Locks and security",
-          body: "Lost keys, snapped keys, forced locks and break-in damage secured.",
+          body: "Lost keys, snapped keys, forced locks and break-in damage secured by a commercial locksmith.",
         },
         {
           title: "Heating, cooling and refrigeration",
@@ -895,6 +910,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     cards: {
       eyebrow: "What we do",
       heading: "Everything a shop needs kept working",
+      lede: "Retail maintenance, store maintenance, retail property maintenance: three names for the same list of things a shop needs kept working.",
       items: [
         {
           title: "Reactive repairs",
@@ -904,7 +920,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "Planned maintenance",
-          body: "Servicing and recurring visits scheduled before faults become urgent, with reminders and an asset history.",
+          body: "Planned preventative maintenance (PPM): servicing and recurring visits scheduled before faults become urgent, with reminders and an asset history.",
           href: "/services",
           linkLabel: "Planned maintenance",
         },
@@ -939,7 +955,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       heading: "One job, or every store",
       items: [
         "One-off jobs: any shop, kiosk or retail unit in London, quoted before work starts",
-        "Monthly coordination: portfolios of five sites and above, with the per-store rates published on the pricing page",
+        "Monthly multi-site coordination: portfolios of five sites and above, with the per-store rates published on the pricing page",
         "On a plan, contractors invoice you directly at their own rates, with no markup on trades",
         "Keep the contractors you already trust, and use the vetted network where you have no cover",
         "Photo evidence checked before any job is closed",
@@ -957,6 +973,10 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       {
         q: "What is the difference between reactive and planned maintenance?",
         a: "Reactive maintenance repairs something after it fails. Planned maintenance services it on a schedule so that it fails less often and the statutory checks are not missed. Most shops need both.",
+      },
+      {
+        q: "Is this the same as facilities management?",
+        a: "It is the maintenance side of facilities management: the repairs, the planned maintenance and the compliance visits, coordinated for retailers who have no facilities team of their own.",
       },
       {
         q: "Do you mark up contractors’ prices?",

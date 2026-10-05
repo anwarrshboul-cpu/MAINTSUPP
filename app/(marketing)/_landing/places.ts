@@ -160,7 +160,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     cards: {
       eyebrow: "What we take on",
       heading: "Services for commercial premises in London",
-      lede: "Each is available as a one-off job, quoted before work starts.",
+      lede: "Each is available as a one-off job, quoted before work starts. Call it property maintenance, building maintenance or facilities maintenance: it starts with one call.",
       items: [
         {
           title: "24-hour emergency repairs",
@@ -304,7 +304,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
       "Shop and kiosk maintenance at Westfield Stratford City, E20: repairs, electricians, kiosk installs and strip-outs, overnight under the centre’s permit rules.",
     eyebrow: "Westfield Stratford City, E20",
     h1: "Shop and kiosk maintenance at Westfield Stratford City",
-    lede: "Repairs, trades, kiosk installs and store works for retailers trading at Westfield Stratford City. MAINTSUPP has coordinated jobs inside the centre for an existing retail client, so the permit, access and out-of-hours routine is familiar ground. One-off jobs are welcome, and the emergency line is answered 24 hours a day.",
+    lede: "Repairs, trades, kiosk installs and store works for retailers trading at Westfield Stratford City, in Newham. MAINTSUPP has coordinated jobs inside the centre for an existing retail client, so the permit, access and out-of-hours routine is familiar ground. One-off jobs are welcome, and the emergency line is answered 24 hours a day.",
     photo: {
       src: "/assets/pages/service-projects-v1.jpg",
       alt: "A fitting team installing a glass display kiosk in a shopping centre, one fitting a panel while another checks a drawing",
@@ -544,7 +544,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     places: {
       eyebrow: "Where we work",
       heading: "Shopping centres and high streets in East London",
-      lede: "MAINTSUPP takes jobs at shops and kiosks in these centres, and on the high streets between them.",
+      lede: "MAINTSUPP takes jobs at shops and kiosks in these centres, and on the high streets between them — a single repair, or the trades a new shop needs alongside your shop fitters.",
       items: [
         { name: "Westfield Stratford City", where: "Stratford, E20", href: "/london/westfield-stratford-city" },
         { name: "Stratford Centre", where: "Stratford, E15" },

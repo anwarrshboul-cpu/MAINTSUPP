@@ -50,10 +50,13 @@ export const HOME_COPY = {
    * hyphen at most widths ("multi- / site maintenance").
    *
    * The kicker carries the place and the hours rather than repeating the
-   * headline's "commercial maintenance" a line above it.
+   * headline's "commercial maintenance" a line above it. It first read "London
+   * and UK-wide · 24-hour emergency line", which can be taken as an emergency
+   * line for the whole UK. The line is London only — the footer and the FAQ say
+   * so — and now the kicker does too, at one character shorter than before.
    */
   hero: {
-    kicker: "London and UK-wide · 24-hour emergency line",
+    kicker: "UK-wide · 24-hour emergency line in London",
     titleLead: "Multi-site, shop and kiosk maintenance,",
     titleAccent: "managed through one point of contact.",
     lede: "MAINTSUPP coordinates repairs, planned maintenance, compliance and store works for commercial premises, from one kiosk in a London shopping centre to a portfolio across the UK, through one contact and a vetted contractor network.",

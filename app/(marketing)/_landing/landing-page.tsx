@@ -6,6 +6,8 @@ import {
   serviceData,
   type BreadcrumbItem,
 } from "../_components/structured-data";
+import { readPagePicture } from "../../lib/page-pictures-public";
+import type { PagePicture } from "../../lib/page-pictures";
 import { ApprovedPhoto } from "../_sections/approved-photo";
 import { EMAIL, PHONE_DISPLAY, PHONE_HREF, type LandingCard, type LandingPage as Page } from "./types";
 
@@ -27,6 +29,13 @@ import { EMAIL, PHONE_DISPLAY, PHONE_HREF, type LandingCard, type LandingPage as
  * for describing a job — it asks how many sites a portfolio has — so the email
  * is the route that lets somebody say what they need, and the subject tells the
  * inbox which page it came from.
+ *
+ * THE PICTURE CAN BE CHANGED FROM THE CONSOLE. Each page ships with a
+ * photograph from the approved pack. An image in the media library whose title
+ * is the page's address — `/london/brent-cross` — and which has alt text takes
+ * its place (`app/lib/page-pictures.ts` gives the rule and the reasons). The
+ * read is cached and can only ever answer "no library picture", so a page is
+ * never waiting on it and never fails because of it.
  */
 
 function mailto(subject: string): string {
@@ -52,7 +61,29 @@ function CardLink({ card }: { card: LandingCard }) {
   );
 }
 
-export function LandingPage({ page }: { page: Page }) {
+/**
+ * A library picture, in the same box the approved photograph fills. A real
+ * `<img>` inside a `<picture>` — the shape `page-parts.css` positions, and the
+ * one `@next/next/no-img-element` does not object to — from this app's own
+ * immutable `/media/...` route, already web-sized by the upload.
+ */
+function LibraryPicture({ picture }: { picture: PagePicture }) {
+  return (
+    <picture>
+      <img
+        className="pagehero__photo"
+        src={picture.src}
+        alt={picture.alt}
+        loading="eager"
+        decoding="async"
+        {...(picture.width && picture.height ? { width: picture.width, height: picture.height } : {})}
+      />
+    </picture>
+  );
+}
+
+export async function LandingPage({ page }: { page: Page }) {
+  const picture = await readPagePicture(page.path);
   const area = page.kind === "area" ? page.crumb : undefined;
   /* The sections after the first alternate plain and tinted, whichever of the
      optional ones a page has — so a page without steps does not put two tinted
@@ -67,13 +98,17 @@ export function LandingPage({ page }: { page: Page }) {
         title={page.h1}
         lede={page.lede}
         media={
-          <ApprovedPhoto
-            src={page.photo.src}
-            alt={page.photo.alt}
-            sizes="(min-width: 1024px) 600px, 100vw"
-            loading="eager"
-            className="pagehero__photo"
-          />
+          picture ? (
+            <LibraryPicture picture={picture} />
+          ) : (
+            <ApprovedPhoto
+              src={page.photo.src}
+              alt={page.photo.alt}
+              sizes="(min-width: 1024px) 600px, 100vw"
+              loading="eager"
+              className="pagehero__photo"
+            />
+          )
         }
       >
         <a className="btn btn--primary btn--lg" href={PHONE_HREF}>
