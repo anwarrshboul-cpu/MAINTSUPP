@@ -171,3 +171,22 @@ The `/locations/...` and `/sectors/...` routes planned in the table above are su
 - **No prices for one-off jobs.** The owner chose "quoted per job". Competitors that publish an hourly rate and a call-out fee are named in the October 2026 research, and price words are heavily typed ("day rate london", "cost", "rates"), so this is the first thing to revisit.
 - **No review or accreditation claims.** None has been supplied.
 - **The enquiry form has no field for describing a job.** The London pages use a telephone link and an email link with a subject line instead. A "what do you need?" field needs a column and a migration.
+
+## Second pass, 5 October 2026
+
+A fresh-eyes review of the pages after release found three things, all fixed in this pass.
+
+- **Supporting phrases that were typed but not on their page.** The page text now carries them: "roller shutter", "commercial plumber", "commercial locksmith", "glazier" and "boarding up" on `/london/emergency-repairs`; "retail fit-out", "shop fitters", "refit" and "refurbishment" on `/london/shop-fit-out`; "shop fitting removal", "back to shell", "end-of-lease" and "store closure" on `/london/shop-strip-out`; "pop-up shop", "promotional stand", "de-rig" and "kiosk fit-out" on `/london/kiosk-installation`; "retail electrician", "shop carpenter", "shop joinery", "store maintenance", "retail property maintenance", "PPM" and "facilities management" on their own pages; "building maintenance" and "facilities maintenance" on the hub.
+- **Two labels that read as a UK-wide emergency line.** The homepage kicker and the `/contact` title now say London. The line is London only.
+- **"Insured." in the handyman description** read as a claim about MAINTSUPP's own cover, which has not been supplied. It now says "Vetted, insured trades", which is what the vetting checks.
+
+## Pictures on the London pages
+
+Each page ships with a photograph from the approved pack, and nine of the seventeen shared one with another page or showed the wrong trade. The owner changes them from the console, without a release:
+
+- an image in the media library (`/admin/media`) whose **title is the page's address** — `/london/brent-cross` — and which has **alt text** is that page's picture, within a minute;
+- no alt text, no picture: the page keeps the photograph it ships with;
+- two images with one address: one still in the library beats an archived one, then the most recently changed wins;
+- to stop using one, change its title or delete it.
+
+`app/lib/page-pictures.ts` is the rule and its reasons; `tests/london-page-pictures.test.mjs` pins it. A generated picture is an illustration: its alt text says what it shows, never that it is a MAINTSUPP job, and never names a centre it is not of.

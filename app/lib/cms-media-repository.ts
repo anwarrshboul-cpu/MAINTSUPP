@@ -105,6 +105,35 @@ export async function listMedia(db: Database): Promise<MediaItem[]> {
     .map((row) => toItem(row, byId.get(row.currentVersionId as string) ?? null, counts.get(row.id) ?? 0));
 }
 
+/**
+ * Every image's title and state, and nothing else — what `page-pictures.ts`
+ * chooses a London page's picture from. Images only, archived ones included
+ * (an archived asset keeps working where it is used), and an image whose first
+ * upload never completed is marked rather than dropped, so the chooser can say
+ * why it was passed over. A library holds hundreds, not millions.
+ */
+export async function listImageTitles(
+  db: Database,
+): Promise<Array<{ id: string; title: string; status: "active" | "archived"; updatedAt: string; hasFile: boolean }>> {
+  const rows = await db
+    .select({
+      id: cmsMedia.id,
+      title: cmsMedia.title,
+      status: cmsMedia.status,
+      updatedAt: cmsMedia.updatedAt,
+      currentVersionId: cmsMedia.currentVersionId,
+    })
+    .from(cmsMedia)
+    .where(eq(cmsMedia.kind, "image"));
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status === "archived" ? "archived" : "active",
+    updatedAt: row.updatedAt,
+    hasFile: Boolean(row.currentVersionId),
+  }));
+}
+
 /** One asset and every file it has had, newest first. */
 export async function readMedia(db: Database, id: string): Promise<{ item: MediaItem; versions: MediaVersion[] } | null> {
   const [row] = await db.select().from(cmsMedia).where(eq(cmsMedia.id, id)).limit(1);

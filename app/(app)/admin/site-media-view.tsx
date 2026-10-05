@@ -328,6 +328,13 @@ export function SiteMediaView() {
             <label className="admin-field">
               <span>Title</span>
               <input maxLength={data.rules.titleMax} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+              {/* The one rule of `app/lib/page-pictures.ts`, said where the title is typed. */}
+              {item.kind === "image" && (
+                <small>
+                  To make this the picture at the top of a London page, use the page&apos;s address as the title — for example
+                  /london/brent-cross — and give it alt text. The page changes within a minute.
+                </small>
+              )}
             </label>
             {item.kind === "image" && (
               <label className="admin-field">
