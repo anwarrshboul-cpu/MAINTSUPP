@@ -18,7 +18,10 @@ import { pageSocial } from "../../lib/page-social";
  * form would be the wrong page.
  */
 
-const TITLE = "Contact Us: Quotes, Portfolio Reviews, 24/7 Line";
+/* "24/7 Line" alone read as a line for the whole UK. The emergency line is
+   London only, so the title says where; "Plans" is the portfolio review this
+   page books. */
+const TITLE = "Contact Us: Quotes, Plans & London 24/7 Line";
 const DESCRIPTION =
   "Contact MAINTSUPP: call 07852 224644 at any hour for an emergency in London, email for a one-off quote, or book a free 30-minute portfolio review.";
 
