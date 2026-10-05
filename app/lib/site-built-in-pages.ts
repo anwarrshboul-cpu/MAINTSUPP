@@ -24,8 +24,12 @@ import { SITE_ROUTES } from "./site-navigation.ts";
  * "home"  — it opens with the Home page's sections, so its headings are the
  *           Home page's copy; the rest of the page is part of the site build.
  * "fixed" — a legal notice, published as written.
+ * "build" — a London page (`app/(marketing)/london/`). Its words are data in
+ *           `app/(marketing)/_landing/`, part of the site build, and Website
+ *           copy has no tab for it. It is NOT a legal notice, which is what
+ *           falling through to "fixed" would have called it on the Pages screen.
  */
-export type BuiltInPageWords = "copy" | "home" | "fixed";
+export type BuiltInPageWords = "copy" | "home" | "fixed" | "build";
 
 export type BuiltInSitePage = {
   key: string;
@@ -46,13 +50,24 @@ export const HOME_COPY_PATHS: readonly string[] = [
   "/contact",
 ];
 
+/** The London hub and everything under it. */
+const isLondonPage = (path: string): boolean => path === "/london" || path.startsWith("/london/");
+
 const wordsOf = (path: string): BuiltInPageWords =>
-  OWN_COPY_PATHS.includes(path) ? "copy" : HOME_COPY_PATHS.includes(path) ? "home" : "fixed";
+  OWN_COPY_PATHS.includes(path)
+    ? "copy"
+    : HOME_COPY_PATHS.includes(path)
+      ? "home"
+      : isLondonPage(path)
+        ? "build"
+        : "fixed";
 
 export const BUILT_IN_SITE_PAGES: readonly BuiltInSitePage[] = SITE_ROUTES.filter(
   (route) => route.path !== "/portal",
 ).map((route) => ({
-  key: route.path === "/" ? "home" : route.path.slice(1),
+  /* A nested address keeps its slash out of the key: `london/brent-cross`
+     would read as a path wherever the key is used as an id. */
+  key: route.path === "/" ? "home" : route.path.slice(1).replace(/\//g, "-"),
   label: route.label,
   path: route.path,
   words: wordsOf(route.path),
@@ -63,4 +78,5 @@ export const BUILT_IN_WORDS_LABEL: Record<BuiltInPageWords, string> = {
   copy: "Built-in · words in Website copy",
   home: "Built-in · headings from the Home page copy",
   fixed: "Built-in · legal notice",
+  build: "Built-in · written in the site build",
 };

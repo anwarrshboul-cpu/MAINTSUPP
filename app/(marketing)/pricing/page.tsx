@@ -5,6 +5,7 @@ import { faq as SHIPPED_QUESTIONS } from "../_sections/content";
 import { ApprovedPhoto } from "../_sections/approved-photo";
 import { Pricing } from "../_sections/pricing";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
+import { ENTRY_BAND } from "../_sections/rates";
 import { pageSocial } from "../../lib/page-social";
 
 /**
@@ -19,9 +20,14 @@ import { pageSocial } from "../../lib/page-social";
  * edit changes here too).
  */
 
-const TITLE = "Pricing";
-const DESCRIPTION =
-  "Simple per-store pricing for multi-site maintenance coordination. Contractors invoice you directly at their agreed rates — no hidden markups on trades.";
+/* "Pricing" alone rendered as "Pricing | MAINTSUPP". The title now says what is
+   priced and the one thing about it a buyer cares about. */
+const TITLE = "Maintenance Pricing Per Store | No Trade Markup";
+/* The two entry rates are INTERPOLATED from `rates.ts`, never typed — the same
+   rule, and the same reason, as the cost answer in `_sections/content.ts`:
+   `tests/homepage-v3.test.mjs` forbids a typed pound-and-digit outside
+   `pricing.tsx`, and a figure derived here cannot go stale. */
+const DESCRIPTION = `Published monthly rates: Essential from £${ENTRY_BAND.essential} and Complete from £${ENTRY_BAND.complete} per store, with no markup on trades. One-off jobs in London are quoted individually.`;
 
 export const metadata: Metadata = {
   title: TITLE,

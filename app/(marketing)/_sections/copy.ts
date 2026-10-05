@@ -28,11 +28,35 @@
 
 export const HOME_COPY = {
   /* Hero */
+  /*
+   * REWRITTEN IN OCTOBER 2026, WITH THE PROPOSITION.
+   *
+   * The headline said "Multi-site commercial maintenance" and nothing else on
+   * the page said shop, kiosk or London — while the owner had begun taking
+   * one-off jobs from single shops and kiosks in London's shopping centres, with
+   * emergency call-outs at any hour. The H1 is what a search engine weighs most
+   * on a page, so it now names the three buyers in the words they search by:
+   * multi-site, shop, kiosk. The second half is unchanged, because "one point
+   * of contact" is still the whole offer.
+   *
+   * IT IS KEPT SHORT ON PURPOSE, and so is the paragraph under it. The first
+   * draft read "Commercial maintenance for shops, kiosks and multi-site
+   * retailers," and at 1280 pixels that ran to six lines of display type and
+   * pushed both buttons below the fold. Measured in a browser at 390, 768, 1280
+   * and 1440 pixels, this headline and this paragraph each break into exactly
+   * the number of lines the old ones did, so the buttons sit where they sat.
+   * "Commercial" is in the title tag and the paragraph instead. The word order
+   * is measured too: with "multi-site" later in the line it broke after its own
+   * hyphen at most widths ("multi- / site maintenance").
+   *
+   * The kicker carries the place and the hours rather than repeating the
+   * headline's "commercial maintenance" a line above it.
+   */
   hero: {
-    kicker: "Commercial maintenance across the UK",
-    titleLead: "Multi-site commercial maintenance,",
+    kicker: "London and UK-wide · 24-hour emergency line",
+    titleLead: "Multi-site, shop and kiosk maintenance,",
     titleAccent: "managed through one point of contact.",
-    lede: "Maintsupp coordinates reactive repairs, planned maintenance and compliance services for retailers and commercial operators across the UK — through one managed contact and a vetted contractor network.",
+    lede: "MAINTSUPP coordinates repairs, planned maintenance, compliance and store works for commercial premises, from one kiosk in a London shopping centre to a portfolio across the UK, through one contact and a vetted contractor network.",
     pills: [
       "Vetted UK contractor network",
       "Evidence-based close-out",
@@ -45,8 +69,11 @@ export const HOME_COPY = {
   /* Who we help */
   whoWeHelp: {
     eyebrow: "Who we help",
-    heading: "Built for multi-site operators without an in-house FM team.",
-    note: "Typically 5–50 locations spread across regions — managed today through scattered calls and spreadsheets.",
+    heading: "Built for retailers and commercial operators without an in-house FM team.",
+    /* "Typically 5–50 locations" stays word for word: the pricing calculator
+       opens on the bottom of that range and `tests/homepage-v3.test.mjs` checks
+       the two agree. What is added is the buyer the range never covered. */
+    note: "Typically 5–50 locations spread across regions on a monthly plan — and single shops and kiosks in London, one job at a time.",
   },
 
   /* Services */
@@ -123,7 +150,10 @@ export const HOME_COPY = {
     eyebrow: "Contact us or book a portfolio review",
     heading: "Not sure where your maintenance is leaking time and money?",
     lede: "Book a free portfolio review — 30 minutes, no obligation. Or use the same form to tell us what you need.",
-    note: "Best suited to multi-site commercial operators seeking ongoing coordination rather than one-off domestic repairs.",
+    /* Was "best suited to multi-site commercial operators … rather than one-off
+       domestic repairs", which turned away the one-off COMMERCIAL job the owner
+       now takes. The line it draws is still drawn — no domestic work. */
+    note: "For commercial premises only: a one-off job at a single shop or kiosk, or ongoing coordination across a portfolio. We do not take domestic work. For an emergency in London, call 07852 224644 at any hour.",
   },
   /* Report a Job — the form section's own heading and eyebrow. Its intro line
      stays in the component because it carries markup (the required-field
@@ -193,19 +223,34 @@ export type PageCopy = typeof PAGE_COPY;
  * description and not this, the shared line stays as it shipped.
  */
 export const SEO_COPY = {
+  /*
+   * THE HOME TITLE LEADS WITH WHAT IS SEARCHED, NOT WITH THE NAME.
+   *
+   * It read "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK":
+   * brand first, and no "shop", "retail" or "London" anywhere in it. Of the
+   * twenty-two competitors read in October 2026 not one uses the word
+   * "coordination" in a title, because nobody searches for it. The brand moves
+   * to the end, where the root template puts it on every other page — after a
+   * dash rather than a bar, because this title is `absolute` and
+   * `tests/site-content.test.mjs` refuses "| MAINTSUPP" in any shipped title,
+   * so that the template's suffix can never be doubled.
+   */
   home: {
-    title: "Maintsupp — Multi-Site Commercial Maintenance Coordination, UK",
-    /* 160 characters: the 191-character line was cut off in search results. */
-    description: "One point of contact for reactive repairs, planned maintenance and compliance across UK retail and commercial portfolios. Vetted contractors, per-store pricing.",
-    socialDescription: "One point of contact for reactive repairs, planned maintenance and compliance across your retail or commercial portfolio.",
+    title: "Shop & Commercial Maintenance, London & UK-Wide — MAINTSUPP",
+    /* At most 160 characters: a longer line is cut off in search results. */
+    description: "One point of contact for shop repairs, kiosk works, planned maintenance and compliance. London 24/7 call-outs, UK multi-site portfolios, vetted contractors.",
+    socialDescription: "One point of contact for repairs, planned maintenance, compliance and store works — a single shop or kiosk in London, or every site in your portfolio.",
   },
   contractors: {
     title: "Join the Contractor Network — Maintsupp",
     description: "Maintsupp allocates multi-site commercial maintenance to vetted independent contractors across the UK. Apply to join the network.",
   },
   faqs: {
-    title: "FAQs",
-    description: "Straight answers to the questions operations teams ask about maintenance coordination, contractor management and compliance.",
+    /* Was "FAQs", which rendered as "FAQs | MAINTSUPP" and told a searcher
+       nothing about what the questions were. Still bare: the template adds the
+       brand once. */
+    title: "FAQs: Commercial Maintenance, Contractors & Costs",
+    description: "Straight answers on one-off jobs, 24/7 emergency call-outs, contractors, pricing and compliance for shops and multi-site commercial portfolios.",
   },
 } as const;
 

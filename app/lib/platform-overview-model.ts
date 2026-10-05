@@ -75,7 +75,7 @@ export type PageRow = {
   changedAt: string | null;
   href: string;
   /** Built-in pages only: where the page's words come from. */
-  words?: "copy" | "home" | "fixed";
+  words?: "copy" | "home" | "fixed" | "build";
 };
 
 /**
@@ -88,7 +88,7 @@ export type PageRow = {
  * nothing has been saved.
  */
 export function websitePageRows(
-  builtIn: ReadonlyArray<{ key: string; label: string; path: string; words?: "copy" | "home" | "fixed" }>,
+  builtIn: ReadonlyArray<{ key: string; label: string; path: string; words?: "copy" | "home" | "fixed" | "build" }>,
   builtInChangedAt: string | null,
   cms: ReadonlyArray<{ id: string; slug: string; title: string; state: PageState; updatedAt: string }>,
 ): PageRow[] {
@@ -100,9 +100,10 @@ export function websitePageRows(
     state: "live",
     /* A legal notice is not part of the copy document, so that document's save
        time says nothing about it; and its link is the page itself, because
-       Website copy has no tab to send the reader to. */
-    changedAt: page.words === "fixed" ? null : builtInChangedAt,
-    href: page.words === "fixed" ? page.path : "/admin/copy",
+       Website copy has no tab to send the reader to. A London page ("build")
+       is the same on both counts: its words ship with the site. */
+    changedAt: page.words === "fixed" || page.words === "build" ? null : builtInChangedAt,
+    href: page.words === "fixed" || page.words === "build" ? page.path : "/admin/copy",
     words: page.words ?? "copy",
   }));
   const written: PageRow[] = [...cms]

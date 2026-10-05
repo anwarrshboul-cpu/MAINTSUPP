@@ -407,7 +407,21 @@ export const testimonials = [
 export const faq = [
   {
     "q": "Do you employ your own engineers?",
-    "a": "No, and we will not pretend otherwise. Maintsupp is a coordination and control layer. We source, vet, assign and performance-manage independent trade contractors according to your portfolio, trade and region."
+    "a": "No, and we will not pretend otherwise. MAINTSUPP is a coordination and control layer. We source, vet, assign and performance-manage independent trade contractors according to your portfolio, trade and region."
+  },
+  {
+    /* ADDED IN OCTOBER 2026, WITH THE NEXT ONE, when the owner widened the
+       proposition: one-off jobs from a single shop or kiosk in London, and an
+       emergency line answered at any hour. They sit second and third because
+       they are now the first two things a London shop manager needs to know,
+       and because the list below still said the opposite — "below five sites,
+       call trades directly" — to exactly that reader. */
+    "q": "Do you take one-off jobs for a single shop or kiosk?",
+    "a": "Yes. In London a single shop, kiosk, restaurant or office can book one job — a repair, an electrician, a kiosk install or removal, a strip-out — and each job is quoted before work starts. The monthly coordination plans are for portfolios of five sites and above."
+  },
+  {
+    "q": "Do you offer 24/7 emergency call-outs?",
+    "a": "Yes, for commercial premises in London. Call 07852 224644 at any hour. We tell you the realistic attendance time before you commit, send a vetted contractor to make the site safe, and arrange the permanent repair. Office hours for everything else are Monday to Friday, 8:30am to 5:30pm."
   },
   {
     "q": "Can you cover sites outside London?",
@@ -415,7 +429,11 @@ export const faq = [
   },
   {
     "q": "What will you not claim?",
-    "a": "We do not advertise nationwide employed engineers, guaranteed same-day UK coverage or a 24/7 national team. Where dedicated coverage is still being established, urgent work is handled through controlled interim sourcing rather than left unmanaged — and we tell you which is which before you commit sites."
+    /* The third item was "a 24/7 national team". It is narrowed, not dropped:
+       there IS now a round-the-clock line, for London, so the claim that is
+       still refused is the one that would be untrue — a promised arrival time,
+       and round-the-clock cover everywhere. */
+    "a": "We do not advertise nationwide employed engineers, guaranteed same-day UK coverage or a guaranteed arrival time. The 24-hour emergency line is for commercial premises in London. Outside London, where dedicated coverage is still being established, urgent work is handled through controlled interim sourcing rather than left unmanaged — and we tell you which is which before you commit sites."
   },
   {
     "q": "Can we keep our current contractors?",
@@ -429,7 +447,7 @@ export const faq = [
   },
   {
     "q": "Who pays the contractor?",
-    "a": "The standard starting model is that the contractor invoices you directly for technical work, and Maintsupp invoices its coordination fee separately. Alternative arrangements need separate agreement."
+    "a": "The standard starting model is that the contractor invoices you directly for technical work, and MAINTSUPP invoices its coordination fee separately. Alternative arrangements need separate agreement."
   },
   {
     "q": "Do you guarantee a first-time fix?",
@@ -456,16 +474,21 @@ export const faq = [
        `pricing.tsx` precisely so a second copy cannot go stale — deriving
        them satisfies the brief and keeps that rule, because a `£${…}` has no
        digit after the sign. Never type one in here. */
-    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${inWords(INCLUDED_JOBS)} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${inWords(MINIMUM_SITES)} sites. Your final quote is confirmed at the free portfolio review.`
+    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${inWords(INCLUDED_JOBS)} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${inWords(MINIMUM_SITES)} sites for a monthly plan; a one-off job in London is quoted individually. Your final quote is confirmed at the free portfolio review.`
   },
   {
     /* ADDED WITH THE COMMERCIAL UPDATE, immediately after the cost answer,
        because it is the question the cost answer provokes. It turns a lead
-       away in plain words, which is the point: below five sites the
-       coordination fee costs more than the coordination saves, and saying so
-       is worth more than the fee. */
+       away FROM THE MONTHLY PLAN in plain words, which is the point: below five
+       sites the coordination fee costs more than the coordination saves, and
+       saying so is worth more than the fee.
+
+       CHANGED IN OCTOBER 2026. It used to send that reader to "call trades
+       directly". The owner now takes one-off jobs in London, so the honest
+       answer has two halves: the plan is still not for you, and the job still
+       can be. */
     "q": "What if we only have three or four sites?",
-    "a": "Then you're probably better served calling trades directly, and we'd rather say so than take the fee. Our minimum is five sites — below that the coordination cost outweighs what you'd save. If you're opening more this year, come back to us when you reach five."
+    "a": "Then the monthly plan is not for you yet, and we'd rather say so than take the fee. Our minimum is five sites — below that the coordination cost outweighs what you'd save. In London you can still use us for one-off jobs, each quoted before work starts. If you're opening more this year, come back to us about a plan when you reach five."
   },
   {
     "q": "Can store teams report jobs directly?",

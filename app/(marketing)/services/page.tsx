@@ -9,6 +9,8 @@ import { Services } from "../_sections/services";
 import { WhoWeHelp } from "../_sections/who-we-help";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
 import { pageSocial } from "../../lib/page-social";
+import Link from "next/link";
+import { landingPage } from "../_landing/index.ts";
 
 /**
  * /services — what Maintsupp coordinates, in full.
@@ -21,9 +23,11 @@ import { pageSocial } from "../../lib/page-social";
  * now — nothing below was written for this page.
  */
 
-const TITLE = "Maintenance Services";
+/* "Maintenance Services" named neither the buyer nor the kind of premises. The
+   title now carries "commercial" and "shops", which is how this is searched. */
+const TITLE = "Commercial Maintenance Services for Shops & Sites";
 const DESCRIPTION =
-  "Reactive repairs, planned maintenance, compliance administration and store projects for UK multi-site commercial operators — coordinated through one point of contact.";
+  "Reactive repairs, planned maintenance, compliance, kiosk and store works for single shops and multi-site portfolios, through one point of contact.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -75,6 +79,9 @@ const TRADE_SUPPLIED: Partial<Record<(typeof TRADE_DETAIL)[number]["id"], { src:
 };
 const TRADE_SIZES = "(min-width: 1024px) 300px, (min-width: 640px) 50vw, 100vw";
 
+/* The London hub's own list of services, drawn here as well. */
+const LONDON = landingPage("/london");
+
 const SIZES = "(min-width: 1024px) 560px, 100vw";
 
 export default async function ServicesPage() {
@@ -84,7 +91,7 @@ export default async function ServicesPage() {
       <PageHero
         crumbs={[{ name: "Home", path: "/" }, { name: "Services", path: "/services" }]}
         eyebrow="Services"
-        title="Maintenance services for multi-site commercial operators"
+        title="Commercial maintenance services for shops, kiosks and multi-site operators"
         lede="Reactive repairs, planned maintenance, compliance administration and store projects — run through one managed point of contact and a vetted UK contractor network, with photo evidence on every close-out."
         media={
           <ApprovedPhoto
@@ -188,6 +195,50 @@ export default async function ServicesPage() {
             </li>
           ))}
         </ul>
+      </PageSection>
+
+      {/* The door to the London pages. The services above are described for a
+          portfolio; these are the same trades as one-off jobs, each with a page
+          of its own, and this is the list the London hub draws — one source, so
+          the two cannot name different services. */}
+      <PageSection
+        tint
+        id="london"
+        eyebrow="London"
+        heading="One-off jobs for shops and kiosks in London"
+        lede="A single shop, kiosk, restaurant or office can book one job, quoted before work starts. The emergency line is answered 24 hours a day."
+      >
+        <ul className="factgrid factgrid--three reveal" role="list">
+          {LONDON.cards.items.map((card) => (
+            <li className="factcard" key={card.title}>
+              <h3 className="factcard__title">{card.title}</h3>
+              <p>{card.body}</p>
+              {card.href ? (
+                <Link className="contactcard__link" href={card.href}>
+                  {card.linkLabel ?? card.title}
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+        {/* `.pagefaq` is only borrowed for its top margin, so the row of links
+            does not sit against the cards above it. */}
+        <div className="pagefaq reveal">
+        <p className="contactcard__links">
+          <Link className="contactcard__link" href="/london">
+            All London services
+          </Link>
+          <Link className="contactcard__link" href="/london/westfield-stratford-city">
+            Westfield Stratford City
+          </Link>
+          <Link className="contactcard__link" href="/london/westfield-london-white-city">
+            Westfield London, White City
+          </Link>
+          <Link className="contactcard__link" href="/london/brent-cross">
+            Brent Cross
+          </Link>
+        </p>
+        </div>
       </PageSection>
 
       <WhoWeHelp copy={home.copy.whoWeHelp} />

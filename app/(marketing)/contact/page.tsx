@@ -18,9 +18,9 @@ import { pageSocial } from "../../lib/page-social";
  * form would be the wrong page.
  */
 
-const TITLE = "Contact Us";
+const TITLE = "Contact Us: Quotes, Portfolio Reviews, 24/7 Line";
 const DESCRIPTION =
-  "Contact Maintsupp about multi-site maintenance coordination: book a free 30-minute portfolio review, call, email, or send an enquiry. Existing clients can report a job.";
+  "Contact MAINTSUPP: call 07852 224644 at any hour for an emergency in London, email for a one-off quote, or book a free 30-minute portfolio review.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -58,14 +58,17 @@ export default async function ContactPage() {
         <ul className="contactcards reveal" role="list">
           <li className="contactcard">
             <h3 className="contactcard__title">Call</h3>
-            <p>Speak to us directly, Monday to Friday, 8:30am to 5:30pm.</p>
+            <p>
+              Speak to us directly, Monday to Friday, 8:30am to 5:30pm. For an emergency at a
+              commercial site in London, call at any hour.
+            </p>
             <a className="contactcard__link" href="tel:+447852224644">
               +44 7852 224644
             </a>
           </li>
           <li className="contactcard">
             <h3 className="contactcard__title">Email</h3>
-            <p>Send details of your portfolio and what you need, and we will come back to you.</p>
+            <p>Send details of the job or of your portfolio, and we will come back to you.</p>
             <a className="contactcard__link" href="mailto:info@maintsupp.com">
               info@maintsupp.com
             </a>

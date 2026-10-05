@@ -19,9 +19,9 @@ import { pageSocial } from "../../lib/page-social";
  * page is not a licence to bring them back.
  */
 
-const TITLE = "Case Study";
+const TITLE = "Case Study: Maintenance for a 27-Store Retailer";
 const DESCRIPTION =
-  "How Maintsupp coordinates maintenance for a UK fragrance retailer with 27 stores and kiosks: one point of contact, vetted contractors and photo-verified close-outs.";
+  "How MAINTSUPP coordinates maintenance for a UK fragrance retailer with 27 stores and kiosks: one contact, vetted contractors and photo-verified close-outs.";
 
 export const metadata: Metadata = {
   title: TITLE,

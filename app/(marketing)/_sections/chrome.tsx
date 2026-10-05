@@ -588,6 +588,12 @@ export function SiteFooter({ navigation }: { navigation: PublicNavigation }) {
             <li>
               <span className="ftr__hours"><Ic d={CLOCK} />Mon – Fri: 8:30am – 5:30pm</span>
             </li>
+            {/* The office keeps office hours; the emergency line does not. Both
+                are true, so the footer says both rather than letting the first
+                read as "closed at 5:30" to a shop with a shutter stuck open. */}
+            <li>
+              <span className="ftr__hours"><Ic d={CLOCK} />Emergencies in London: 24 hours</span>
+            </li>
           </ul>
           {/* Not in the source. The lead form asks people to accept a privacy
               notice, so the notice has to be reachable from the page — which is
