@@ -74,7 +74,7 @@ function expose(row: typeof reportSchedules.$inferSelect) {
 export async function GET(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "data.export");
+    const guard = await scopedDbWithCapability(request, "settings.edit") /* owner decision 2026-10-06: schedules are workspace configuration, not a client's */;
     if (guard.denied) return guard.denied;
     /* The switch holds at the API too, not only in the navigation — see
        `module-guard.ts`. */
@@ -119,7 +119,7 @@ async function recipientsRefusal(scope: ScopedDatabase, encoded: unknown) {
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "data.export");
+    const guard = await scopedDbWithCapability(request, "settings.edit") /* owner decision 2026-10-06: schedules are workspace configuration, not a client's */;
     if (guard.denied) return guard.denied;
     /* The switch holds at the API too, not only in the navigation — see
        `module-guard.ts`. */
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "data.export");
+    const guard = await scopedDbWithCapability(request, "settings.edit") /* owner decision 2026-10-06: schedules are workspace configuration, not a client's */;
     if (guard.denied) return guard.denied;
     /* The switch holds at the API too, not only in the navigation — see
        `module-guard.ts`. */
@@ -234,7 +234,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "data.export");
+    const guard = await scopedDbWithCapability(request, "settings.edit") /* owner decision 2026-10-06: schedules are workspace configuration, not a client's */;
     if (guard.denied) return guard.denied;
     /* The switch holds at the API too, not only in the navigation — see
        `module-guard.ts`. */

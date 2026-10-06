@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "data.export");
+    const guard = await scopedDbWithCapability(request, "settings.edit") /* owner decision 2026-10-06: schedules are workspace configuration, not a client's */;
     if (guard.denied) return guard.denied;
     /* The switch holds at the API too, not only in the navigation — see
        `module-guard.ts`. */

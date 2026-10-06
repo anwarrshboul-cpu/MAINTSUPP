@@ -7123,7 +7123,7 @@ function SettingsView({
         </div>
         {/* Only for `settings.edit`; a client's Save was refused with a 403. */}
         {canEditSettings ? (
-          <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy}>
+          <button className="primary-button" type="button" onClick={() => void saveSettings()} disabled={busy || !canEditSettings}>
             <Icon name="check" size={17} />
             {busy ? "Saving…" : "Save settings"}
           </button>
@@ -7200,6 +7200,7 @@ function SettingsView({
               <input
                 value={slas[option.value] ?? ""}
                 aria-label={`${option.value} SLA`}
+                disabled={!canEditSettings}
                 onChange={(event) =>
                   setSlas((current) => ({ ...current, [option.value]: event.target.value }))
                 }
@@ -7251,6 +7252,7 @@ function SettingsView({
             value={warningWindow}
             placeholder={String(EXPIRY_DUE_SOON_DAYS)}
             aria-label="Compliance warning window in days"
+            disabled={!canEditSettings}
             onChange={(event) => setWarningWindow(event.target.value)}
           />
         </label>
@@ -7289,7 +7291,7 @@ function SettingsView({
             <button
               type="button"
               className="secondary-button admin-mini"
-              disabled={busy}
+              disabled={busy || !canEditSettings}
               onClick={() =>
                 setEvidenceCategories([...RECOMMENDED_EVIDENCE_CATEGORIES])
               }
@@ -7320,7 +7322,7 @@ function SettingsView({
                     <input
                       type="checkbox"
                       checked={on}
-                      disabled={busy}
+                      disabled={busy || !canEditSettings}
                       onChange={() =>
                         setEvidenceCategories((current) =>
                           on
