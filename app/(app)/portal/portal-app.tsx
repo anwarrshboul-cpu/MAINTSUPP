@@ -4324,6 +4324,7 @@ export default function PortalApp({
           initialRecordId={workspaceManager.recordId}
           busy={workspaceBusy}
           canEdit={runtimeContext?.capabilities?.["sites.edit"] !== false}
+          canAdd={runtimeContext?.capabilities?.["board.add"] === true ? ["compliance", "contractor"] : []}
           canImport={runtimeContext?.capabilities?.["data.import"] !== false}
           onClose={() => setWorkspaceManager(null)}
           onSave={saveWorkspaceRecord}

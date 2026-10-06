@@ -73,6 +73,7 @@ import {
   anonymousRefusal,
   busyRefusal,
   scopedDb,
+  scopedDbWithAnyCapability,
   scopedDbWithCapability,
 } from "../../lib/tenant-db";
 import { sampleSeedingAllowed } from "../../lib/tenant-access";
@@ -1864,13 +1865,30 @@ export async function GET(request: Request) {
   }
 }
 
+/**
+ * WHAT `board.add` ALONE MAY DO (owner decision, 2026-10-06): add a group, a
+ * column (or a copy of one) or a dropdown label, and move a group. Each only
+ * ADDS to the board or reorders it; renaming, recolouring, deleting, clearing,
+ * reconfiguring and every job edit still need `board.edit`.
+ */
+const BOARD_ADD_ACTIONS: ReadonlySet<string> = new Set([
+  "create_group",
+  "create_column",
+  "duplicate_column",
+  "create_option",
+  "move_group",
+]);
+
 export async function POST(request: Request) {
   try {
     await ensureDatabase();
     // `identityEmail` and `session` are pulled through for the audit trail:
     // together they distinguish a signed-in action from one taken under the
     // testing role switcher, which a reader cannot tell apart otherwise.
-    const guard = await scopedDbWithCapability(request, "board.edit");
+    /* `board.add` reaches the additive actions only (owner decision,
+       2026-10-06); every other action still needs `board.edit`, checked once
+       the action is known. See `BOARD_ADD_ACTIONS`. */
+    const guard = await scopedDbWithAnyCapability(request, ["board.edit", "board.add"]);
     if (guard.denied) return guard.denied;
     const { actor, db, orgId, identityEmail, session, siteScope } = guard.scope;
     /*
@@ -1892,6 +1910,10 @@ export async function POST(request: Request) {
        work their own jobs here, never reshape the board. See job-site-scope.ts. */
     const structureRefusal = boardActionStructureRefusal(siteScope, action, payload.optionId);
     if (structureRefusal) return structureRefusal;
+    if (!BOARD_ADD_ACTIONS.has(action)) {
+      const editGuard = await scopedDbWithCapability(request, "board.edit");
+      if (editGuard.denied) return editGuard.denied;
+    }
     const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 
@@ -2517,7 +2539,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     await ensureDatabase();
-    const guard = await scopedDbWithCapability(request, "board.edit");
+    const guard = await scopedDbWithAnyCapability(request, ["board.edit", "board.add"]);
     if (guard.denied) return guard.denied;
     // `session` joins the other two for the audit trail: an event whose email
     // has no user id behind it was performed under the testing role switcher,
@@ -2539,6 +2561,10 @@ export async function PATCH(request: Request) {
        work their own jobs here, never reshape the board. See job-site-scope.ts. */
     const structureRefusal = boardActionStructureRefusal(siteScope, action, payload.optionId);
     if (structureRefusal) return structureRefusal;
+    if (!BOARD_ADD_ACTIONS.has(action)) {
+      const editGuard = await scopedDbWithCapability(request, "board.edit");
+      if (editGuard.denied) return editGuard.denied;
+    }
     const boardId = await boardIdFrom(request, db, orgId);
     await ensureBoardState(db, orgId, boardId);
 

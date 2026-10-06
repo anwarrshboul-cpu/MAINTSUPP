@@ -873,6 +873,7 @@ export function WorkspaceDataManager({
   initialRecordId,
   busy,
   canEdit = true,
+  canAdd = [],
   canImport = true,
   onClose,
   onSave,
@@ -889,6 +890,12 @@ export function WorkspaceDataManager({
    * offered a working "+ New" form and an Import tab that then failed on save.
    */
   canEdit?: boolean;
+  /**
+   * Tabs this person may ADD a record to without `canEdit` — `board.add`
+   * (owner decision, 2026-10-06): a client may create a compliance requirement
+   * or a contractor, but not open an existing one for editing or archive it.
+   */
+  canAdd?: readonly ManagerTab[];
   canImport?: boolean;
   onClose: () => void;
   onSave: (entity: Exclude<ManagerTab, "activity" | "import">, id: string | null, data: Record<string, unknown>) => Promise<void>;
@@ -1077,6 +1084,10 @@ export function WorkspaceDataManager({
     });
   }, [query, tab, workspace, customRecords]);
   const readOnlyTab = tab === "activity" || tab === "import" || !canEdit;
+  /* May this person start a NEW record on this tab? Editing still needs
+     `canEdit`; see `canAdd`. */
+  const mayCreate = tab !== "activity" && tab !== "import" && (canEdit || canAdd.includes(tab));
+  const editorOpen = !readOnlyTab || (mayCreate && editorId === null);
 
   /*
    * W05-07 — the configured site types, fetched once.
@@ -1144,7 +1155,7 @@ export function WorkspaceDataManager({
    * keep showing somebody who has since been archived. `form` rather than the
    * record, because it is the value the control is actually bound to.
    */
-  const fields = readOnlyTab
+  const fields = !editorOpen
     ? []
     : fieldsFor(
         tab,
@@ -1180,7 +1191,7 @@ export function WorkspaceDataManager({
   const activeTabLabel = tabs.find((item) => item.key === tab)?.label ?? "records";
 
   const startNew = () => {
-    if (readOnlyTab) return;
+    if (!mayCreate) return;
     const defaults = { ...emptyDefaults[tab] };
     if ("siteId" in defaults && !defaults.siteId) defaults.siteId = workspace.stores[0]?.id ?? "";
     // The workspace's own first site type, the same way the site above is the
@@ -1454,7 +1465,7 @@ export function WorkspaceDataManager({
                   {plannedRunBusy ? "Checking…" : "Create due visits now"}
                 </button>
               )}
-              {!readOnlyTab && <button className="primary-button" type="button" onClick={startNew}><Icon name="plus" size={17} />New</button>}
+              {mayCreate && <button className="primary-button" type="button" onClick={startNew}><Icon name="plus" size={17} />New</button>}
             </div>
 
             {/*
@@ -1541,7 +1552,7 @@ export function WorkspaceDataManager({
             </div>
           </div>
           )}
-          {form && !readOnlyTab && (
+          {form && editorOpen && (
             /*
               W05-05 — CLOSING A SITE FROM HERE ASKS FIRST.
 

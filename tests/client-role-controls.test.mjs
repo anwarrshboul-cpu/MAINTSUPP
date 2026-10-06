@@ -98,7 +98,7 @@ test("a client raises a request with photos, and still cannot edit one", async (
   const app = await read("app/(app)/portal/portal-app.tsx");
   assert.match(app, /\.\.\.\(payload\.uploadToken \? \{ uploadToken: payload\.uploadToken \} : \{\}\)/);
   const perms = await read("app/lib/permissions.ts");
-  assert.match(perms, /client: \["board\.view", "requests\.create", "data\.export", "navigation\.personalise"\]/);
+  assert.match(perms, /client: \["board\.view", "board\.add", "requests\.create", "data\.export", "navigation\.personalise"\]/);
 });
 
 /* The option-list editor existed and was mounted nowhere, while refusals told
