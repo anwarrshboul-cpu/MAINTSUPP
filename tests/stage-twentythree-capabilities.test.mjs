@@ -88,7 +88,10 @@ test("every capability is either enforced or labelled as not yet enforced", asyn
     const escaped = key.replace(".", "\\.");
     return sources.filter((source) =>
       new RegExp(
-        `(requireCapability\\([^)]*|scopedDbWithCapability\\(request, |can\\([^)]*, )"${escaped}"`,
+        /* A FOURTH SHAPE (2026-10-06): `scopedDbWithAnyCapability(request,
+           ["board.edit", "board.add"])` refuses exactly as the single-capability
+           guard does, when the caller holds none of the listed grants. */
+        `(requireCapability\\([^)]*|scopedDbWithCapability\\(request, |scopedDbWithAnyCapability\\(request, \\[[^\\]]*|can\\([^)]*, )"${escaped}"`,
       ).test(source),
     ).length;
   };

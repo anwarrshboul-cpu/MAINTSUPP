@@ -1591,6 +1591,9 @@ async function authoriseWorkspaceWrite(
   authenticated: boolean,
   entity: string | undefined,
   intent: "write" | "deactivate" = "write",
+  /* A second capability that also authorises this write — `board.add` for
+     CREATING a compliance requirement or a contractor (2026-10-06). */
+  orCapability?: Capability,
 ): Promise<Response | null> {
   if (!authenticated) {
     return Response.json({ error: "Sign in to make this change." }, { status: 401 });
@@ -1603,8 +1606,19 @@ async function authoriseWorkspaceWrite(
     return Response.json({ error: "Unknown record type." }, { status: 400 });
   }
   const subject = await resolvePermissions(db, orgId, actor.role as WorkspaceRole, siteScope);
+  if (orCapability && can(subject, orCapability)) return null;
   return requireCapability(subject, capability);
 }
+
+/**
+ * The records `board.add` may CREATE here (owner decision, 2026-10-06): a
+ * client may add a compliance requirement or a contractor. Editing or
+ * archiving either one is still `sites.edit` — this applies to POST only.
+ */
+const WORKSPACE_ADD_CAPABILITY: Record<string, Capability> = {
+  compliance: "board.add",
+  contractor: "board.add",
+};
 
 export async function POST(request: Request) {
   try {
@@ -1622,7 +1636,16 @@ export async function POST(request: Request) {
      */
     const rawData = payload.data;
     const data = rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
-    const refusal = await authoriseWorkspaceWrite(db, orgId, actor, memberSiteScope, authenticated, entity);
+    const refusal = await authoriseWorkspaceWrite(
+      db,
+      orgId,
+      actor,
+      memberSiteScope,
+      authenticated,
+      entity,
+      "write",
+      WORKSPACE_ADD_CAPABILITY[entity ?? ""],
+    );
     if (refusal) return refusal;
     /* One contractor record serves every site: the register is refused to a
        site-restricted member (security review) — see `everySiteRefusal`. */

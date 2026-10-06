@@ -125,6 +125,22 @@ export const CAPABILITY_CATALOGUE = [
     description: "Create, update and move rows, columns and groups on a board.",
   },
   {
+    /*
+     * ADDING WITHOUT CHANGING (owner decision, 2026-10-06): "the client …
+     * just maybe add the columns, move the groups, add the groups, add more
+     * compliance … more contractors." A client may ADD to the shared structure
+     * — a new column, a new group, a group moved, a compliance requirement, a
+     * contractor — but not rename, delete, clear or reconfigure anything, and
+     * not edit jobs, which stay `board.edit`. Anyone holding `board.edit` (or
+     * `sites.edit` for the register) already may do all of this.
+     */
+    key: "board.add",
+    label: "Add columns, groups, compliance and contractors",
+    group: "Operational data",
+    description:
+      "Add a column or a group to a board, move groups, and add compliance requirements and contractors. Renaming, deleting and settings still need the edit permissions.",
+  },
+  {
     key: "requests.create",
     label: "Raise maintenance requests",
     group: "Operational data",
@@ -454,6 +470,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
   admin: [
     "board.view",
     "board.edit",
+    "board.add",
     "requests.create",
     "sites.edit",
     "data.import",
@@ -479,6 +496,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
   owner: [
     "board.view",
     "board.edit",
+    "board.add",
     "requests.create",
     "sites.edit",
     "data.import",
@@ -491,7 +509,7 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
     "audit.read",
     "navigation.personalise",
   ],
-  manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
+  manager: ["board.view", "board.edit", "board.add", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
   /*
    * `navigation.personalise` for clients too: arranging your OWN sidebar was
    * open to every signed-in person before the roles-and-access batch, it is
@@ -503,7 +521,12 @@ const BUILT_IN_DEFAULTS: Record<WorkspaceRole, readonly Capability[]> = {
    * at their own store is the product's first job. They may RAISE a job;
    * changing one is still `board.edit`.
    */
-  client: ["board.view", "requests.create", "data.export", "navigation.personalise"],
+  /*
+   * `board.add` — owner decision, 2026-10-06: a client may add columns, groups,
+   * compliance requirements and contractors, and move groups. Nothing they
+   * add can rename, delete or reconfigure what is already there.
+   */
+  client: ["board.view", "board.add", "requests.create", "data.export", "navigation.personalise"],
 };
 
 const DEFAULT_SETS: Record<WorkspaceRole, ReadonlySet<Capability>> = {

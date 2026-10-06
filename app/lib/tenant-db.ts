@@ -10,6 +10,7 @@ import {
 import { type WorkspaceActor } from "./workspace-actor";
 import {
   type Capability,
+  can,
   requireCapability,
   resolvePermissions,
 } from "./permissions";
@@ -294,5 +295,25 @@ export async function scopedDbWithCapability(
 
   const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
   const refusal = requireCapability(subject, capability);
+  return refusal ? { denied: refusal } : { scope };
+}
+
+/**
+ * The same, satisfied by ANY of `capabilities` — for an act two permissions
+ * each cover, e.g. adding a column: `board.edit` (edit the board) or
+ * `board.add` (add to it, the client's grant of 2026-10-06). The first is
+ * named in the refusal.
+ */
+export async function scopedDbWithAnyCapability(
+  request: Request,
+  capabilities: readonly [Capability, ...Capability[]],
+): Promise<{ denied: Response; scope?: never } | { denied?: never; scope: ScopedDatabase }> {
+  const scope = await scopedDb(request);
+  if (!scope.authenticated && !demoIdentityAllowed()) {
+    return { denied: Response.json({ error: "Sign in to make this change." }, { status: 401 }) };
+  }
+  const subject = await resolvePermissions(scope.db, scope.orgId, scope.actor.role, scope.siteScope);
+  if (capabilities.some((capability) => can(subject, capability))) return { scope };
+  const refusal = requireCapability(subject, capabilities[0]);
   return refusal ? { denied: refusal } : { scope };
 }

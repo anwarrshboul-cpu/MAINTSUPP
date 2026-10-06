@@ -122,6 +122,9 @@ const EXPECTED = {
   admin: [
     "board.view",
     "board.edit",
+    /* 2026-10-06: adding to a board is its own grant (`board.add`), so a
+       client can hold it without `board.edit`; every editing role holds it. */
+    "board.add",
     /* Owner decision 2026-10-01: raising a request is its own grant, held by
        every role, so a client can report a fault without editing the board. */
     "requests.create",
@@ -142,8 +145,8 @@ const EXPECTED = {
        open either per workspace through the role matrix. */
     "navigation.personalise",
   ],
-  manager: ["board.view", "board.edit", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
-  client: ["board.view", "requests.create", "data.export", "navigation.personalise"],
+  manager: ["board.view", "board.edit", "board.add", "requests.create", "sites.edit", "data.export", "navigation.personalise"],
+  client: ["board.view", "board.add", "requests.create", "data.export", "navigation.personalise"],
 };
 // An Owner holds exactly the Admin set; their extra authority is SCOPE (every
 // workspace of their company), not extra capabilities.
