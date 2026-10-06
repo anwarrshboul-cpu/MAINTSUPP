@@ -1,6 +1,7 @@
 import { reconcileSiteUnitsQuietly } from "../../lib/site-units";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
-import { ensureDatabase } from "../../../db/init";
+import { ensureDatabase, seedStoreDocumentationGroups } from "../../../db/init";
+import { getD1 } from "../../../db";
 import {
   activityLog,
   attachments,
@@ -948,6 +949,15 @@ export async function GET(request: Request) {
         aliases: allAliases
           .filter((alias) => alias.siteId === id)
           .map((alias) => alias.alias),
+      });
+    }
+
+    /* The four default groups exist in every workspace and every site has a
+       group, so the grouped board (2026-10-06) never opens on one "No group"
+       lane. Additive: a site somebody placed stays where they put it. */
+    if (scope === CANONICAL_REGISTER) {
+      await seedStoreDocumentationGroups(await getD1(), orgId).catch((error: unknown) => {
+        console.error("[/api/sites] default groups", error instanceof Error ? error.message : error);
       });
     }
 

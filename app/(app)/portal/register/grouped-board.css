@@ -68,11 +68,12 @@
   background: transparent;
   color: var(--gboard-colour);
   cursor: pointer;
+  transform: rotate(90deg);
   transition: transform 120ms ease;
 }
 
 .gboard-group__toggle[aria-expanded="false"] {
-  transform: rotate(-90deg);
+  transform: none;
 }
 
 .gboard-group__toggle:focus-visible,

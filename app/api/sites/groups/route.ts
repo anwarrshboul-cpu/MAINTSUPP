@@ -137,6 +137,24 @@ export async function POST(request: Request) {
     }
 
     const id = `sgrp-${slug}-${Math.random().toString(36).slice(2, 8)}`;
+    /* A new group goes above "Closed" when Closed is the last group, so closed
+       stores stay at the bottom of the board (2026-10-06). */
+    const last = existing[existing.length - 1];
+    const closedLast = last && last.slug === "closed";
+    let position = existing.length;
+    if (closedLast) {
+      position = last.position;
+      await db
+        .update(siteGroups)
+        .set({ position: last.position + 1 })
+        .where(
+          and(
+            eq(siteGroups.id, last.id),
+            eq(siteGroups.organisationId, orgId),
+            registerScopeFilter(siteGroups.boardId, scope),
+          ),
+        );
+    }
     await db.insert(siteGroups).values({
       id,
       organisationId: orgId,
@@ -148,7 +166,7 @@ export async function POST(request: Request) {
          the canonical register, so a create with no `?section=` is exactly
          what it was before this column existed. */
       boardId: scope,
-      position: existing.length,
+      position,
     });
     return Response.json({ ok: true, id });
   } catch (error) {

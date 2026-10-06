@@ -219,7 +219,14 @@ export function GroupedBoard<T extends BoardItem>({
   /* ── drag and drop ───────────────────────────────────────────────────── */
 
   const drag = useRef<Drag | null>(null);
-  const [target, setTarget] = useState<Target | null>(null);
+  const [target, setTargetState] = useState<Target | null>(null);
+  /* The drop reads the ref: a fast drop can arrive before React has drawn the
+     last dragover's state, and a drop that read a stale target did nothing. */
+  const targetRef = useRef<Target | null>(null);
+  const setTarget = (next: Target | null) => {
+    targetRef.current = next;
+    setTargetState(next);
+  };
   const [dragging, setDragging] = useState<string | null>(null);
 
   const endDrag = () => {
@@ -235,7 +242,7 @@ export function GroupedBoard<T extends BoardItem>({
 
   const drop = () => {
     const source = drag.current;
-    const at = target;
+    const at = targetRef.current;
     endDrag();
     if (!source || !at) return;
     if (source.kind === "item") {
@@ -519,7 +526,7 @@ export function GroupedBoard<T extends BoardItem>({
                 {rows.length === 0 ? (
                   <p className="gboard-empty">
                     {emptyGroupText ?? `No ${noun}s in this group.`}
-                    {canArrange ? ` Drag a ${noun} here to add it.` : ""}
+                    {canArrange ? ` Drag ${/^[aeiou]/i.test(noun) ? "an" : "a"} ${noun} here to add it.` : ""}
                   </p>
                 ) : (
                   rows.map((row, rowIndex) => {

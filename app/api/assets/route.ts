@@ -55,7 +55,8 @@
 import { reconcileSiteUnitsQuietly } from "../../lib/site-units";
 import { listSiteGroups } from "../../lib/sites-repository";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
-import { ensureDatabase } from "../../../db/init";
+import { ensureDatabase, seedStoreDocumentationGroups } from "../../../db/init";
+import { getD1 } from "../../../db";
 import {
   activityLog,
   attachments,
@@ -642,6 +643,7 @@ export async function GET(request: Request) {
     /* Every site has its own asset (app/lib/site-units.ts). The write paths
        keep this true; reading the register makes sure of it. */
     await reconcileSiteUnitsQuietly(db, orgId);
+    await seedStoreDocumentationGroups(await getD1(), orgId).catch(() => undefined);
 
     /*
      * A site named in the query is INTERSECTED with the member's scope rather
