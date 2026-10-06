@@ -508,6 +508,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
     ["contractor_id", "TEXT"],
   ]);
 
+  /* 2026-10-06 — one asset per site, and Sites/Assets arranged in groups. Two
+     guarded columns, one INSERT OR IGNORE backfill and one position move. See
+     `ensureSiteUnitsAndGroupOrder`. */
+  await ensureSiteUnitsAndGroupOrder(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -3892,6 +3897,63 @@ export async function seedBoardStructure(
 
 
 /**
+ * ONE ASSET PER SITE, AND CLOSED GROUPS LAST (2026-10-06).
+ *
+ * The owner asked for the Assets register to carry exactly one asset per site —
+ * the store unit — named, typed and located from the site, and for the Sites
+ * and Assets pages to be grouped boards with open stores first and closed ones
+ * at the bottom. `app/lib/site-units.ts` keeps the units in step on every site
+ * write; this is the once-only part:
+ *
+ *  · `sites.monday_snapshot` — the monday Store Documentation values last
+ *    applied to a site (`app/lib/store-register-sync.ts`);
+ *  · `units.site_mirror` — what a site unit last copied from its site;
+ *  · every existing site gets its unit, `site-unit-<siteId>`. INSERT OR IGNORE,
+ *    so a unit already there (or binned) is left alone;
+ *  · each workspace's seeded "Closed" group moves below its other groups.
+ *
+ * `s.status`/`s.lifecycle` rather than `s.active` decide Inactive, because a
+ * boolean literal reads differently in SQLite and Postgres and the two text
+ * columns say the same thing.
+ */
+async function ensureSiteUnitsAndGroupOrder(d1: D1DatabaseLike) {
+  await addColumn(d1, "sites", "monday_snapshot", "TEXT");
+  await addColumn(d1, "units", "site_mirror", "TEXT");
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO units
+         (id, organisation_id, site_id, name, category, kind, status, location_in_site, position, notes)
+       SELECT 'site-unit-' || s.id,
+              s.organisation_id,
+              s.id,
+              s.name || ' — ' || COALESCE(NULLIF(s.site_type_value, ''), NULLIF(s.type, ''), 'Store'),
+              COALESCE(NULLIF(s.site_type_value, ''), NULLIF(s.type, ''), 'Store'),
+              'equipment',
+              CASE WHEN s.status = 'closed' OR s.lifecycle = 'Closed' THEN 'Inactive' ELSE 'Active' END,
+              COALESCE(NULLIF(s.address_line1, ''), NULLIF(s.address, '')),
+              COALESCE(s.position, 0),
+              'The store unit itself. Name, type, location and status follow the site.'
+         FROM sites s`,
+    )
+    .run();
+  await d1
+    .prepare(
+      `UPDATE site_groups
+          SET position = (
+            SELECT MAX(x.position) + 1 FROM site_groups x
+             WHERE x.organisation_id = site_groups.organisation_id
+          )
+        WHERE slug = 'closed'
+          AND id = 'site-group-' || organisation_id || '-closed'
+          AND position < (
+            SELECT MAX(x.position) FROM site_groups x
+             WHERE x.organisation_id = site_groups.organisation_id
+          )`,
+    )
+    .run();
+}
+
+/**
  * Seeds the Store Documentation board's four groups over the site register.
  *
  * Monday files every store into "Current stores", "Europe", "Closed" or
@@ -3900,10 +3962,9 @@ export async function seedBoardStructure(
  * "All groups" filter was empty and the register could not be read the way the
  * board is.
  *
- * Membership is derived rather than stored by hand, and re-derived on each
- * boot, so a site closed or moved to Europe lands in the right group without
- * anyone maintaining a second list. Groups an admin has created themselves are
- * untouched — only the four seeded slugs are rebuilt.
+ * Membership is derived from status for a site that is in no group yet; a
+ * site that already has a group stays where somebody put it (see the note in
+ * the body, 2026-10-06). Groups an admin has created themselves are untouched.
  */
 export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisationId: string) {
   /*
@@ -3936,8 +3997,11 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
     // slug, name, colour, SQL predicate over `sites s`
     ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND COALESCE(s.site_type_value, s.type) IN ('Inline', 'Kiosk')"],
     ["europe", "Europe", "#a25ddc", "s.status = 'international'"],
-    ["closed", "Closed", "#ff5ac4", "s.status = 'closed'"],
+    /* "Other" before "Closed" (2026-10-06): open stores first, closed at the
+       bottom, which is the order the owner asked the Sites and Assets pages
+       to keep. `ensureSiteUnitsAndGroupOrder` moves existing workspaces. */
     ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND COALESCE(s.site_type_value, s.type) NOT IN ('Inline', 'Kiosk'))"],
+    ["closed", "Closed", "#ff5ac4", "s.status = 'closed'"],
   ];
 
   for (const [position, [slug, name, colour, predicate]] of groups.entries()) {
@@ -3951,11 +4015,16 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
       .bind(id, organisationId, name, slug, colour, position)
       .run();
 
-    // Rebuild membership so a lifecycle or region change is reflected.
-    await d1
-      .prepare("DELETE FROM site_group_members WHERE site_group_id = ?")
-      .bind(id)
-      .run();
+    /*
+     * MEMBERSHIP IS NO LONGER REBUILT (2026-10-06).
+     *
+     * This used to delete every member of the four groups and re-derive them
+     * from status on every Sites read by an editor. Since the Sites and Assets
+     * pages became grouped boards, the groups are the owner's own arrangement:
+     * a store dragged into "London" has to stay there. So only a site that is
+     * in NO group yet is placed, by the same predicates; a site somebody has
+     * placed is left where they put it.
+     */
     await d1
       .prepare(
         /*
@@ -3972,7 +4041,11 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
            (id, organisation_id, site_group_id, site_id)
          SELECT 'sgm-' || ? || '-' || s.id, ?, ?, s.id
            FROM sites s
-          WHERE s.organisation_id = ? AND (${predicate})`,
+          WHERE s.organisation_id = ? AND (${predicate})
+            AND NOT EXISTS (
+              SELECT 1 FROM site_group_members m
+               WHERE m.organisation_id = s.organisation_id AND m.site_id = s.id
+            )`,
       )
       .bind(slug, organisationId, id, organisationId)
       .run();
