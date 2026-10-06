@@ -218,7 +218,7 @@ import type { ContractorRow } from "./ops/contractors-list";
  * badge and the Overview both read it, which is what stops the two disagreeing
  * about the same workspace.
  */
-import { JOBS_BOARD_KEY, isOnJobsBoard, openJobCount, spendLineOf } from "../../lib/job-metrics";
+import { JOBS_BOARD_KEY, isOnJobsBoard, openJobCount, spendLineOf, statusKey } from "../../lib/job-metrics";
 import { jobTypeChoices, jobTypeLabel, useJobTypes } from "./use-job-types";
 import { JobTypeDrawerField } from "./cells/job-type-cell";
 import { JobTypesSettings } from "./admin/job-types-settings";
@@ -1956,8 +1956,18 @@ export default function PortalApp({
     }
 
     loadNotificationStates();
+    /* Kept in step with the Overview, which re-reads its figures every 60s and
+       when the tab returns — the badge used to be read once per page load
+       (2026-10-06). */
+    const timer = window.setInterval(loadNotificationStates, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadNotificationStates();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 
@@ -2450,7 +2460,11 @@ export default function PortalApp({
   /* And the organisation's closed statuses, on the same terms: `family=open`
      has to cut the list where the Overview's figure cut the count, and that
      cut is configuration now rather than a constant. */
-  const { closedStatusKeys: drillClosedKeys, loaded: drillClosedKeysLoaded } = useDrillStatusMap(
+  const {
+    closedStatusKeys: drillClosedKeys,
+    overdueExemptKeys: drillOverdueExemptKeys,
+    loaded: drillClosedKeysLoaded,
+  } = useDrillStatusMap(
     drillApplies && routeSearch.replace(/^\?/, "") !== "",
   );
   const drill = useMemo(() => {
@@ -2473,6 +2487,7 @@ export default function PortalApp({
          read as "this organisation closes nothing" and let completed jobs into
          an open list. */
       closedStatusKeys: drillClosedKeysLoaded ? drillClosedKeys : undefined,
+      overdueExemptKeys: drillClosedKeysLoaded ? drillOverdueExemptKeys : undefined,
     };
     return readDrillFilter(new URLSearchParams(drillApplies ? routeSearch : ""), new Date(), context);
   }, [
@@ -2482,6 +2497,7 @@ export default function PortalApp({
     drillJobTypes,
     drillJobTypesLoaded,
     drillClosedKeys,
+    drillOverdueExemptKeys,
     drillClosedKeysLoaded,
   ]);
   const boardRequests = useMemo(
@@ -3103,8 +3119,20 @@ export default function PortalApp({
   /* The job list when this screen has loaded it; the server's own count and
      candidates when it has not (the Overview), so neither goes blank there. */
   const jobListLoaded = requests.length > 0;
+  /* The workspace's own "counts as open" settings, as the Overview and the
+     server's count apply them — the list count used the shipped vocabulary and
+     drifted from the Overview once an admin changed one (2026-10-06). */
+  const { closedStatusKeys: badgeClosedKeys, loaded: badgeClosedKeysLoaded } =
+    useDrillStatusMap(jobListLoaded);
   const openCount = jobListLoaded
-    ? openJobCount(requests.filter(countsAsWorkOrder))
+    ? badgeClosedKeysLoaded
+      ? requests
+          .filter(countsAsWorkOrder)
+          .filter(
+            (request) =>
+              request.stage !== "Completed" && !badgeClosedKeys.includes(statusKey(request.status)),
+          ).length
+      : openJobCount(requests.filter(countsAsWorkOrder))
     : (serverOpenJobs ?? 0);
   const notificationItems = useMemo(
     () =>

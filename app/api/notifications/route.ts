@@ -1,7 +1,8 @@
 import { and, count, desc, eq, or, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
-import { activityLog, maintenanceRequests } from "../../../db/schema";
-import { closedJobSql } from "../../lib/dashboard-aggregates";
+import { activityLog, jobStatusMap, maintenanceRequests } from "../../../db/schema";
+import { closedJobSql, closedJobSqlFor } from "../../lib/dashboard-aggregates";
+import { closedStatusKeys } from "../../lib/job-metrics";
 import { liveWorkOrderCondition } from "../../lib/dashboard-filters";
 import { memberSiteCondition } from "../../lib/member-site-scope";
 import { exposeRequest } from "../../lib/request-payload";
@@ -67,10 +68,23 @@ export async function GET(request: Request) {
      * Attention or Urgent) and the same scope as the job feed (live work
      * orders on the Jobs board, the member's sites), so the two never differ.
      */
+    /* The workspace's own "counts as open" settings, as the Overview applies
+       them (2026-10-06); the shipped vocabulary when none are configured. */
+    const statusRows = await db
+      .select({ label: jobStatusMap.sourceStatusLabel, open: jobStatusMap.countsAsOpen })
+      .from(jobStatusMap)
+      .where(and(eq(jobStatusMap.organisationId, orgId), eq(jobStatusMap.active, true)));
+    const closedSql = statusRows.length
+      ? closedJobSqlFor(
+          closedStatusKeys(
+            statusRows.map((row) => ({ sourceStatusLabel: String(row.label ?? ""), countsAsOpen: Boolean(row.open) })),
+          ),
+        )
+      : closedJobSql;
     const open = and(
       liveWorkOrderCondition(orgId),
       memberSiteCondition(maintenanceRequests.siteId, siteScope),
-      sql`not ${closedJobSql}`,
+      sql`not ${closedSql}`,
     );
     /* Three independent reads, started together: one round trip, not three. */
     const [rows, candidates, [openRow]] = await Promise.all([

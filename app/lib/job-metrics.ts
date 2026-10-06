@@ -262,6 +262,8 @@ export function statusKey(value: string | null | undefined): string {
 export type StatusOpenness = {
   sourceStatusLabel: string;
   countsAsOpen: boolean;
+  /** Absent means eligible. `false` keeps a parked status (On hold …) from going overdue. */
+  countsAsOverdueEligible?: boolean | null;
   /** Absent means active; only an explicit `false` retires a row. */
   active?: boolean | null;
 };
@@ -283,6 +285,20 @@ export function closedStatusKeys(mappings: readonly StatusOpenness[]): string[] 
     if (!configured.has(key)) closed.add(key);
   }
   return [...closed].sort();
+}
+
+/**
+ * OPEN STATUSES THAT NEVER GO OVERDUE — "counts as overdue" switched off for a
+ * parked status such as On hold or Awaiting parts. The Jobs board's chip
+ * (`jobIsOverdue`) has always honoured it; the Overview's Overdue and SLA
+ * figures and their drill-down now do too (2026-10-06), so a job the board
+ * shows as on time is never counted late on the Overview.
+ */
+export function overdueExemptStatusKeys(mappings: readonly StatusOpenness[]): string[] {
+  return mappings
+    .filter((row) => row.active !== false && row.countsAsOverdueEligible === false)
+    .map((row) => statusKey(row.sourceStatusLabel))
+    .sort();
 }
 
 /** Statuses met at runtime that `STATUS_FAMILY` has no entry for. */
@@ -841,7 +857,9 @@ export function spendLineOf(job: {
 }): { pence: number; day: string } | null {
   if (job.cost === null || job.cost === undefined) return null;
   const pence = poundsToPence(Number(job.cost));
-  if (pence === null) return null;
+  /* A £0 job is not a spend line — the same rule as `isCostedSql` in
+     cost-sql.ts, so "costed jobs" counts agree on every screen (2026-10-06). */
+  if (pence === null || pence <= 0) return null;
   const day = String(job.completedAt ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   return { pence, day };

@@ -415,10 +415,17 @@ export function readDrillFilter(
      * authoritative.
      */
     closedStatusKeys?: readonly string[];
+    /** Open statuses that never go overdue (`overdueExemptStatusKeys`). */
+    overdueExemptKeys?: readonly string[];
   } = {},
 ): DrillFilter {
   const jobTypes = context.jobTypes ?? null;
   const closedKeys = closedKeysOf(context.closedStatusKeys);
+  /* The overdue test treats a parked status like a closed one, as the
+     Overview's figure does (2026-10-06). */
+  const overdueClosedKeys: ReadonlySet<string> = context.overdueExemptKeys?.length
+    ? new Set([...closedKeys, ...context.overdueExemptKeys])
+    : closedKeys;
   const list = (name: string) =>
     searchParams
       .getAll(name)
@@ -611,7 +618,12 @@ export function readDrillFilter(
          archived and sub-item rows excluded must not open a list that puts
          them back. */
       if (!countsAsWork(request)) return false;
-      if (statuses.size && !statuses.has(key(request.status))) return false;
+      if (statuses.size) {
+        /* `__not_recorded__` is the Overview's slice for a job with no status. */
+        const status = key(request.status);
+        const notRecorded = statuses.has(NOT_RECORDED_VALUE) && !status;
+        if (!notRecorded && !statuses.has(status)) return false;
+      }
       if (sites.size) {
         /* `__unassigned__` is the Overview's sentinel for a job whose site is
            blank OR points at an id the register does not hold. The shell cannot
@@ -651,7 +663,7 @@ export function readDrillFilter(
            it in SQL: a Project, a custom type or an untyped job is neither. */
         if (!natures.has(jobTypeBucketOf(jobTypeIdOf(request), jobTypes))) return false;
       }
-      if (overdueOnly && !isOverdue(request, now, closedKeys)) return false;
+      if (overdueOnly && !isOverdue(request, now, overdueClosedKeys)) return false;
       if (breachOnly && !isBreachRisk(request, now, closedKeys)) return false;
       if (matchesType && !matchesType(request)) return false;
       if (costedOnly && spendLineOf(request) === null) return false;

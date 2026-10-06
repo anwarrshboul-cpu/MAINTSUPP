@@ -1,3 +1,4 @@
+import { poundsToPence } from "../../lib/reporting/money";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -498,6 +499,8 @@ export async function commit(
          `normaliseCost` in request-fields.ts. Unreadable text ("TBC") is no
          cost rather than NaN; negative clamps to zero, as a PATCH would. */
       cost: item.values.cost ? normaliseCost(Number(item.values.cost)) ?? null : null,
+      /* …and the same money in pence, so `cost-sql.ts` never reads a stale one. */
+      costPence: item.values.cost ? poundsToPence(normaliseCost(Number(item.values.cost)) ?? null) : null,
       approvedBy: item.values.approvedBy || null,
       invoice: item.values.invoice || null,
       contractor: item.values.contractor || null,

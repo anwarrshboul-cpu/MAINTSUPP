@@ -66,7 +66,7 @@ import {
 } from "../../db/schema";
 import { closedJobSqlFor, dateText, overdueOpenSql } from "./dashboard-aggregates";
 import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters";
-import { closedStatusKeys, drillSiteIds, normalisePriority } from "./job-metrics";
+import { closedStatusKeys, drillSiteIds, normalisePriority, overdueExemptStatusKeys } from "./job-metrics";
 import { poundsToPence } from "./reporting/money";
 import { complianceCompletion } from "./compliance-status";
 import { readComplianceRegister } from "./compliance-register";
@@ -460,6 +460,8 @@ export async function loadSpendByMonth(
         sql`${dayOnly(maintenanceRequests.completedAt)} >= ${fromDay}`,
         sql`${dayOnly(maintenanceRequests.completedAt)} < ${endExclusive}`,
         isNotNull(maintenanceRequests.cost),
+        /* £0 is not spend — `spendLineOf` and `isCostedSql` agree (2026-10-06). */
+        sql`${maintenanceRequests.cost} > 0`,
       ),
     )
     .groupBy(sql`month`, maintenanceRequests.cost);
@@ -528,6 +530,7 @@ export async function loadOverviewMetrics(
       display: jobStatusMap.displayLabel,
       colour: jobStatusMap.colourHex,
       open: jobStatusMap.countsAsOpen,
+      overdueEligible: jobStatusMap.countsAsOverdueEligible,
       sortOrder: jobStatusMap.sortOrder,
     })
     .from(jobStatusMap)
@@ -558,7 +561,17 @@ export async function loadOverviewMetrics(
   const openScope = and(scope, sql`not ${closedSql}`)!;
   /* Overdue is open work past its date, so it takes the same test — otherwise
      `sla.percent`, computed from both, contradicts itself. */
-  const overdueSql = overdueOpenSql(now, closedSql);
+  const overdueExempt = overdueExemptStatusKeys(
+    statusRows.map((row) => ({
+      sourceStatusLabel: String(row.label ?? ""),
+      countsAsOpen: Boolean(row.open),
+      countsAsOverdueEligible: Boolean(row.overdueEligible),
+    })),
+  );
+  /* A parked status the board never flags late is not late here either. */
+  const overdueSql = overdueExempt.length
+    ? overdueOpenSql(now, closedJobSqlFor([...new Set([...closedKeys, ...overdueExempt])]))
+    : overdueOpenSql(now, closedSql);
 
   const statusMeta = new Map(
     statusRows.map((row) => [
@@ -842,7 +855,9 @@ export async function loadOverviewMetrics(
       sources: new Set<string>(),
     };
     entry.value += Number(row.total ?? 0);
-    if (raw) entry.sources.add(raw);
+    /* A job with no status at all drills with the shared "not recorded"
+       sentinel — sending the word "Unset" opened an empty list (2026-10-06). */
+    entry.sources.add(raw || "__not_recorded__");
     statusTally.set(label, entry);
   }
   const jobsByStatus: OvSlice[] = [...statusTally.values()]

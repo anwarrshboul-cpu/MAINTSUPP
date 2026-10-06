@@ -23,16 +23,19 @@
  */
 
 import { useEffect, useState } from "react";
-import { closedStatusKeys, type StatusOpenness } from "../../lib/job-metrics";
+import { closedStatusKeys, overdueExemptStatusKeys, type StatusOpenness } from "../../lib/job-metrics";
 
 type StatusMapResponse = { mappings?: StatusOpenness[] };
 
 export function useDrillStatusMap(enabled: boolean): {
   closedStatusKeys: string[];
+  /** Open statuses that never go overdue — see `overdueExemptStatusKeys`. */
+  overdueExemptKeys: string[];
   loaded: boolean;
 } {
-  const [state, setState] = useState<{ keys: string[]; loaded: boolean }>({
+  const [state, setState] = useState<{ keys: string[]; exempt: string[]; loaded: boolean }>({
     keys: [],
+    exempt: [],
     loaded: false,
   });
 
@@ -43,7 +46,11 @@ export function useDrillStatusMap(enabled: boolean): {
       .then((response) => (response.ok ? response.json() : null))
       .then((body: StatusMapResponse | null) => {
         if (cancelled || !body?.mappings) return;
-        setState({ keys: closedStatusKeys(body.mappings), loaded: true });
+        setState({
+          keys: closedStatusKeys(body.mappings),
+          exempt: overdueExemptStatusKeys(body.mappings),
+          loaded: true,
+        });
       })
       /* A failed read leaves `loaded` false, so the drill keeps the shipped
          vocabulary rather than concluding this organisation closes nothing. */
@@ -53,5 +60,5 @@ export function useDrillStatusMap(enabled: boolean): {
     };
   }, [enabled, state.loaded]);
 
-  return { closedStatusKeys: state.keys, loaded: state.loaded };
+  return { closedStatusKeys: state.keys, overdueExemptKeys: state.exempt, loaded: state.loaded };
 }

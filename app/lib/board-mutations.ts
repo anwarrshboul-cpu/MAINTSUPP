@@ -671,6 +671,7 @@ export async function duplicateBoardItems(
         completedAt: source.completedAt,
         nextUpdateAt: source.nextUpdateAt,
         cost: source.cost,
+        costPence: source.costPence,
         approvedBy: source.approvedBy,
         invoice: source.invoice,
         attachmentCount: 0,

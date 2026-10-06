@@ -27,8 +27,10 @@
 
 import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { getDb } from "../../db";
-import { maintenanceRequests } from "../../db/schema";
-import { closedJobSql } from "./dashboard-aggregates";
+import { jobStatusMap, maintenanceRequests } from "../../db/schema";
+import { closedJobSql, closedJobSqlFor } from "./dashboard-aggregates";
+import { isCostedSql, rowCostPenceSql } from "./cost-sql";
+import { closedStatusKeys } from "./job-metrics";
 import { jobsBoardCondition } from "./dashboard-filters";
 import { complianceCompletion, type ComplianceCompletion } from "./compliance-status";
 import { selectInChunks } from "./sql-batching";
@@ -180,6 +182,25 @@ export async function loadSiteMetrics(
     Array<{ state: ComplianceState; dutyHolder?: string | null }>
   >,
 ): Promise<Map<string, SiteMetrics>> {
+  /*
+   * OPEN AND SPEND BY THE OVERVIEW'S RULES (2026-10-06).
+   *
+   * Open used to be the shipped `closedJobSql` while the Overview honours the
+   * workspace's own "counts as open" settings, so the two pages disagreed the
+   * moment an admin changed one. Spend used to be `sum(cost)` over every job,
+   * open ones included, in floating pounds; it is now completed, costed jobs in
+   * whole pence (`cost-sql.ts`) — the Reports rule, over all time ("to date").
+   */
+  const statusRows = await db
+    .select({ label: jobStatusMap.sourceStatusLabel, open: jobStatusMap.countsAsOpen })
+    .from(jobStatusMap)
+    .where(and(eq(jobStatusMap.organisationId, orgId), eq(jobStatusMap.active, true)));
+  const closedKeys = closedStatusKeys(
+    statusRows.map((row) => ({ sourceStatusLabel: String(row.label ?? ""), countsAsOpen: Boolean(row.open) })),
+  );
+  /* The shipped vocabulary when nothing is configured, so an unconfigured
+     workspace reads exactly as before. */
+  const closedSql = statusRows.length ? closedJobSqlFor(closedKeys) : closedJobSql;
   const out = new Map<string, SiteMetrics>();
   for (const id of siteIds) {
     out.set(id, {
@@ -222,9 +243,9 @@ export async function loadSiteMetrics(
       .select({
         siteId: maintenanceRequests.siteId,
         totalJobs: count(),
-        openJobs: sql<number>`sum(case when not ${closedJobSql} then 1 else 0 end)`,
-        urgentOpen: sql<number>`sum(case when not ${closedJobSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "high", "p1"]} then 1 else 0 end)`,
-        spend: sql<number>`coalesce(sum(${maintenanceRequests.cost}), 0)`,
+        openJobs: sql<number>`sum(case when not ${closedSql} then 1 else 0 end)`,
+        urgentOpen: sql<number>`sum(case when not ${closedSql} and lower(trim(${maintenanceRequests.priority})) in ${["urgent", "critical", "high", "p1"]} then 1 else 0 end)`,
+        spendPence: sql<number>`coalesce(sum(case when ${maintenanceRequests.completedAt} is not null and ${isCostedSql} then ${rowCostPenceSql} else 0 end), 0)`,
       })
       .from(maintenanceRequests)
       .where(
@@ -248,7 +269,9 @@ export async function loadSiteMetrics(
      * chunk at a time and with a comment claiming it was safe. 80 leaves seven
      * spare on top of the thirteen.
      */
-    80,
+    /* 50 since 2026-10-06: the configured closed statuses bind one variable
+       each (twice over), on top of the thirteen counted above. */
+    50,
   );
 
   for (const row of rows) {
@@ -258,7 +281,7 @@ export async function loadSiteMetrics(
     current.totalJobs = Number(row.totalJobs ?? 0);
     current.openJobs = Number(row.openJobs ?? 0);
     current.urgentOpen = Number(row.urgentOpen ?? 0);
-    current.spend = Number(row.spend ?? 0);
+    current.spend = Number(row.spendPence ?? 0) / 100;
   }
   return out;
 }
