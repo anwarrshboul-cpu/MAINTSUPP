@@ -257,5 +257,113 @@ export const assetWidths: Record<string, AssetEntry> = {
     ],
     "width": 1536,
     "height": 1024
+  },
+  "/assets/pages/london-decorator-shop-wall-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-carpenter-shop-counter-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-contractors-mall-walkway-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-ladder-shopfront-ceiling-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-technician-kiosk-base-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-shutter-high-street-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-glaziers-shopfront-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-decorator-shopfront-frame-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-light-fitting-brick-arch-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-handyman-shelving-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-shop-strip-out-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
+  },
+  "/assets/pages/london-night-shutter-repair-v1.jpg": {
+    "widths": [
+      480,
+      960,
+      1400
+    ],
+    "width": 1536,
+    "height": 960
   }
 };

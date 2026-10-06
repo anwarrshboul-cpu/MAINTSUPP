@@ -1,6 +1,7 @@
 /*
  * Install the photographs for the menu's own pages — /services, /how-it-works,
- * /pricing, /case-study and /contact.
+ * /pricing, /case-study and /contact — and, since October 2026, the London
+ * pages' own pictures (LONDON below).
  *
  *   node scripts/install-page-photos.mjs <folder-with-the-supplied-files>
  *
@@ -34,6 +35,29 @@ const MANIFEST = path.join(ROOT, "app/(marketing)/_sections/asset-widths.ts");
 const WIDTHS = [480, 960, 1400];
 const VERSION = "v1";
 
+/*
+ * The London pages' pictures, one per page, supplied by the owner in October
+ * 2026 as generated illustrations. Each is named for what it SHOWS, never for
+ * the page or centre it sits on: a file called after a shopping centre would
+ * say the picture is of that centre, which is the claim the alt text is
+ * forbidden to make. They arrive already cropped to the hero's 16:10, with the
+ * misspelt lettering the generator put on the workwear taken off.
+ */
+const LONDON = [
+  "london-decorator-shop-wall",
+  "london-carpenter-shop-counter",
+  "london-contractors-mall-walkway",
+  "london-ladder-shopfront-ceiling",
+  "london-technician-kiosk-base",
+  "london-shutter-high-street",
+  "london-glaziers-shopfront",
+  "london-decorator-shopfront-frame",
+  "london-light-fitting-brick-arch",
+  "london-handyman-shelving",
+  "london-shop-strip-out",
+  "london-night-shutter-repair",
+];
+
 /* The shot list, in its order. */
 const PLAN = [
   "page-services-hero",
@@ -50,6 +74,7 @@ const PLAN = [
   "case-results",
   "trade-cctv",
   "trade-refrigeration",
+  ...LONDON,
 ];
 
 const source = process.argv[2];

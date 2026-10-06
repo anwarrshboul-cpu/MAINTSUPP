@@ -176,8 +176,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     h1: "Shop strip-out and closure works in London",
     lede: "Closing a shop, a concession or a kiosk? MAINTSUPP coordinates the strip-out contractors, the removal of fixtures and signs, the clearance and the making good — around your lease-end date and the landlord’s rules — so the unit goes back in the condition your lease asks for.",
     photo: {
-      src: "/assets/pages/case-work-v1.jpg",
-      alt: "A contractor in a hi-vis vest carrying a toolbag into a shopping centre while checking the job on his phone",
+      src: "/assets/pages/london-shop-strip-out-v1.jpg",
+      alt: "A contractor in a hi-vis vest removing the last fixings from the bare wall of an empty shop, with stripped-out panels stacked on the floor and filled rubble bags by the window",
     },
     cards: {
       eyebrow: "What we do",
@@ -504,8 +504,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     h1: "Commercial handyman services for shops and offices in London",
     lede: "The small jobs that keep a shop presentable and safe — a door that will not close, a loose shelf, a stained ceiling tile, a sign that needs fixing — handled by vetted, insured tradespeople who work around your trading hours. One job or a list of them, anywhere in London.",
     photo: {
-      src: "/assets/pages/trade-cctv-v1.jpg",
-      alt: "A tradesperson on a stepladder adjusting a ceiling-mounted camera beside a store entrance with an access-control keypad",
+      src: "/assets/pages/london-handyman-shelving-v1.jpg",
+      alt: "A handyman fixing timber shelves to wall uprights with a cordless drill, a spirit level on the shelf and a box of fixings beside him",
     },
     cards: {
       eyebrow: "What we do",
@@ -598,8 +598,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     h1: "Commercial painters and decorators for shops in London",
     lede: "Shop floors, shopfronts, stockrooms, offices and common areas painted by vetted commercial decorators — overnight or before opening, so you do not lose a day’s trade. One-off jobs, end-of-lease redecoration and brand refreshes across London.",
     photo: {
-      src: "/assets/pages/case-brief-v1.jpg",
-      alt: "A coordinator photographing a water-stained ceiling tile in a fragrance shop with her phone",
+      src: "/assets/pages/london-decorator-shop-wall-v1.jpg",
+      alt: "A decorator in a hi-vis vest painting a shop wall with a roller on a pole, the display tables under dust sheets and a stepladder beside him",
     },
     cards: {
       eyebrow: "What we do",
@@ -688,8 +688,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     h1: "Commercial carpentry and joinery for shops in London",
     lede: "Counters, till points, shop doors, shelving, partitions and stockroom fittings repaired, adjusted or built by vetted carpenters and joiners — for shops, kiosks, restaurants and offices across London, outside trading hours where needed.",
     photo: {
-      src: "/assets/pages/service-reactive-v1.jpg",
-      alt: "A tradesperson kneeling at a shop entrance to repair a jammed roller shutter, with an open toolbox and phone beside him",
+      src: "/assets/pages/london-carpenter-shop-counter-v1.jpg",
+      alt: "A carpenter kneeling at a shop counter, drilling into its fluted timber front beside the till, with an open toolbox on the floor",
     },
     cards: {
       eyebrow: "What we do",
@@ -783,8 +783,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     h1: "24-hour emergency repairs for shops and commercial premises in London",
     lede: "A shutter that will not close, a leak over the shop floor, no power, a smashed shopfront, a door that will not lock: call 07852 224644 at any hour. MAINTSUPP takes the call, tells you the realistic attendance time, sends a vetted contractor to make the site safe, and arranges the permanent repair.",
     photo: {
-      src: "/assets/pages/page-how-it-works-hero-v1.jpg",
-      alt: "A coordinator in a headset working at two monitors that show a job board with coloured status columns",
+      src: "/assets/pages/london-night-shutter-repair-v1.jpg",
+      alt: "A contractor wearing a head torch working on a roller shutter from a ladder on a wet street at night, with a white van parked alongside, its side door open",
     },
     cards: {
       eyebrow: "What we attend",

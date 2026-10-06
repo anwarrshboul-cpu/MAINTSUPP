@@ -271,6 +271,38 @@ test("the photographs are ones the site already ships, with their own alt text",
   }
 });
 
+test("the London pages' own pictures: every variant exists, none is shared, none is named after a centre", () => {
+  /*
+   * Twelve pages got pictures of their own in October 2026 (generated
+   * illustrations supplied by the owner). Three things could quietly go wrong
+   * with them, and each is checked here rather than trusted:
+   *   - a variant the manifest advertises but the install never wrote, which a
+   *     browser would fetch and get a 404 for instead of the picture;
+   *   - two pages drifting back onto one shared picture;
+   *   - a file NAMED after a centre. Image search reads file names, so a picture
+   *     called after Westfield would claim to show it — the claim the alt text
+   *     is already forbidden to make. The files are named for what they show.
+   */
+  const manifest = read(`${MARKETING}/_sections/asset-widths.ts`);
+  const own = LANDING_PAGES.filter((page) => page.photo.src.startsWith("/assets/pages/london-"));
+  assert.equal(own.length, 12, "the twelve service and area pages each have their own picture");
+  assert.equal(new Set(own.map((page) => page.photo.src)).size, own.length, "no two pages share a picture");
+  for (const page of own) {
+    const src = page.photo.src;
+    assert.doesNotMatch(src, /westfield|stratford|white-city|brent-cross/, `${src} is named after a centre`);
+    const entry = manifest.match(new RegExp(`"${src.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}": \\{\\s*"widths": \\[([^\\]]*)\\]`));
+    assert.ok(entry, `${src} has no widths in the manifest`);
+    const widths = entry[1].split(",").map((n) => Number(n.trim())).filter(Boolean);
+    assert.ok(widths.length > 0, `${src} advertises no variants`);
+    const stem = src.replace(/\.jpg$/, "");
+    for (const width of widths) {
+      for (const ext of ["avif", "webp"]) {
+        assert.ok(existsSync(path.join(root, "public", `${stem}-${width}.${ext}`)), `${stem}-${width}.${ext} is missing`);
+      }
+    }
+  }
+});
+
 test("the sitemap, the navigation and the footer all know the pages", () => {
   const sitemap = read("public/sitemap.xml");
   const routes = new Set(SITE_ROUTES.map((route) => route.path));
