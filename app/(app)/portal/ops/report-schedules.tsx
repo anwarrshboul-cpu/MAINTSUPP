@@ -9,8 +9,10 @@
  * before anyone waits, and each run's outcome is the recorded one — a run that
  * could not be delivered reads "Not delivered", never "Sent".
  *
- * Draws nothing for a reader without `data.export` (the API answers 403), the
- * capability that already governs taking these figures out of the portal.
+ * Draws nothing for a reader without `settings.edit` (the API answers 403):
+ * a schedule emails people on a cadence, which is workspace configuration and
+ * therefore MAINTSUPP's, not a client's (owner decision, 2026-10-06). Exporting
+ * the figures by hand is still `data.export`.
  */
 
 import { useCallback, useEffect, useState } from "react";
