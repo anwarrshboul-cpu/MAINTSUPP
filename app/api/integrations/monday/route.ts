@@ -1,3 +1,4 @@
+import { retirePlaceholderAssets, retireUnlistedSites } from "../../../lib/store-register-cleanup";
 import { reconcileStoreRegister } from "../../../lib/store-register-sync";
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
@@ -35,6 +36,7 @@ export const dynamic = "force-dynamic";
  *        or { action: "repair-files", itemIds } for up to 10 named items
  *
  *   POST { action: "verify-store-docs" }
+ *   POST { action: "retire-unlisted-sites" | "retire-placeholder-assets", apply? } one-off tidy-ups, dry run by default
  *   POST { action: "sync-store-register" } sites, groups and site assets from Store Documentation
  *        read-only comparison of Store Documentation with monday
  *
@@ -93,6 +95,25 @@ export async function POST(request: Request) {
       /* Read-only: every difference between monday's Store Documentation and
          ours — stores, certificate files (and their bytes), expiry dates. */
       return Response.json(await verifyStoreDocumentation(await getDb()));
+    }
+    if (body.action === "retire-unlisted-sites" || body.action === "retire-placeholder-assets") {
+      /* The two one-off tidy-ups of 2026-10-06 (app/lib/store-register-cleanup.ts).
+         A dry run unless `apply: true` is sent. */
+      const db = await getDb();
+      const apply = (body as { apply?: unknown }).apply === true;
+      if (body.action === "retire-unlisted-sites") {
+        return Response.json({ ok: true, ...(await retireUnlistedSites(db, config.organisationId, { apply })) });
+      }
+      const scope = await scopedDb(request);
+      return Response.json({
+        ok: true,
+        ...(await retirePlaceholderAssets(
+          db,
+          config.organisationId,
+          { email: scope.actor.email, displayName: scope.actor.displayName },
+          { apply },
+        )),
+      });
     }
     if (body.action === "sync-store-register") {
       /* The site register, its groups and every site's own asset, brought into
