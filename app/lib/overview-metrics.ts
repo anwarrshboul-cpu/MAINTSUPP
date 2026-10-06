@@ -69,7 +69,7 @@ import { dayString, liveWorkOrderCondition, shiftDay } from "./dashboard-filters
 import { closedStatusKeys, drillSiteIds, normalisePriority, overdueExemptStatusKeys } from "./job-metrics";
 import { poundsToPence } from "./reporting/money";
 import { complianceCompletion } from "./compliance-status";
-import { readComplianceRegister } from "./compliance-register";
+import { readComplianceRegister, withinOperationalEstate } from "./compliance-register";
 import {
   AGING_THRESHOLD_DAYS,
   BREACH_WINDOW_HOURS,
@@ -968,8 +968,13 @@ export async function loadOverviewMetrics(
    * pre-filtering always left for it (the export's "requirements not required"
    * row read 0 on an estate holding 541).
    */
+  /* THE OPERATIONAL ESTATE ONLY (2026-10-06): a closed store's lapsed
+     certificates are kept on the register but no longer pull the headline
+     score down — the same population the reminder emails chase
+     (`withinOperationalEstate`), and the same as the Compliance page and the
+     Sites header. */
   const scorable = register.entries.filter(
-    (entry) => !allowed || allowed.has(String(entry.siteId ?? "")),
+    (entry) => withinOperationalEstate(entry) && (!allowed || allowed.has(String(entry.siteId ?? ""))),
   );
   const completion = complianceCompletion(scorable);
 

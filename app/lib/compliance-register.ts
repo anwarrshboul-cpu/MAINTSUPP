@@ -38,7 +38,7 @@
  * Nothing here writes, and nothing here drops a row.
  */
 
-import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, max } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   attachments,
@@ -397,7 +397,9 @@ export function withinOperationalEstate(entry: {
 /** The `sites` lifecycle/status words that mean a store is not trading. */
 const CLOSED_SITE_WORDS = new Set(["closed", "archived", "inactive"]);
 
-function siteIsClosed(site: { lifecycle?: string | null; status?: string | null }) {
+/* Exported (2026-10-06) so every compliance figure that asks "is this site
+   trading?" asks the same question — see `api/compliance/metrics`. */
+export function siteIsClosed(site: { lifecycle?: string | null; status?: string | null }) {
   const lifecycle = (site.lifecycle ?? "").trim().toLowerCase();
   const status = (site.status ?? "").trim().toLowerCase();
   return CLOSED_SITE_WORDS.has(lifecycle) || CLOSED_SITE_WORDS.has(status);
@@ -559,6 +561,7 @@ async function readStoreDocumentationRows(
         requestId: attachments.requestId,
         columnId: attachments.boardColumnId,
         count: count(),
+        expiry: max(attachments.expiryDate),
       })
       .from(attachments)
       .where(
@@ -585,8 +588,8 @@ async function readStoreDocumentationRows(
       cells: cellRows,
       fileCounts: fileRows.filter(
         (
-          row: { requestId: string | null; columnId: string | null; count: number },
-        ): row is { requestId: string; columnId: string; count: number } =>
+          row: { requestId: string | null; columnId: string | null; count: number; expiry: string | null },
+        ): row is { requestId: string; columnId: string; count: number; expiry: string | null } =>
           Boolean(row.requestId) &&
           Boolean(row.columnId) &&
           columnIds.has(row.columnId ?? "") &&

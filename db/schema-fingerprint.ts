@@ -196,6 +196,10 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
      form and asset vocabulary seeded at workspace creation. Not yet released
      when written, so this entry was settled once, before its first deploy. */
   "4b63ec07",
+  /* 2026-10-06 (generation 12): `ensureCostPenceInStep` — realigns a stale
+     `cost_pence` with the cost a person typed, so every money figure on the
+     Overview, Sites and Reports reads the same amount. */
+  "78a9d044",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

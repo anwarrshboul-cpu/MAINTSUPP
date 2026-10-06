@@ -557,7 +557,7 @@ export function CompliancePage({
               Missing only
             </button>
             <button type="button" className="ops-option" onClick={() => applyPreset("due")}>
-              Due in 30 days
+              Expired or due in 30 days
             </button>
           </>
         }

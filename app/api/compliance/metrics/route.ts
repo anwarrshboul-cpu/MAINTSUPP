@@ -29,7 +29,7 @@ import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
 import { scopedDbWithCapability } from "../../../lib/tenant-db";
 import { dashboardFailure } from "../../../lib/dashboard-route";
-import { readComplianceRegister } from "../../../lib/compliance-register";
+import { readComplianceRegister, siteIsClosed, withinOperationalEstate } from "../../../lib/compliance-register";
 import { contractorNamesById } from "../../../lib/compliance-provider";
 import { complianceRowsFrom, isScoredRow } from "../../../lib/compliance-view";
 import { buildComplianceDashboard } from "../../../lib/compliance-dash";
@@ -96,10 +96,17 @@ export async function GET(request: Request) {
         (row) => [row.id, (row.managerName || row.manager || "").trim()],
       ),
     );
-    const rows = complianceRowsFrom(register.entries, managerById, providerNames);
+    /* The operational estate (2026-10-06): the dashboard scores and lists what
+       somebody is expected to keep compliant — the population the reminder
+       emails chase, the Overview scores and the Sites header scores. A closed
+       store stays on the register itself. */
+    const rows = complianceRowsFrom(register.entries.filter(withinOperationalEstate), managerById, providerNames);
     const allowed = portfolio.siteIds ? new Set(portfolio.siteIds) : null;
-    const activeSiteIds = (registerSites as Array<{ id: string; status: string | null }>)
-      .filter((site) => site.status !== "closed" && (!allowed || allowed.has(site.id)))
+    /* "Active" is not closed by EITHER column — the register's own test
+       (`siteIsClosed`), so a legacy 'other' row whose lifecycle is Closed is
+       not counted as an active site (2026-10-06). */
+    const activeSiteIds = (registerSites as Array<{ id: string; status: string | null; lifecycle?: string | null }>)
+      .filter((site) => !siteIsClosed(site) && (!allowed || allowed.has(site.id)))
       .map((site) => site.id);
 
     const metrics = buildComplianceDashboard({

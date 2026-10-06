@@ -57,6 +57,12 @@ export type RegisterFileCount = {
   requestId: string;
   columnId: string;
   count: number;
+  /**
+   * The latest expiry date recorded on those files themselves (the file's own
+   * "Expiry date" field), or null. Used only when the board's expiry cell for
+   * the slot is empty — see `documentFor`.
+   */
+  expiry?: string | null;
 };
 
 /**
@@ -73,6 +79,12 @@ export type BoardStoreRow = {
   cells: Record<string, string>;
   /** Attachment counts keyed by column key, e.g. `{ patCertificate: 4 }`. */
   fileCounts: Record<string, number>;
+  /**
+   * The latest expiry recorded on the files themselves, keyed by file column
+   * key, e.g. `{ patCertificate: "2027-03-01" }`. Optional: browser callers
+   * that only know counts leave it out.
+   */
+  fileExpiries?: Record<string, string>;
   /**
    * The board GROUP this row sits in — "Current stores", "Closed", "Europe",
    * "Other" — or null when the caller did not resolve one.
@@ -187,12 +199,19 @@ export function boardRowsFrom(input: {
   }
 
   const filesByRequest = new Map<string, Record<string, number>>();
+  const expiriesByRequest = new Map<string, Record<string, string>>();
   for (const entry of input.fileCounts ?? []) {
     const key = keyById.get(entry.columnId);
     if (!key) continue;
     const bucket = filesByRequest.get(entry.requestId) ?? {};
     bucket[key] = (bucket[key] ?? 0) + entry.count;
     filesByRequest.set(entry.requestId, bucket);
+    const expiry = dateOnlyValue(entry.expiry ?? "");
+    if (expiry) {
+      const dates = expiriesByRequest.get(entry.requestId) ?? {};
+      if (!dates[key] || expiry > dates[key]) dates[key] = expiry;
+      expiriesByRequest.set(entry.requestId, dates);
+    }
   }
 
   return input.requests.map((request) => ({
@@ -200,6 +219,7 @@ export function boardRowsFrom(input: {
     name: (request.title ?? "").trim() || request.reference || request.id,
     cells: cellsByRequest.get(request.id) ?? {},
     fileCounts: filesByRequest.get(request.id) ?? {},
+    fileExpiries: expiriesByRequest.get(request.id) ?? {},
     boardGroup: (request.group ?? "").trim() || null,
   }));
 }
@@ -268,10 +288,19 @@ function documentFor(
   notRequired: boolean,
   windowDays?: number,
 ): RegisterDocument {
-  const expiry = slot.expiryColumn
-    ? dateOnlyValue(row.cells[slot.expiryColumn]) || null
-    : null;
+  /*
+   * The board's expiry cell is the record (monday writes it, and so does the
+   * board). A certificate uploaded in the portal can carry its own expiry date
+   * on the file instead, with the cell left empty; without this fallback that
+   * slot read "Expiring soon"/"Missing date" on every compliance surface while
+   * the file on it said otherwise. The cell still wins whenever it holds a
+   * date, so a recorded expiry is never hidden by a file.
+   */
   const fileCount = row.fileCounts[slot.fileColumn] ?? 0;
+  const expiry = slot.expiryColumn
+    ? dateOnlyValue(row.cells[slot.expiryColumn]) ||
+      (fileCount > 0 ? row.fileExpiries?.[slot.fileColumn] ?? null : null)
+    : null;
   return {
     id: registerDocumentId(row.id, slot.key),
     slotKey: slot.key,

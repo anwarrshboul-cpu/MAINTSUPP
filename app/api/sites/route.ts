@@ -12,7 +12,7 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
-import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
+import { readComplianceRegister, readSiteComplianceRecords, withinOperationalEstate } from "../../lib/compliance-register";
 import { complianceCompletion } from "../../lib/compliance-status";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import { siteCreationRefusal } from "../../lib/job-site-scope";
@@ -1048,9 +1048,11 @@ export async function GET(request: Request) {
     const portfolioCompliance =
       scope === CANONICAL_REGISTER
         ? complianceCompletion(
-            allowed
-              ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
-              : register.entries,
+            /* The operational estate, as the Overview and Compliance page score
+               it (2026-10-06): closed stores do not pull the figure down. */
+            register.entries.filter(
+              (entry) => withinOperationalEstate(entry) && (!allowed || withinMemberScope(allowed, entry.siteId)),
+            ),
           )
         : null;
 

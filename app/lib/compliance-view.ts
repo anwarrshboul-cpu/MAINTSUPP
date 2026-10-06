@@ -427,6 +427,10 @@ export function filterComplianceRows(
     if (renewalGroups.size && !renewalGroups.has(renewalGroupKey(row))) return false;
     if (filters.scored && !isScoredRow(row)) return false;
     if (filters.due.length || bands.length) {
+      /* A requirement marked Not required keeps the date the board holds, but
+         nothing is due on it: the calendar and the renewal rings already leave
+         it out, and so does every due filter (2026-10-06). */
+      if (row.state === "Not required") return false;
       const matches =
         filters.due.some((window) => withinDueWindow(row, window, today)) ||
         bands.some((band) => {
