@@ -119,3 +119,16 @@ test("the seeded Closed group sits below the others in every workspace", async (
   const seed = init.slice(init.indexOf("export async function seedStoreDocumentationGroups"));
   assert.ok(seed.indexOf('["other", "Other"') < seed.indexOf('["closed", "Closed"'), "Other is seeded before Closed");
 });
+
+test("the two register tidy-ups are staff-only dry runs that never touch real work", async () => {
+  const route = await read("app/api/integrations/monday/route.ts");
+  assert.match(route, /const apply = \(body as \{ apply\?: unknown \}\)\.apply === true;/);
+  const cleanup = await read("app/lib/store-register-cleanup.ts");
+  for (const blocker of ["invoices", "quotes", "planned visits", "certificates on file", "assets of its own"]) {
+    assert.match(cleanup, new RegExp(`"${blocker}"`));
+  }
+  /* jobs are kept: re-pointed, never deleted */
+  assert.match(cleanup, /\.set\(\{ siteId: UNASSIGNED_SITE \}\)/);
+  assert.doesNotMatch(cleanup, /\.delete\(maintenanceRequests\)/);
+  assert.match(cleanup, /sendAssetToBin\(db, organisationId, actor, row\.id\)/);
+});
