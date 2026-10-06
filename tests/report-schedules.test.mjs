@@ -89,7 +89,12 @@ test("a run is claimed once, and the outcome is what the email door returned", a
 test("recipients are members of this workspace, never typed addresses", async () => {
   const route = code(await read("app/api/reports/schedules/route.ts"));
   assert.match(route, /Reports can only be sent to active members of this workspace\./);
-  assert.match(route, /scopedDbWithCapability\(request, "data\.export"\)/);
+  // Re-pointed 2026-10-06: a schedule is shared workspace configuration (it
+  // emails people on a cadence), so creating, changing, deleting, running and
+  // listing them is `settings.edit` — MAINTSUPP owners and admins — not the
+  // `data.export` every client holds. The owner's rule: settings are ours.
+  assert.match(route, /scopedDbWithCapability\(request, "settings\.edit"\)/);
+  assert.doesNotMatch(route, /scopedDbWithCapability\(request, "data\.export"\)/);
   assert.doesNotMatch(route, /body\.email|recipients: \[?body\.to/);
   assert.match(route, /emailDelivery: emailDeliveryStatus\(\),/, "the screen is told before anybody waits");
 });
