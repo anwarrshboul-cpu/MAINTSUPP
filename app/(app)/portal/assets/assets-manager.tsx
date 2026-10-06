@@ -248,8 +248,50 @@ export function AssetsManager({
         })
       }
       fixedSiteId={effectiveSiteId}
+      /*
+       * THE BOARD (2026-10-06). The groups are the site groups, so a group
+       * made, renamed or coloured here is the same group on the Sites page.
+       * Dragging an asset into another group moves its site there.
+       */
+      canArrange={canEdit}
+      onArrange={async (next) => {
+        try {
+          await api("/api/sites/groups", {
+            method: "PUT",
+            body: { groupOrder: next.groupOrder, moves: next.siteMove ? [next.siteMove] : [] },
+          });
+          await api("/api/assets", { method: "PUT", body: { order: next.itemOrder } });
+          if (next.siteMove) onNotify("Moved. The asset's site is now in that group too.");
+        } catch (caught) {
+          onNotify(caught instanceof Error ? caught.message : "The new order could not be saved.");
+        }
+        list.reload();
+      }}
+      onAddGroup={(name, colour) =>
+        groupCall("POST", { data: { name, colourHex: colour, kind: "portfolio" } }, `Group "${name}" added.`)
+      }
+      onRenameGroup={(id, name) => groupCall("PATCH", { id, data: { name } }, "Group renamed.")}
+      onRecolourGroup={(id, colour) => groupCall("PATCH", { id, data: { colourHex: colour } }, "Group colour changed.")}
+      onDeleteGroup={(group, count) => {
+        if (!group.id) return;
+        const warning = count
+          ? `Delete the group "${group.name}"?\n\nIts sites and their ${count} asset${count === 1 ? "" : "s"} are kept and move to "No group". Nothing else is deleted.`
+          : `Delete the empty group "${group.name}"?`;
+        if (!window.confirm(warning)) return;
+        return groupCall("DELETE", { id: group.id }, `Group "${group.name}" deleted.`);
+      }}
     />
   );
+
+  async function groupCall(method: string, body: unknown, done: string) {
+    try {
+      await api("/api/sites/groups", { method, body });
+      onNotify(done);
+    } catch (caught) {
+      onNotify(caught instanceof Error ? caught.message : "The change could not be saved.");
+    }
+    list.reload();
+  }
 }
 
 /**

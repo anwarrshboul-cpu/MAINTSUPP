@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { getD1 } from "../../../../db";
 import { ensureDatabase, seedStoreDocumentationGroups } from "../../../../db/init";
-import { siteGroupMembers, siteGroups } from "../../../../db/schema";
+import { siteGroupMembers, siteGroups, sites } from "../../../../db/schema";
+import { reconcileSiteUnitsQuietly } from "../../../lib/site-units";
 import { anonymousRefusal, scopedDbWithCapability } from "../../../lib/tenant-db";
 import { can, resolvePermissions } from "../../../lib/permissions";
 import type { WorkspaceRole } from "../../../lib/workspace-actor";
@@ -283,6 +284,142 @@ export async function DELETE(request: Request) {
     return Response.json({ ok: true, id });
   } catch (error) {
     const failure = siteWriteFailure(error, "The group could not be removed.");
+    return Response.json({ error: failure.message }, { status: failure.status });
+  }
+}
+
+/**
+ * ARRANGE THE SITES BOARD — the hold-and-drag gesture on Sites and Assets.
+ *
+ * One request carries the whole new arrangement, the way the jobs board sends
+ * a reorder: the groups in their new order, every site in its new order, and
+ * the moves between groups the drag made.
+ *
+ *   PUT { groupOrder?: string[], siteOrder?: string[],
+ *         moves?: Array<{ siteId, fromGroupId: string|null, toGroupId: string|null }> }
+ *
+ *  · `groupOrder` renumbers `site_groups.position` 0..n for the ids named.
+ *  · `siteOrder` renumbers `sites.position` 0..n — and with it each site's own
+ *    asset, so the Assets page keeps the Sites order (app/lib/site-units.ts).
+ *  · a move takes the site OUT of the group it was dragged from and INTO the one
+ *    it was dropped on. Only that pair changes: a site that also belongs to a
+ *    reporting group elsewhere keeps that membership.
+ *
+ * Every id is checked against this organisation and this register before any
+ * write, so a forged id moves nothing.
+ */
+export async function PUT(request: Request) {
+  try {
+    await ensureDatabase();
+    const guard = await scopedDbWithCapability(request, "sites.edit");
+    if (guard.denied) return guard.denied;
+    const structureRefusal = boardStructureRefusal(guard.scope.siteScope);
+    if (structureRefusal) return structureRefusal;
+    const { db, orgId } = guard.scope;
+    const resolved = await resolveRegisterScope(db, orgId, new URL(request.url), "sites");
+    const refused = scopeRefusal(resolved);
+    if (refused) return refused;
+    const scope = resolved.ok ? resolved.scope : CANONICAL_REGISTER;
+    const body = (await request.json().catch(() => ({}))) as {
+      groupOrder?: unknown;
+      siteOrder?: unknown;
+      moves?: unknown;
+    };
+    const ids = (value: unknown) =>
+      Array.isArray(value) ? value.map((entry) => text(entry, 120)).filter(Boolean).slice(0, 2000) : [];
+    const groupOrder = ids(body.groupOrder);
+    const siteOrder = ids(body.siteOrder);
+    const moves = (Array.isArray(body.moves) ? body.moves : [])
+      .slice(0, 500)
+      .map((entry) => {
+        const move = (entry ?? {}) as Record<string, unknown>;
+        return {
+          siteId: text(move.siteId, 120),
+          fromGroupId: text(move.fromGroupId, 120) || null,
+          toGroupId: text(move.toGroupId, 120) || null,
+        };
+      })
+      .filter((move) => move.siteId && move.fromGroupId !== move.toGroupId);
+
+    const groups = await db
+      .select({ id: siteGroups.id })
+      .from(siteGroups)
+      .where(and(eq(siteGroups.organisationId, orgId), registerScopeFilter(siteGroups.boardId, scope)));
+    const knownGroups = new Set(groups.map((row) => row.id));
+    const siteRows = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(and(eq(sites.organisationId, orgId), registerScopeFilter(sites.boardId, scope)));
+    const knownSites = new Set(siteRows.map((row) => row.id));
+    const allowed = memberSiteSet(guard.scope.siteScope);
+
+    for (const id of [...groupOrder]) {
+      if (!knownGroups.has(id)) return Response.json({ error: "Group not found." }, { status: 404 });
+    }
+    for (const id of [...siteOrder, ...moves.map((move) => move.siteId)]) {
+      if (!knownSites.has(id) || !withinMemberScope(allowed, id)) {
+        return Response.json({ error: "Site not found." }, { status: 404 });
+      }
+    }
+    for (const move of moves) {
+      for (const id of [move.fromGroupId, move.toGroupId]) {
+        if (id && !knownGroups.has(id)) return Response.json({ error: "Group not found." }, { status: 404 });
+      }
+    }
+
+    const now = new Date().toISOString();
+    for (const [position, id] of groupOrder.entries()) {
+      await db
+        .update(siteGroups)
+        .set({ position, updatedAt: now })
+        .where(
+          and(
+            eq(siteGroups.id, id),
+            eq(siteGroups.organisationId, orgId),
+            registerScopeFilter(siteGroups.boardId, scope),
+          ),
+        );
+    }
+    for (const move of moves) {
+      if (move.fromGroupId) {
+        await db
+          .delete(siteGroupMembers)
+          .where(
+            and(
+              eq(siteGroupMembers.organisationId, orgId),
+              eq(siteGroupMembers.siteGroupId, move.fromGroupId),
+              eq(siteGroupMembers.siteId, move.siteId),
+            ),
+          );
+      }
+      if (move.toGroupId) {
+        await db
+          .insert(siteGroupMembers)
+          .values({
+            id: `sgm-${crypto.randomUUID().slice(0, 12)}`,
+            organisationId: orgId,
+            siteGroupId: move.toGroupId,
+            siteId: move.siteId,
+          })
+          .onConflictDoNothing();
+      }
+    }
+    for (const [position, id] of siteOrder.entries()) {
+      await db
+        .update(sites)
+        .set({ position })
+        .where(
+          and(
+            eq(sites.id, id),
+            eq(sites.organisationId, orgId),
+            registerScopeFilter(sites.boardId, scope),
+          ),
+        );
+    }
+    if (siteOrder.length) await reconcileSiteUnitsQuietly(db, orgId, siteOrder);
+    return Response.json({ ok: true, groups: groupOrder.length, sites: siteOrder.length, moved: moves.length });
+  } catch (error) {
+    const failure = siteWriteFailure(error, "The new order could not be saved.");
     return Response.json({ error: failure.message }, { status: failure.status });
   }
 }

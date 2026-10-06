@@ -1,3 +1,4 @@
+import { reconcileStoreRegister } from "../../../lib/store-register-sync";
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
 import {
@@ -34,6 +35,7 @@ export const dynamic = "force-dynamic";
  *        or { action: "repair-files", itemIds } for up to 10 named items
  *
  *   POST { action: "verify-store-docs" }
+ *   POST { action: "sync-store-register" } sites, groups and site assets from Store Documentation
  *        read-only comparison of Store Documentation with monday
  *
  * Every write is idempotent — matched on monday's item id, files on name and
@@ -91,6 +93,14 @@ export async function POST(request: Request) {
       /* Read-only: every difference between monday's Store Documentation and
          ours — stores, certificate files (and their bytes), expiry dates. */
       return Response.json(await verifyStoreDocumentation(await getDb()));
+    }
+    if (body.action === "sync-store-register") {
+      /* The site register, its groups and every site's own asset, brought into
+         line with Store Documentation now rather than at the next change. */
+      return Response.json({
+        ok: true,
+        ...(await reconcileStoreRegister(await getDb(), config.organisationId)),
+      });
     }
     if (body.action === "connect") {
       return Response.json({ ok: true, ...(await connectMondayWebhooks(publicOrigin(request))) });

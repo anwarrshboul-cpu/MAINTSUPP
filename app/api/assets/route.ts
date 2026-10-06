@@ -52,7 +52,9 @@
  *     which is the trap `confineToSiteScope` exists for on the dashboard side.
  */
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { reconcileSiteUnitsQuietly } from "../../lib/site-units";
+import { listSiteGroups } from "../../lib/sites-repository";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
   activityLog,
@@ -556,7 +558,13 @@ async function referenceData(db: Db, orgId: string, siteScope: string[] | null) 
     listOptionValues(db, orgId, "unit_category"),
     listOptionValues(db, orgId, "unit_status"),
     db
-      .select({ id: sites.id, name: sites.name })
+      .select({
+        id: sites.id,
+        name: sites.name,
+        status: sites.status,
+        active: sites.active,
+        position: sites.position,
+      })
       .from(sites)
       .where(
         and(
@@ -571,10 +579,24 @@ async function referenceData(db: Db, orgId: string, siteScope: string[] | null) 
       .where(and(eq(contractors.organisationId, orgId), eq(contractors.active, true)))
       .orderBy(asc(contractors.name)),
   ]);
+  /*
+   * The site groups, so the Assets page is grouped exactly like the Sites page
+   * (2026-10-06): an asset sits in the group its site sits in. Only the ids this
+   * caller may see are listed in each group.
+   */
+  const visibleSites = new Set(siteRows.map((row) => row.id));
+  const groups = (await listSiteGroups(db, orgId)).map((group) => ({
+    id: group.id,
+    name: group.name,
+    colourHex: group.colourHex,
+    position: group.position,
+    siteIds: group.siteIds.filter((id) => visibleSites.has(id)),
+  }));
   return {
     categories,
     statuses,
     sites: siteRows,
+    groups,
     suppliers: supplierRows,
     kinds: ASSET_KINDS.map((key) => ({ value: key, label: ASSET_KIND_LABELS[key] })),
     events: ASSET_EVENTS,
@@ -616,6 +638,10 @@ export async function GET(request: Request) {
     const siteId = text(url.searchParams.get("siteId"), 120);
 
     if (id) return await readOne(db, orgId, siteScope, id);
+
+    /* Every site has its own asset (app/lib/site-units.ts). The write paths
+       keep this true; reading the register makes sure of it. */
+    await reconcileSiteUnitsQuietly(db, orgId);
 
     /*
      * A site named in the query is INTERSECTED with the member's scope rather
@@ -666,6 +692,7 @@ export async function GET(request: Request) {
         primaryImageId: units.primaryImageId,
         notes: units.notes,
         updatedAt: units.updatedAt,
+        position: units.position,
       })
       .from(units)
       .where(
@@ -1322,4 +1349,55 @@ function writeFailure(error: unknown, fallback: string): Response {
   }
   console.error("assets write failed", error);
   return Response.json({ error: fallback }, { status: 503 });
+}
+
+/**
+ * ARRANGE THE ASSETS BOARD — hold an asset and drag it above or below another.
+ *
+ *   PUT { order: string[] }  every asset id in its new order
+ *
+ * Renumbers `units.position` 0..n for the ids named, each checked against this
+ * organisation and the caller's sites first. Moving an asset into another group
+ * is moving its SITE, so the page sends that to `PUT /api/sites/groups`.
+ */
+export async function PUT(request: Request) {
+  try {
+    await ensureDatabase();
+    const guard = await scopedDbWithCapability(request, "sites.edit");
+    if (guard.denied) return guard.denied;
+    const switchedOff = await moduleRefusal(guard.scope, "assets");
+    if (switchedOff) return switchedOff;
+    const { db, orgId, siteScope } = guard.scope;
+    const body = ((await request.json().catch(() => null)) ?? {}) as { order?: unknown };
+    const order = (Array.isArray(body.order) ? body.order : [])
+      .map((entry) => text(entry, 120))
+      .filter(Boolean)
+      .slice(0, 5000);
+    if (!order.length) return Response.json({ ok: true, assets: 0 });
+    const rows = await db
+      .select({ id: units.id })
+      .from(units)
+      .where(
+        and(
+          eq(units.organisationId, orgId),
+          isNull(units.deletedAt),
+          inArray(units.id, order),
+          siteFilter(siteScope),
+        ),
+      );
+    const known = new Set(rows.map((row) => row.id));
+    if (order.some((id) => !known.has(id))) {
+      return Response.json({ error: "Asset not found." }, { status: 404 });
+    }
+    for (const [position, id] of order.entries()) {
+      await db
+        .update(units)
+        .set({ position })
+        .where(and(eq(units.id, id), eq(units.organisationId, orgId)));
+    }
+    return Response.json({ ok: true, assets: order.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The new order could not be saved.";
+    return Response.json({ error: message }, { status: 400 });
+  }
 }

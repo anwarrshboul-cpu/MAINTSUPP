@@ -1,3 +1,4 @@
+import { reconcileSiteUnitsQuietly } from "../../lib/site-units";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -1328,6 +1329,7 @@ export async function POST(request: Request) {
     await setSiteGroupMembership(db, orgId, id, stringList(body.data?.groupIds), scope);
     await logChange(db, orgId, id, "created", actor.email, { name: payload.name });
 
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     // A name another site already answers to is not recorded. Saying so is the
     // difference between an alias that is missing and an alias nobody knows is
     // missing — see `setSiteAliases`.
@@ -1464,6 +1466,7 @@ export async function PATCH(request: Request) {
           aliasSkipped: recorded.ok ? null : recorded.reason,
         });
       }
+      await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
       return Response.json({ ok: true, id, name: nextName });
     }
 
@@ -1667,6 +1670,7 @@ export async function PATCH(request: Request) {
 
     // See `setSiteAliases`: a name another site already answers to is refused,
     // and the save must say so rather than report a list it did not record.
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     return Response.json({
       ok: true,
       id,
@@ -1757,6 +1761,7 @@ export async function DELETE(request: Request) {
       retainedJobs: openJobs?.total ?? 0,
     });
 
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     return Response.json({ ok: true, id, retainedJobs: openJobs?.total ?? 0 });
   } catch (error) {
     const failure = siteWriteFailure(error, "The site could not be archived.");
