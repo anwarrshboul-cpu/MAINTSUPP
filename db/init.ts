@@ -17,6 +17,7 @@ import {
   seedDemoWorkspaceData,
   ensureDemoWorkspaceVocabularies,
 } from "./demo-workspace";
+import { reconcileDemoEstate } from "./demo-estate";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { backfillLegacyMemberships } from "./legacy-memberships";
@@ -551,6 +552,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
    * instance is one indexed primary-key read and nothing else.
    */
   await seedDemoWorkspaceAssets(d1, new Date().toISOString().slice(0, 10));
+  /* 2026-10-06 — ten sites, five in London, each with its Store Documentation
+     row, certificates re-based on today and its site group. Demo rows only. */
+  await reconcileDemoEstate(d1, new Date().toISOString().slice(0, 10));
 }
 
 /**
@@ -3995,12 +3999,15 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
    */
   const groups: Array<[string, string, string, string]> = [
     // slug, name, colour, SQL predicate over `sites s`
-    ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND COALESCE(s.site_type_value, s.type) IN ('Inline', 'Kiosk')"],
+    /* Generic since 2026-10-06: every open TRADING site, whatever a workspace
+       calls its site types — offices and warehouses go to "Other". For
+       Sunnamusk this is the same 21 shops as the old Inline/Kiosk test. */
+    ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND LOWER(COALESCE(s.site_type_value, s.type, '')) NOT IN ('office', 'warehouse', 'head office', 'hq', 'depot', 'distribution centre')"],
     ["europe", "Europe", "#a25ddc", "s.status = 'international'"],
     /* "Other" before "Closed" (2026-10-06): open stores first, closed at the
        bottom, which is the order the owner asked the Sites and Assets pages
        to keep. `ensureSiteUnitsAndGroupOrder` moves existing workspaces. */
-    ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND COALESCE(s.site_type_value, s.type) NOT IN ('Inline', 'Kiosk'))"],
+    ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND LOWER(COALESCE(s.site_type_value, s.type, '')) IN ('office', 'warehouse', 'head office', 'hq', 'depot', 'distribution centre'))"],
     ["closed", "Closed", "#ff5ac4", "s.status = 'closed'"],
   ];
 
@@ -4258,6 +4265,43 @@ async function ensureFormBuilder(d1: D1DatabaseLike) {
       )
       .run();
   }
+}
+
+/**
+ * ONE workspace's Maintenance Request form, with its share link and QR token.
+ *
+ * Added 2026-10-06: a workspace created between two migration runs had NO form
+ * until the next cold boot replayed `ensureFormBuilder` above — its Form tab
+ * answered 404 and it had no share link or QR. `createWorkspace` now calls
+ * this at once. Same id, same statement as the loop above, INSERT OR IGNORE:
+ * a workspace that already has its form keeps it, and its link, unchanged.
+ */
+export async function seedMaintenanceForm(d1: D1DatabaseLike, organisationId: string) {
+  const config = JSON.stringify({
+    order: maintenanceFormConfiguration.order,
+    questions: maintenanceFormConfiguration.questions,
+    features: maintenanceFormConfiguration.features,
+    appearance: maintenanceFormConfiguration.appearance,
+    accessibility: maintenanceFormConfiguration.accessibility,
+    tags: maintenanceFormConfiguration.tags,
+  });
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO form_configurations
+         (id, organisation_id, board_id, view_key, title, description,
+          share_token, short_token, config)
+       VALUES (?, ?, 'maintenance', 'form', ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      `form_${organisationId.slice(-12)}_maintenance`,
+      organisationId,
+      maintenanceFormConfiguration.title,
+      maintenanceFormConfiguration.description,
+      crypto.randomUUID().replace(/-/g, ""),
+      crypto.randomUUID().replace(/-/g, "").slice(0, 12),
+      config,
+    )
+    .run();
 }
 
 /**
@@ -8116,7 +8160,10 @@ async function ensureAssetsFoundation(d1: D1DatabaseLike) {
  * workspace created next year is picked up on its own first boot without any
  * of the others paying for a re-check.
  */
-async function seedAssetVocabulary(d1: D1DatabaseLike) {
+/* Exported (2026-10-06) so `createWorkspace` gives a new workspace its asset
+   categories and statuses at once, not at the next cold boot. It only touches
+   active workspaces that do not have them yet. */
+export async function seedAssetVocabulary(d1: D1DatabaseLike) {
   const pending = await d1
     .prepare(
       `SELECT id FROM organisations o

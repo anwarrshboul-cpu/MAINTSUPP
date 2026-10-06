@@ -95,7 +95,7 @@ export const DEMO_WORKSPACE_NAME = "MAINTSUPP Demo";
 const DEMO_COMPLETED_GROUP = `demo-group-${DEMO_WORKSPACE_ID}-completed`;
 
 /** `YYYY-MM-DD`, `offset` days from `today`. Negative is the past. */
-function day(today: string, offset: number): string {
+export function day(today: string, offset: number): string {
   const base = new Date(`${today}T00:00:00Z`);
   base.setUTCDate(base.getUTCDate() + offset);
   return base.toISOString().slice(0, 10);
@@ -104,7 +104,18 @@ function day(today: string, offset: number): string {
 /* ── The estate ───────────────────────────────────────────────────────────── */
 
 /**
- * Eight fictional UK retail sites.
+ * Ten fictional UK retail sites — five in London (owner's request, 2026-10-06).
+ *
+ * "Castle Quarter" (Norwich) and "Priory Court" (Cardiff) became the London
+ * kiosks "Lockside Kiosk" and "Riverview Arcade": their keys, jobs, assets and
+ * certificates are unchanged, only the name and address moved. Highgate Parade
+ * and Wandle Yard are new and sit LAST in this list on purpose — the two
+ * "already seeded" checks look at the last entry, so an existing workspace
+ * gains them through the same additive seeders a fresh one uses.
+ * `reconcileDemoEstate` below renames the two existing rows and puts the
+ * register in order: the five London sites first.
+ *
+ * The original note, still true:
  *
  * Invented outright — the names, the streets and the postcodes belong to no
  * real business and no real address. They are ordinary enough to read as a real
@@ -113,7 +124,7 @@ function day(today: string, offset: number): string {
  * register, the portfolio filters and the regional breakdowns all have
  * something to show.
  */
-const DEMO_SITES: ReadonlyArray<{
+export const DEMO_SITES: ReadonlyArray<{
   key: string;
   name: string;
   type: string;
@@ -126,11 +137,19 @@ const DEMO_SITES: ReadonlyArray<{
   { key: "kingsway", name: "Kingsway Central", type: "Flagship", region: "London", city: "London", postcode: "EC2V 7JH", address: "14 Kingsway Parade, London", manager: "Priya Raman" },
   { key: "harbour", name: "Harbour Point", type: "Store", region: "South West", city: "Bristol", postcode: "BS1 5TY", address: "8 Harbour Point, Bristol", manager: "Daniel Okafor" },
   { key: "meadowbank", name: "Meadowbank", type: "Store", region: "Scotland", city: "Edinburgh", postcode: "EH8 7AE", address: "221 Meadowbank Row, Edinburgh", manager: "Iona Fraser" },
-  { key: "castle", name: "Castle Quarter", type: "Kiosk", region: "East", city: "Norwich", postcode: "NR1 3DD", address: "Unit 12, Castle Quarter, Norwich", manager: "Tom Ellery" },
+  { key: "castle", name: "Lockside Kiosk", type: "Kiosk", region: "London", city: "London", postcode: "NW1 8AF", address: "Kiosk K12, Lockside Yard, London", manager: "Tom Ellery" },
   { key: "riverside", name: "Riverside Walk", type: "Store", region: "North West", city: "Manchester", postcode: "M3 4LZ", address: "5 Riverside Walk, Manchester", manager: "Sofia Marchetti" },
   { key: "abbeygate", name: "Abbey Gate", type: "Store", region: "Yorkshire", city: "Leeds", postcode: "LS1 6QR", address: "44 Abbey Gate, Leeds", manager: "Callum Reid" },
-  { key: "priory", name: "Priory Court", type: "Kiosk", region: "Wales", city: "Cardiff", postcode: "CF10 2HG", address: "Unit 3, Priory Court, Cardiff", manager: "Rhian Davies" },
+  { key: "priory", name: "Riverview Arcade", type: "Kiosk", region: "London", city: "London", postcode: "SE10 9GB", address: "Kiosk K3, Riverview Arcade, London", manager: "Rhian Davies" },
   { key: "oldmill", name: "Old Mill Depot", type: "Warehouse", region: "Midlands", city: "Birmingham", postcode: "B7 4QN", address: "Old Mill Industrial Estate, Birmingham", manager: "Marcus Bell" },
+  { key: "highgate", name: "Highgate Parade", type: "Store", region: "London", city: "London", postcode: "N6 5JR", address: "62 Highgate Parade, London", manager: "Amara Cole" },
+  { key: "wandle", name: "Wandle Yard", type: "Store", region: "London", city: "London", postcode: "SW18 4TQ", address: "Unit 18, Wandle Yard, London", manager: "Jonah Pryce" },
+];
+
+/** The order the register shows them in: London first, then the regions. */
+export const DEMO_SITE_ORDER: readonly string[] = [
+  "kingsway", "castle", "priory", "highgate", "wandle",
+  "harbour", "meadowbank", "riverside", "abbeygate", "oldmill",
 ];
 
 /**
@@ -163,7 +182,7 @@ const DEMO_CONTRACTORS: ReadonlyArray<{
  * `storeDocumentationCertificates` names them so the register groups them with
  * the real vocabulary rather than inventing an eighth spelling.
  */
-const DEMO_REQUIREMENTS: readonly string[] = [
+export const DEMO_REQUIREMENTS: readonly string[] = [
   "Fire Alarm",
   "Fire Extinguisher",
   "Emergency Lighting",
@@ -186,7 +205,7 @@ const DEMO_REQUIREMENTS: readonly string[] = [
  * column is never read as truth (`app/lib/compliance-status.ts`), so the date
  * is the only thing that decides what a reader sees.
  */
-const DEMO_EXPIRY_OFFSETS: Readonly<Record<string, ReadonlyArray<number | null>>> = {
+export const DEMO_EXPIRY_OFFSETS: Readonly<Record<string, ReadonlyArray<number | null>>> = {
   /*                 Alarm  Exting  EmLight  Elec   PAT    Water   PLI   */
   kingsway:     [   210,   175,    140,    520,    95,    260,   300 ],
   harbour:      [    47,   320,     18,    610,   150,     73,   410 ],
@@ -196,6 +215,8 @@ const DEMO_EXPIRY_OFFSETS: Readonly<Record<string, ReadonlyArray<number | null>>
   abbeygate:    [     9,   135,     55,    -21,    70,    290,   120 ],
   priory:       [  null,    31,    160,    240,  null,    145,    84 ],
   oldmill:      [   420,   380,    450,    560,   275,    400,   330 ],
+  highgate:     [   190,   260,     35,    480,   140,    210,   280 ],
+  wandle:       [   300,    14,    230,    -6,    185,    120,   350 ],
 };
 
 /* ── The work ─────────────────────────────────────────────────────────────── */
@@ -242,6 +263,15 @@ type DemoJob = {
  *   · four priorities, eight categories, all eight sites, all seven suppliers.
  */
 const DEMO_JOBS: readonly DemoJob[] = [
+  /* ── The two London sites added on 2026-10-06 ─────────────────────────── */
+  j("hg1", "highgate", "Shopfront lighting out on one side", "Half of the window downlights are out; the other half work. Suspect a failed LED driver.", "Shopfront", "Electrical", "brightwell", "High", null, 3, 2, null, "In Progress", "Attention", "needs-attention", 3),
+  j("hg2", "highgate", "Stockroom door closer leaking", "Overhead closer leaking oil and slamming the door.", "Stockroom", "Fabric", "ironside", "Medium", null, 10, 4, null, "Job Scheduled", "Booked", "jobs-booked", 2),
+  j("hg3", "highgate", "Annual fire alarm service", "Panel and all detectors serviced; certificate issued.", "Whole site", "Fire safety", "stonebridge", "Medium", 35, null, 42, 420, "Job Completed", "Completed", "completed", 4),
+  j("hg4", "highgate", "Counter hinge replacement", "Two cabinet hinges on the till counter replaced.", "Serving counter", "Fabric", "ironside", "Low", 71, null, 75, 140, "Job Completed", "Completed", "completed", 1),
+  j("wy1", "wandle", "Electrical wiring certificate expired — retest", "Five-year fixed wire test is overdue; the store needs a new EICR.", "Whole site", "Compliance", "brightwell", "Urgent", null, -2, 12, null, "Pending Approval", "Incoming", "topics", 5),
+  j("wy2", "wandle", "Fire extinguisher service due", "Annual extinguisher service due within two weeks.", "Whole site", "Fire safety", "stonebridge", "Medium", null, 12, 3, null, "Job Scheduled", "Booked", "jobs-booked", 2),
+  j("wy3", "wandle", "Air conditioning not cooling", "Shop floor unit blowing warm air; filters cleaned, still warm.", "Shop floor", "HVAC", "brightwell", "High", 18, null, 21, 560, "Job Completed", "Completed", "completed", 3),
+  j("wy4", "wandle", "Display strip lights flickering", "LED strip in the main display cabinet flickering; transformer replaced.", "Display cabinet", "Electrical", "brightwell", "Medium", 52, null, 55, 210, "Job Completed", "Completed", "completed", 2),
   /* ── Open: overdue ─────────────────────────────────────────────────────── */
   j("od1", "harbour", "Chiller cabinet losing temperature overnight", "Front-of-house chiller is reading 9°C each morning and recovering by mid-morning. Stock at risk.", "Shop floor — chiller run", "Refrigeration", "halewood", "High", null, -9, 24, null, "In Progress", "Attention", "needs-attention", 3),
   j("od2", "castle", "Emergency lighting failed monthly test", "Two of six emergency luminaires did not hold charge during the monthly drop test.", "Back corridor", "Fire safety", "stonebridge", "Urgent", null, -4, 16, null, "Awaiting parts", "Attention", "needs-attention", 4),
@@ -412,7 +442,7 @@ function dutyHolderFor(siteKey: string, requirement: string): string {
 
 /* ── Writing it ───────────────────────────────────────────────────────────── */
 
-const siteId = (key: string) => `demo-site-${key}`;
+export const siteId = (key: string) => `demo-site-${key}`;
 const contractorId = (key: string) => `demo-contractor-${key}`;
 const jobId = (key: string) => `demo-job-${key}`;
 
