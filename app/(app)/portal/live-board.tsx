@@ -1,5 +1,6 @@
 "use client";
 
+import { useBoardGroupDrag } from "./board-group-drag";
 import {
   Fragment,
   useCallback,
@@ -2701,6 +2702,11 @@ export function LiveMaintenanceBoard({
     }
   };
 
+  /* Hold and drag a group header above or below another — board-group-drag.ts. */
+  const groupDrag = useBoardGroupDrag({
+    groups, url: boardUrl("/api/board", boardId), enabled: true, onGroups: setGroups, onNotify,
+  });
+
   const sortGroup = async (
     group: MaintenanceGroup,
     mode: "alphabetical" | "newest",
@@ -3876,12 +3882,13 @@ export function LiveMaintenanceBoard({
                   }`}
                   key={group.id}
                   data-board-group-id={group.id}
+                  {...groupDrag.sectionProps(group)}
                   style={{
                     "--group-color": group.color,
                     "--group-height": `${deferredGroupHeight(rows.length)}px`,
                   } as CSSProperties}
                 >
-                  <header className="sheet-group__header">
+                  <header className="sheet-group__header" {...groupDrag.headerProps(group, !synthetic && renamingId !== group.id)}>
                     <button
                       type="button"
                       aria-label={

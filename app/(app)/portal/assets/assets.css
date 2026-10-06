@@ -398,3 +398,15 @@
     max-height: 280px;
   }
 }
+
+/* The grouped board (2026-10-06): one asset per row, in its site's group. */
+.asset-board-card {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-card);
+}

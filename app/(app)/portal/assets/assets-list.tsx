@@ -47,13 +47,16 @@ import {
 } from "../../../lib/asset-model";
 import { formatDate, formatMoney, labelFor, styleFor } from "../sites/site-types";
 import type { AssetListPayload, AssetRow } from "./asset-types";
+import { GroupedBoard, type Arrangement, type BoardGroup } from "../register/grouped-board";
 
 /** Every key this screen owns in the address bar, so "Clear all" is exact. */
 const FILTER_KEYS = ["q", "site", "kind", "category", "status", "sort"] as const;
 
-type SortKey = "name" | "site" | "category" | "status" | "updated" | "model";
+type SortKey = "manual" | "name" | "site" | "category" | "status" | "updated" | "model";
 
 const SORTS: ReadonlyArray<{ value: SortKey; label: string }> = [
+  /* The board's own order, grouped like the Sites page (2026-10-06). */
+  { value: "manual", label: "My order (drag to arrange)" },
   { value: "name", label: "Asset name" },
   { value: "site", label: "Site" },
   { value: "category", label: "Category" },
@@ -78,6 +81,12 @@ export function AssetsList({
    * every cell says "Kingsway Central" is a column carrying no information.
    */
   fixedSiteId = null,
+  canArrange = false,
+  onArrange,
+  onAddGroup,
+  onRenameGroup,
+  onRecolourGroup,
+  onDeleteGroup,
 }: {
   data: AssetListPayload | null;
   error: string;
@@ -87,6 +96,16 @@ export function AssetsList({
   /** Absent for a role that cannot add one; every add control is then hidden. */
   onAddAsset?: () => void;
   fixedSiteId?: string | null;
+  /** May this caller drag assets and groups and edit groups? (2026-10-06) */
+  canArrange?: boolean;
+  /** The new order, plus the asset's SITE if the asset changed group. */
+  onArrange?: (
+    next: Arrangement & { siteMove: { siteId: string; fromGroupId: string | null; toGroupId: string | null } | null },
+  ) => Promise<void> | void;
+  onAddGroup?: (name: string, colour: string) => Promise<void> | void;
+  onRenameGroup?: (id: string, name: string) => Promise<void> | void;
+  onRecolourGroup?: (id: string, colour: string) => Promise<void> | void;
+  onDeleteGroup?: (group: BoardGroup, count: number) => Promise<void> | void;
 }) {
   /*
    * `search` is the query string itself. `useQueryState` publishes it beside
@@ -97,7 +116,7 @@ export function AssetsList({
   const { params, setParams, search } = useQueryState();
 
   const query = (params.get("q") ?? "").trim().toLowerCase();
-  const sort = (params.get("sort") ?? "name") as SortKey;
+  const sort = (params.get("sort") ?? "manual") as SortKey;
 
   /*
    * THE FOUR MULTI-SELECT FILTERS, PARSED ONCE.
@@ -225,8 +244,10 @@ export function AssetsList({
           /* Newest first — "recently updated" means the top of the list is the
              thing somebody touched this morning. */
           return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
-        default:
+        case "name":
           return collator.compare(a.name, b.name);
+        default:
+          return (a.position ?? 0) - (b.position ?? 0) || collator.compare(a.name, b.name);
       }
     });
   }, [data, chosenSites, chosenKinds, chosenCategories, chosenStatuses, query, sort, siteName]);
@@ -341,6 +362,33 @@ export function AssetsList({
 
   /* The seeded value is the fallback for a payload that predates the field. */
   const replaceableStatus = data?.needsReplacementStatus ?? NEEDS_REPLACEMENT_STATUS;
+
+  /*
+   * THE GROUPED BOARD (2026-10-06). An asset sits in the group its SITE sits
+   * in — the same groups, in the same order, as the Sites page — so the two
+   * pages always agree. Open first, closed last: an asset is "closed" when it
+   * is Inactive or its site is closed.
+   */
+  const boardGroups = useMemo<BoardGroup[]>(
+    () => (data?.groups ?? []).map((group) => ({ id: group.id, name: group.name, colour: group.colourHex })),
+    [data],
+  );
+  const boardItems = useMemo(() => {
+    const home = new Map<string, string>();
+    for (const group of data?.groups ?? []) {
+      for (const siteId of group.siteIds) if (!home.has(siteId)) home.set(siteId, group.id);
+    }
+    const siteClosed = new Map(
+      (data?.sites ?? []).map((site) => [site.id, site.status === "closed" || site.active === false]),
+    );
+    return visible.map((row) => ({
+      id: row.id,
+      groupId: home.get(row.siteId) ?? null,
+      closed: siteClosed.get(row.siteId) === true || /^(inactive|disposed|retired)$/i.test(row.status),
+      row,
+    }));
+  }, [data, visible]);
+  const useBoard = !fixedSiteId && boardGroups.length > 0;
 
   /*
    * The export carries the filters the reader can see, so the file matches the
@@ -469,7 +517,7 @@ export function AssetsList({
             </label>
             <label className="ops-field">
               <span className="visually-hidden">Sort assets by</span>
-              <select value={sort} onChange={(event) => setValue("sort", event.target.value, "name")}>
+              <select value={sort} onChange={(event) => setValue("sort", event.target.value, "manual")}>
                 {SORTS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -507,6 +555,68 @@ export function AssetsList({
               </button>
             </>
           )
+        ) : useBoard ? (
+          <GroupedBoard
+            noun="asset"
+            storageKey="maintsupp.assets.collapsed"
+            groups={boardGroups}
+            items={boardItems}
+            canArrange={canArrange && sort === "manual" && Boolean(onArrange)}
+            canEditGroups={canArrange}
+            emptyGroupText="No assets in this group."
+            onArrange={(next) => {
+              /* Moving an asset to another group moves its site there. */
+              const moved = next.moved
+                ? boardItems.find((item) => item.id === next.moved!.itemId)
+                : null;
+              return onArrange?.({
+                ...next,
+                siteMove:
+                  next.moved && moved
+                    ? { siteId: moved.row.siteId, fromGroupId: next.moved.fromGroupId, toGroupId: next.moved.toGroupId }
+                    : null,
+              });
+            }}
+            onAddGroup={onAddGroup}
+            onRenameGroup={onRenameGroup}
+            onRecolourGroup={onRecolourGroup}
+            onDeleteGroup={onDeleteGroup}
+            renderItem={({ row }, controls) => (
+              <div className="gboard-row-shell asset-board-row">
+                {controls.handle ?? <span />}
+                <div className="asset-board-card">
+                  {row.primaryImageId ? (
+                    <img
+                      className="asset-thumb"
+                      src={`/api/files/${row.primaryImageId}?thumb=1`}
+                      alt=""
+                      width={40}
+                      height={40}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <span className="asset-thumb asset-thumb--empty" aria-hidden="true">
+                      <Icon name="building" size={16} />
+                    </span>
+                  )}
+                  <span className="asset-cell">
+                    <button type="button" className="table-text-action" onClick={() => onOpenAsset(row.id)}>
+                      {row.name}
+                    </button>
+                    <span className="asset-subline">
+                      {[siteName(row.siteId), labelFor(data?.categories ?? [], row.category), row.locationInSite]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                  <span className="status-chip" style={styleFor(data?.statuses ?? [], row.status)}>
+                    {labelFor(data?.statuses ?? [], row.status)}
+                  </span>
+                </div>
+                {controls.menu ?? <span />}
+              </div>
+            )}
+          />
         ) : (
           <div className="table-scroll">
             <table className="analytics-table analytics-table--mobile-cards asset-table">

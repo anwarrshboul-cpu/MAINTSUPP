@@ -17,6 +17,7 @@ import {
   seedDemoWorkspaceData,
   ensureDemoWorkspaceVocabularies,
 } from "./demo-workspace";
+import { reconcileDemoEstate } from "./demo-estate";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "../app/lib/generic-board-template";
 import { seedStoreDocumentationBoard } from "./seed-store-documentation";
 import { backfillLegacyMemberships } from "./legacy-memberships";
@@ -508,6 +509,11 @@ async function applyMigrations(d1: D1DatabaseLike) {
     ["contractor_id", "TEXT"],
   ]);
 
+  /* 2026-10-06 — one asset per site, and Sites/Assets arranged in groups. Two
+     guarded columns, one INSERT OR IGNORE backfill and one position move. See
+     `ensureSiteUnitsAndGroupOrder`. */
+  await ensureSiteUnitsAndGroupOrder(d1);
+
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -546,6 +552,9 @@ async function applyMigrations(d1: D1DatabaseLike) {
    * instance is one indexed primary-key read and nothing else.
    */
   await seedDemoWorkspaceAssets(d1, new Date().toISOString().slice(0, 10));
+  /* 2026-10-06 — ten sites, five in London, each with its Store Documentation
+     row, certificates re-based on today and its site group. Demo rows only. */
+  await reconcileDemoEstate(d1, new Date().toISOString().slice(0, 10));
 }
 
 /**
@@ -3892,6 +3901,63 @@ export async function seedBoardStructure(
 
 
 /**
+ * ONE ASSET PER SITE, AND CLOSED GROUPS LAST (2026-10-06).
+ *
+ * The owner asked for the Assets register to carry exactly one asset per site —
+ * the store unit — named, typed and located from the site, and for the Sites
+ * and Assets pages to be grouped boards with open stores first and closed ones
+ * at the bottom. `app/lib/site-units.ts` keeps the units in step on every site
+ * write; this is the once-only part:
+ *
+ *  · `sites.monday_snapshot` — the monday Store Documentation values last
+ *    applied to a site (`app/lib/store-register-sync.ts`);
+ *  · `units.site_mirror` — what a site unit last copied from its site;
+ *  · every existing site gets its unit, `site-unit-<siteId>`. INSERT OR IGNORE,
+ *    so a unit already there (or binned) is left alone;
+ *  · each workspace's seeded "Closed" group moves below its other groups.
+ *
+ * `s.status`/`s.lifecycle` rather than `s.active` decide Inactive, because a
+ * boolean literal reads differently in SQLite and Postgres and the two text
+ * columns say the same thing.
+ */
+async function ensureSiteUnitsAndGroupOrder(d1: D1DatabaseLike) {
+  await addColumn(d1, "sites", "monday_snapshot", "TEXT");
+  await addColumn(d1, "units", "site_mirror", "TEXT");
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO units
+         (id, organisation_id, site_id, name, category, kind, status, location_in_site, position, notes)
+       SELECT 'site-unit-' || s.id,
+              s.organisation_id,
+              s.id,
+              s.name || ' — ' || COALESCE(NULLIF(s.site_type_value, ''), NULLIF(s.type, ''), 'Store'),
+              COALESCE(NULLIF(s.site_type_value, ''), NULLIF(s.type, ''), 'Store'),
+              'equipment',
+              CASE WHEN s.status = 'closed' OR s.lifecycle = 'Closed' THEN 'Inactive' ELSE 'Active' END,
+              COALESCE(NULLIF(s.address_line1, ''), NULLIF(s.address, '')),
+              COALESCE(s.position, 0),
+              'The store unit itself. Name, type, location and status follow the site.'
+         FROM sites s`,
+    )
+    .run();
+  await d1
+    .prepare(
+      `UPDATE site_groups
+          SET position = (
+            SELECT MAX(x.position) + 1 FROM site_groups x
+             WHERE x.organisation_id = site_groups.organisation_id
+          )
+        WHERE slug = 'closed'
+          AND id = 'site-group-' || organisation_id || '-closed'
+          AND position < (
+            SELECT MAX(x.position) FROM site_groups x
+             WHERE x.organisation_id = site_groups.organisation_id
+          )`,
+    )
+    .run();
+}
+
+/**
  * Seeds the Store Documentation board's four groups over the site register.
  *
  * Monday files every store into "Current stores", "Europe", "Closed" or
@@ -3900,10 +3966,9 @@ export async function seedBoardStructure(
  * "All groups" filter was empty and the register could not be read the way the
  * board is.
  *
- * Membership is derived rather than stored by hand, and re-derived on each
- * boot, so a site closed or moved to Europe lands in the right group without
- * anyone maintaining a second list. Groups an admin has created themselves are
- * untouched — only the four seeded slugs are rebuilt.
+ * Membership is derived from status for a site that is in no group yet; a
+ * site that already has a group stays where somebody put it (see the note in
+ * the body, 2026-10-06). Groups an admin has created themselves are untouched.
  */
 export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisationId: string) {
   /*
@@ -3934,10 +3999,16 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
    */
   const groups: Array<[string, string, string, string]> = [
     // slug, name, colour, SQL predicate over `sites s`
-    ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND COALESCE(s.site_type_value, s.type) IN ('Inline', 'Kiosk')"],
+    /* Generic since 2026-10-06: every open TRADING site, whatever a workspace
+       calls its site types — offices and warehouses go to "Other". For
+       Sunnamusk this is the same 21 shops as the old Inline/Kiosk test. */
+    ["current-stores", "Current stores", "#579bfc", "s.status = 'active' AND LOWER(COALESCE(s.site_type_value, s.type, '')) NOT IN ('office', 'warehouse', 'head office', 'hq', 'depot', 'distribution centre')"],
     ["europe", "Europe", "#a25ddc", "s.status = 'international'"],
+    /* "Other" before "Closed" (2026-10-06): open stores first, closed at the
+       bottom, which is the order the owner asked the Sites and Assets pages
+       to keep. `ensureSiteUnitsAndGroupOrder` moves existing workspaces. */
+    ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND LOWER(COALESCE(s.site_type_value, s.type, '')) IN ('office', 'warehouse', 'head office', 'hq', 'depot', 'distribution centre'))"],
     ["closed", "Closed", "#ff5ac4", "s.status = 'closed'"],
-    ["other", "Other", "#757575", "s.status = 'other' OR (s.status = 'active' AND COALESCE(s.site_type_value, s.type) NOT IN ('Inline', 'Kiosk'))"],
   ];
 
   for (const [position, [slug, name, colour, predicate]] of groups.entries()) {
@@ -3951,11 +4022,16 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
       .bind(id, organisationId, name, slug, colour, position)
       .run();
 
-    // Rebuild membership so a lifecycle or region change is reflected.
-    await d1
-      .prepare("DELETE FROM site_group_members WHERE site_group_id = ?")
-      .bind(id)
-      .run();
+    /*
+     * MEMBERSHIP IS NO LONGER REBUILT (2026-10-06).
+     *
+     * This used to delete every member of the four groups and re-derive them
+     * from status on every Sites read by an editor. Since the Sites and Assets
+     * pages became grouped boards, the groups are the owner's own arrangement:
+     * a store dragged into "London" has to stay there. So only a site that is
+     * in NO group yet is placed, by the same predicates; a site somebody has
+     * placed is left where they put it.
+     */
     await d1
       .prepare(
         /*
@@ -3972,7 +4048,11 @@ export async function seedStoreDocumentationGroups(d1: D1DatabaseLike, organisat
            (id, organisation_id, site_group_id, site_id)
          SELECT 'sgm-' || ? || '-' || s.id, ?, ?, s.id
            FROM sites s
-          WHERE s.organisation_id = ? AND (${predicate})`,
+          WHERE s.organisation_id = ? AND (${predicate})
+            AND NOT EXISTS (
+              SELECT 1 FROM site_group_members m
+               WHERE m.organisation_id = s.organisation_id AND m.site_id = s.id
+            )`,
       )
       .bind(slug, organisationId, id, organisationId)
       .run();
@@ -4185,6 +4265,43 @@ async function ensureFormBuilder(d1: D1DatabaseLike) {
       )
       .run();
   }
+}
+
+/**
+ * ONE workspace's Maintenance Request form, with its share link and QR token.
+ *
+ * Added 2026-10-06: a workspace created between two migration runs had NO form
+ * until the next cold boot replayed `ensureFormBuilder` above — its Form tab
+ * answered 404 and it had no share link or QR. `createWorkspace` now calls
+ * this at once. Same id, same statement as the loop above, INSERT OR IGNORE:
+ * a workspace that already has its form keeps it, and its link, unchanged.
+ */
+export async function seedMaintenanceForm(d1: D1DatabaseLike, organisationId: string) {
+  const config = JSON.stringify({
+    order: maintenanceFormConfiguration.order,
+    questions: maintenanceFormConfiguration.questions,
+    features: maintenanceFormConfiguration.features,
+    appearance: maintenanceFormConfiguration.appearance,
+    accessibility: maintenanceFormConfiguration.accessibility,
+    tags: maintenanceFormConfiguration.tags,
+  });
+  await d1
+    .prepare(
+      `INSERT OR IGNORE INTO form_configurations
+         (id, organisation_id, board_id, view_key, title, description,
+          share_token, short_token, config)
+       VALUES (?, ?, 'maintenance', 'form', ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      `form_${organisationId.slice(-12)}_maintenance`,
+      organisationId,
+      maintenanceFormConfiguration.title,
+      maintenanceFormConfiguration.description,
+      crypto.randomUUID().replace(/-/g, ""),
+      crypto.randomUUID().replace(/-/g, "").slice(0, 12),
+      config,
+    )
+    .run();
 }
 
 /**
@@ -8043,7 +8160,10 @@ async function ensureAssetsFoundation(d1: D1DatabaseLike) {
  * workspace created next year is picked up on its own first boot without any
  * of the others paying for a re-check.
  */
-async function seedAssetVocabulary(d1: D1DatabaseLike) {
+/* Exported (2026-10-06) so `createWorkspace` gives a new workspace its asset
+   categories and statuses at once, not at the next cold boot. It only touches
+   active workspaces that do not have them yet. */
+export async function seedAssetVocabulary(d1: D1DatabaseLike) {
   const pending = await d1
     .prepare(
       `SELECT id FROM organisations o

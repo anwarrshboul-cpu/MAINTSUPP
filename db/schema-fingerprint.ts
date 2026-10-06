@@ -99,6 +99,8 @@ export const FINGERPRINTED_SOURCES: readonly string[] = [
   "db/init.ts",
   "db/schema.ts",
   "db/demo-workspace.ts",
+  /* The demo workspace's one UPDATE path — its ten sites (2026-10-06). */
+  "db/demo-estate.ts",
   /* Holds the intake workspace's fixed id and its four seed statements. Changing
      that id decides which workspace the seed creates AND which one the public
      enquiry path writes to, so it is a migration change in every sense. */
@@ -187,6 +189,13 @@ export const SCHEMA_GENERATIONS: readonly string[] = [
   /* 10 — contractor applications: document upload key, documents, and the
      register record an approved application became. */
   "43652600",
+  /* 11 — `ensureSiteUnitsAndGroupOrder`: one asset per site (two guarded
+     columns, one INSERT OR IGNORE backfill), the seeded Closed site group
+     moved below the others, and site-group membership no longer rebuilt;
+     the demo workspace's ten sites (`reconcileDemoEstate`); the Maintenance
+     form and asset vocabulary seeded at workspace creation. Not yet released
+     when written, so this entry was settled once, before its first deploy. */
+  "4b63ec07",
 ];
 
 /** This build's generation: its position in `SCHEMA_GENERATIONS`. */

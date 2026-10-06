@@ -17,7 +17,7 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { getDb } from "../../db";
 import { getD1 } from "../../db";
-import { seedBoardStructure, seedJobTypes, seedWorkspaceDefaults } from "../../db/init";
+import { seedAssetVocabulary, seedBoardStructure, seedJobTypes, seedMaintenanceForm, seedWorkspaceDefaults } from "../../db/init";
 import { seedStoreDocumentationBoard } from "../../db/seed-store-documentation";
 import { JOBS_TEMPLATE_GROUP_KEYS } from "./generic-board-template";
 import {
@@ -30,7 +30,7 @@ import {
   organisations,
   users,
 } from "../../db/schema";
-import { demoIdentityAllowed, organisationIdentityEmail } from "./tenant-access";
+import { demoIdentityAllowed, organisationIdentityEmail, PRIMARY_ORGANISATION_ID } from "./tenant-access";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
 
@@ -133,11 +133,20 @@ export async function createWorkspace(
     })
     .returning();
 
-  if (input.templateOrganisationId) {
+  /*
+   * THE VOCABULARY ALWAYS ARRIVES (2026-10-06). With no template — an Owner
+   * whose company has no default workspace yet — a new workspace used to get
+   * no option lists at all: no site types (so "Add site" failed), empty status
+   * and priority pickers. It now falls back to the product's own lists, taken
+   * from the primary workspace with every customer-specific set left empty
+   * (`CUSTOMER_SPECIFIC_OPTION_SETS`), so no client's store names travel.
+   */
+  const template = input.templateOrganisationId ?? PRIMARY_ORGANISATION_ID;
+  if (template) {
     const sourceSets = await db
       .select()
       .from(optionSets)
-      .where(eq(optionSets.organisationId, input.templateOrganisationId));
+      .where(eq(optionSets.organisationId, template));
     for (const sourceSet of sourceSets) {
       const newSetId = `set_${crypto.randomUUID().replaceAll("-", "")}`;
       await db.insert(optionSets).values({
@@ -204,6 +213,10 @@ export async function createWorkspace(
      status map and approval bands. Without them every invoice approval in a
      new workspace failed - see `seedTargets` in db/init.ts. */
   await seedWorkspaceDefaults(d1, created.id);
+  /* The Maintenance Request form (with its share link and QR) and the asset
+     categories and statuses, at once rather than at the next cold boot. */
+  await seedMaintenanceForm(d1, created.id);
+  await seedAssetVocabulary(d1);
 
   if (demoIdentityAllowed()) {
     for (const role of ["admin", "client"] as const) {

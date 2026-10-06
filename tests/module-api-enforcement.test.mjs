@@ -57,7 +57,7 @@ function handlerBody(source, name) {
  * handler asks. Each key is the module the switch belongs to.
  */
 const EXCLUSIVE = {
-  "app/api/assets/route.ts": { key: "assets", handlers: ["GET", "POST", "PATCH", "DELETE"] },
+  "app/api/assets/route.ts": { key: "assets", handlers: ["GET", "POST", "PATCH", "DELETE", "PUT"] }, // PUT: the Assets board order, 2026-10-06
   "app/api/assets/csv/route.ts": { key: "assets", handlers: ["GET"] },
   "app/api/teams/route.ts": { key: "team", handlers: ["GET", "POST", "PATCH"] },
   "app/api/teams/members/route.ts": { key: "team", handlers: ["POST", "DELETE"] },

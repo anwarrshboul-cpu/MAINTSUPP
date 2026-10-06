@@ -228,6 +228,21 @@ export function SitesManager({
     }
   }
 
+  /*
+   * THE BOARD'S WRITES (2026-10-06) — arrange, and the group chrome. Each one
+   * reloads afterwards so the page shows what the server stored, not what the
+   * drag hoped for; a refusal is shown in the server's own words.
+   */
+  async function groupsCall(method: string, body: unknown, done: string) {
+    try {
+      await api(scopedUrl("/api/sites/groups", sectionKey), { method, body });
+      if (done) onNotify(done);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The change could not be saved.");
+    }
+    reload();
+  }
+
   async function runImport(csv: string, dryRun: boolean) {
     try {
       const result = await api<ImportResult>(scopedUrl("/api/sites/csv", sectionKey), {
@@ -410,6 +425,34 @@ export function SitesManager({
           label: type.label,
         }))}
         statusLabel={(value) => labelFor(data?.statuses ?? [], value)}
+        siteGroups={data?.groups ?? []}
+        canArrange={canEditSites}
+        onArrange={(next) =>
+          groupsCall(
+            "PUT",
+            {
+              groupOrder: next.groupOrder,
+              siteOrder: next.itemOrder,
+              moves: next.moved
+                ? [{ siteId: next.moved.itemId, fromGroupId: next.moved.fromGroupId, toGroupId: next.moved.toGroupId }]
+                : [],
+            },
+            next.moved ? "Site moved." : "",
+          )
+        }
+        onAddGroup={(name, colour) =>
+          groupsCall("POST", { data: { name, colourHex: colour, kind: "portfolio" } }, `Group "${name}" added.`)
+        }
+        onRenameGroup={(id, name) => groupsCall("PATCH", { id, data: { name } }, "Group renamed.")}
+        onRecolourGroup={(id, colour) => groupsCall("PATCH", { id, data: { colourHex: colour } }, "Group colour changed.")}
+        onDeleteGroup={(group, count) => {
+          if (!group.id) return;
+          const warning = count
+            ? `Delete the group "${group.name}"?\n\nIts ${count} site${count === 1 ? "" : "s"} are kept and move to \"No group\", where you can drag them into another group. Nothing else is deleted.`
+            : `Delete the empty group "${group.name}"?`;
+          if (!window.confirm(warning)) return;
+          return groupsCall("DELETE", { id: group.id }, `Group "${group.name}" deleted.`);
+        }}
         onOpenSite={openSite}
         onEditSite={(site) =>
           setMode({

@@ -1,5 +1,7 @@
+import { reconcileSiteUnitsQuietly } from "../../lib/site-units";
 import { and, count, desc, eq, isNull } from "drizzle-orm";
-import { ensureDatabase } from "../../../db/init";
+import { ensureDatabase, seedStoreDocumentationGroups } from "../../../db/init";
+import { getD1 } from "../../../db";
 import {
   activityLog,
   attachments,
@@ -950,6 +952,15 @@ export async function GET(request: Request) {
       });
     }
 
+    /* The four default groups exist in every workspace and every site has a
+       group, so the grouped board (2026-10-06) never opens on one "No group"
+       lane. Additive: a site somebody placed stays where they put it. */
+    if (scope === CANONICAL_REGISTER) {
+      await seedStoreDocumentationGroups(await getD1(), orgId).catch((error: unknown) => {
+        console.error("[/api/sites] default groups", error instanceof Error ? error.message : error);
+      });
+    }
+
     const [listed, listedGroups, siteTypes, statuses, aliases] = await Promise.all([
       listSites(db, orgId, { includeInactive: true }, scope),
       listSiteGroups(db, orgId, scope),
@@ -1328,6 +1339,7 @@ export async function POST(request: Request) {
     await setSiteGroupMembership(db, orgId, id, stringList(body.data?.groupIds), scope);
     await logChange(db, orgId, id, "created", actor.email, { name: payload.name });
 
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     // A name another site already answers to is not recorded. Saying so is the
     // difference between an alias that is missing and an alias nobody knows is
     // missing — see `setSiteAliases`.
@@ -1464,6 +1476,7 @@ export async function PATCH(request: Request) {
           aliasSkipped: recorded.ok ? null : recorded.reason,
         });
       }
+      await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
       return Response.json({ ok: true, id, name: nextName });
     }
 
@@ -1667,6 +1680,7 @@ export async function PATCH(request: Request) {
 
     // See `setSiteAliases`: a name another site already answers to is refused,
     // and the save must say so rather than report a list it did not record.
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     return Response.json({
       ok: true,
       id,
@@ -1757,6 +1771,7 @@ export async function DELETE(request: Request) {
       retainedJobs: openJobs?.total ?? 0,
     });
 
+    await reconcileSiteUnitsQuietly(db, orgId); /* the site's own asset follows it — app/lib/site-units.ts */
     return Response.json({ ok: true, id, retainedJobs: openJobs?.total ?? 0 });
   } catch (error) {
     const failure = siteWriteFailure(error, "The site could not be archived.");

@@ -516,6 +516,12 @@ test("the Store Documentation groups are derived, not hand-maintained", async ()
   for (const name of ["Current stores", "Europe", "Closed", "Other"]) {
     assert.ok(fn.includes(`"${name}"`), `${name} must be one of the board's four groups`);
   }
-  // Membership is rebuilt so a closed or relocated store changes group.
-  assert.match(fn, /DELETE FROM site_group_members WHERE site_group_id = \?/);
+  // Membership used to be rebuilt from status on every read. Since 2026-10-06
+  // the groups are the owner's own arrangement on the grouped Sites/Assets
+  // boards ("a store dragged into London has to stay there"), so the derivation
+  // now PLACES only a site that is in no group yet, and never deletes a
+  // membership. The contract that moved: placement is still derived from
+  // status for a new site; an arranged site keeps its group.
+  assert.doesNotMatch(fn, /DELETE FROM site_group_members WHERE site_group_id = \?/);
+  assert.match(fn, /NOT EXISTS \(\s*SELECT 1 FROM site_group_members m/);
 });

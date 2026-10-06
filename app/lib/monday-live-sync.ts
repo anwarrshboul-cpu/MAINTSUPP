@@ -60,6 +60,7 @@ import { dateOnlyValue } from "./expiry-status";
 import { listJobTypes } from "./job-types";
 import { planImport, type ImportBoardKey } from "./monday-import";
 import { notifyPlatformStaff } from "./push-notify";
+import { reconcileStoreRegister, type StoreRegisterResult } from "./store-register-sync";
 import { PRIMARY_ORGANISATION_ID } from "./tenant-access";
 
 type Database = Awaited<ReturnType<typeof getDb>>;
@@ -251,6 +252,8 @@ export type MondaySyncResult = {
   filesSkipped: number;
   expiryDatesSet: number;
   ignored: number;
+  /** Set when the run touched Store Documentation: what the site register did. */
+  storeRegister?: StoreRegisterResult | null;
 };
 
 /**
@@ -705,6 +708,15 @@ export async function syncMondayItems(
       .filter((id): id is string => Boolean(id)),
   );
 
+  /* A Store Documentation change reaches the site register, its groups and
+     each site's own asset straight away (app/lib/store-register-sync.ts). */
+  if (items.some((entry) => entry.board.key === "store-documentation")) {
+    result.storeRegister = await reconcileStoreRegister(db, orgId).catch((error: unknown) => {
+      console.error("[monday sync] store register", error instanceof Error ? error.message : error);
+      return null;
+    });
+  }
+
   /* A brand-new maintenance request is worth a tap on the office's phones. */
   const fresh = items
     .filter(({ item, board }) => board.key === "maintenance" && !known.has(String(item.id)) && (!item.state || item.state === "active"))
@@ -866,7 +878,11 @@ export async function catchUpMondaySync(db: Database, days = 2, options: { budge
   const ids: string[] = [];
   for (const board of config.boards) ids.push(...(await boardItemIds(board.mondayId, since)));
   const outcome = await syncMondayItems(db, ids, options);
-  return { changed: ids.length, ...outcome };
+  /* The daily run checks the whole register even when no store changed, so a
+     site edited by hand into disagreement with monday is reported every day. */
+  const storeRegister =
+    outcome.storeRegister ?? (await reconcileStoreRegister(db, config.organisationId).catch(() => null));
+  return { changed: ids.length, ...outcome, storeRegister };
 }
 
 /* ── webhooks on monday ──────────────────────────────────────────────────── */

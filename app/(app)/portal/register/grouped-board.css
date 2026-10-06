@@ -1,0 +1,292 @@
+/* The grouped board on Sites and Assets — see grouped-board.tsx. */
+
+.gboard {
+  display: grid;
+  gap: 18px;
+}
+
+.gboard-group {
+  --gboard-colour: #579bfc;
+  position: relative;
+  border-radius: 10px;
+}
+
+.gboard-group.is-dragging {
+  opacity: 0.45;
+}
+
+.gboard-group.is-drop-before::before,
+.gboard-group.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--gboard-colour);
+}
+
+.gboard-group.is-drop-before::before {
+  top: -10px;
+}
+
+.gboard-group.is-drop-after::after {
+  bottom: -10px;
+}
+
+.gboard-group.is-drop-into .gboard-group__rows {
+  outline: 2px dashed var(--gboard-colour);
+  outline-offset: 2px;
+}
+
+.gboard-group__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 4px 4px 0;
+  border-bottom: 2px solid var(--gboard-colour);
+  margin-bottom: 8px;
+  cursor: default;
+}
+
+.gboard-group__head[draggable="true"] {
+  cursor: grab;
+}
+
+.gboard-group__head[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.gboard-group__toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gboard-colour);
+  cursor: pointer;
+  transform: rotate(90deg);
+  transition: transform 120ms ease;
+}
+
+.gboard-group__toggle[aria-expanded="false"] {
+  transform: none;
+}
+
+.gboard-group__toggle:focus-visible,
+.gboard-icon-button:focus-visible {
+  outline: 2px solid var(--gboard-colour);
+  outline-offset: 2px;
+}
+
+.gboard-group__name {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--gboard-colour);
+  overflow-wrap: anywhere;
+}
+
+.gboard-group__count {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.gboard-group__menu {
+  margin-left: auto;
+}
+
+.gboard-rename input,
+.gboard-add input {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-card);
+  color: inherit;
+  min-width: 0;
+}
+
+.gboard-group__rows {
+  display: grid;
+  gap: 10px;
+  border-left: 4px solid var(--gboard-colour);
+  padding-left: 10px;
+  border-radius: 0 0 0 4px;
+  min-height: 36px;
+}
+
+.gboard-empty {
+  margin: 6px 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.gboard-row {
+  position: relative;
+}
+
+.gboard-row[draggable="true"] {
+  cursor: grab;
+}
+
+.gboard-row[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.gboard-row.is-dragging {
+  opacity: 0.4;
+}
+
+.gboard-row.is-closed {
+  opacity: 0.78;
+}
+
+.gboard-row.is-drop-before::before,
+.gboard-row.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--gboard-colour, #579bfc);
+  z-index: 2;
+}
+
+.gboard-row.is-drop-before::before {
+  top: -7px;
+}
+
+.gboard-row.is-drop-after::after {
+  bottom: -7px;
+}
+
+.gboard-handle {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: grab;
+  user-select: none;
+}
+
+.gboard-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.gboard-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.gboard-icon-button:hover {
+  background: var(--surface-hover);
+}
+
+.gboard-menu__list {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 200px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-card);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.16);
+}
+
+.gboard-menu__list > button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.gboard-menu__list > button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.gboard-menu__list > button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.gboard-menu__list > button.is-destructive {
+  color: var(--status-red, #c62828);
+}
+
+.gboard-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.gboard-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.gboard-swatch[aria-pressed="true"] {
+  border-color: var(--text-primary, #1d2b36);
+}
+
+.gboard-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.gboard-add-button {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gboard-row-shell {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 6px;
+}
+
+.gboard-row-shell > .gboard-handle {
+  padding-top: 18px;
+}
+
+.gboard-row-shell > .gboard-menu {
+  padding-top: 10px;
+}
+
+@media (max-width: 767px) {
+  .gboard-group__count {
+    display: none;
+  }
+}

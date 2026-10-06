@@ -2633,6 +2633,79 @@ export async function PATCH(request: Request) {
       return Response.json({ group });
     }
 
+    if (action === "move_group" && "beforeGroupId" in (payload as Record<string, unknown>)) {
+      /*
+       * HOLD AND DRAG A GROUP (2026-10-06). The owner: "we just hold the mouse
+       * and keep holding and move … above or below, even for the groups".
+       * `beforeGroupId` names the group it was dropped above; null or empty
+       * means "to the end". Every group is renumbered 0..n through temporary
+       * negative positions first, so the unique (board, position) index never
+       * sees two groups on one number mid-way.
+       */
+      const groupId = trimString(payload.groupId, 80);
+      const beforeGroupId = trimString(payload.beforeGroupId, 80) || null;
+      const groups = await db
+        .select()
+        .from(maintenanceGroups)
+        .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
+            isNull(maintenanceGroups.deletedAt),))
+        .orderBy(asc(maintenanceGroups.position));
+      const selected = groups.find((group) => group.id === groupId);
+      if (!selected || (beforeGroupId && !groups.some((group) => group.id === beforeGroupId))) {
+        return Response.json({ error: "Group not found." }, { status: 404 });
+      }
+      const without = groups.filter((group) => group.id !== groupId);
+      const at = beforeGroupId ? without.findIndex((group) => group.id === beforeGroupId) : without.length;
+      const order = [...without.slice(0, at), selected, ...without.slice(at)];
+      if (order.every((group, index) => group.id === groups[index]?.id)) {
+        return Response.json({ groups });
+      }
+      /* The live groups keep the SAME set of positions, handed out in the new
+         order: a binned group still holds its number in the unique index, so
+         renumbering 0..n could land on it. The temporary numbers sit below
+         every position on the board, binned groups included. */
+      const slots = groups.map((group) => group.position).sort((a, b) => a - b);
+      const everyGroup = await db
+        .select({ position: maintenanceGroups.position })
+        .from(maintenanceGroups)
+        .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId)));
+      const floor = Math.min(0, ...everyGroup.map((group) => group.position)) - 1000 - groups.length;
+      const now = new Date().toISOString();
+      for (const [index, group] of order.entries()) {
+        await db
+          .update(maintenanceGroups)
+          .set({ position: floor - index, updatedAt: now })
+          .where(and(eq(maintenanceGroups.id, group.id), eq(maintenanceGroups.organisationId, orgId)));
+      }
+      for (const [index, group] of order.entries()) {
+        await db
+          .update(maintenanceGroups)
+          .set({ position: slots[index]!, updatedAt: now })
+          .where(and(eq(maintenanceGroups.id, group.id), eq(maintenanceGroups.organisationId, orgId)));
+      }
+      const reordered = await db
+        .select()
+        .from(maintenanceGroups)
+        .where(and(eq(maintenanceGroups.boardId, boardId), eq(maintenanceGroups.organisationId, orgId),
+            isNull(maintenanceGroups.deletedAt),))
+        .orderBy(asc(maintenanceGroups.position));
+      await recordAudit({
+        db,
+        organisationId: orgId,
+        actor: auditActor({ actor, identityEmail, session }),
+        action: "board.group_reordered",
+        entityType: "maintenance_group",
+        entityId: selected.id,
+        summary: `Dragged the "${selected.name}" group to position ${order.indexOf(selected) + 1} on ${boardId}.`,
+        detail: {
+          board: boardId,
+          order: reordered.map((entry) => ({ id: entry.id, name: entry.name })),
+        },
+        request,
+      });
+      return Response.json({ groups: reordered });
+    }
+
     if (action === "move_group") {
       const groupId = trimString(payload.groupId, 80);
       const direction = trimString(payload.direction, 10);

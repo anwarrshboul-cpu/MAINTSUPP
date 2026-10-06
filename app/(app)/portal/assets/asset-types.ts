@@ -49,6 +49,8 @@ export type AssetRow = {
   primaryImageId: string | null;
   notes: string | null;
   updatedAt: string | null;
+  /** The order on the Assets board (hold-and-drag). Optional for older cached payloads. */
+  position?: number | null;
 };
 
 /** The whole record, as the single-asset endpoint sends it. */
@@ -109,7 +111,9 @@ export type AssetRelation = {
 export type AssetReference = {
   categories: OptionChoice[];
   statuses: OptionChoice[];
-  sites: Array<{ id: string; name: string }>;
+  sites: Array<{ id: string; name: string; status?: string | null; active?: boolean | null; position?: number | null }>;
+  /** The site groups — an asset sits in its site's group. Optional for older cached payloads. */
+  groups?: Array<{ id: string; name: string; colourHex: string; position: number; siteIds: string[] }>;
   suppliers: Array<{ id: string; name: string }>;
   kinds: Array<{ value: string; label: string }>;
   events: readonly string[];

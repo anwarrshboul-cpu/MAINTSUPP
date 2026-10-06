@@ -125,6 +125,14 @@ export const sites = sqliteTable(
     // under different names; the importer matches on either.
     mondayMaintenanceName: text("monday_maintenance_name"),
     mondayComplianceName: text("monday_compliance_name"),
+    /**
+     * The monday Store Documentation values last applied to this site (JSON of
+     * name, type, address and group). `app/lib/store-register-sync.ts` applies
+     * a monday field only when monday's value differs from this snapshot, so a
+     * change made on monday flows in while an edit made in the portal stands
+     * until monday itself changes that field again.
+     */
+    mondaySnapshot: text("monday_snapshot"),
 
     notes: text("notes"),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -422,6 +430,13 @@ export const units = sqliteTable(
      */
     assetNumber: text("asset_number"),
     /** equipment | component | replacement_part | reference. `asset-model.ts`. */
+    /**
+     * Set only on a site's own unit (`site-unit-<siteId>`): the name, category,
+     * location, status and position last copied from the site, as JSON. See
+     * `app/lib/site-units.ts` — a field is re-copied only while it still holds
+     * the copied value, so an edit made on the asset itself is kept.
+     */
+    siteMirror: text("site_mirror"),
     kind: text("kind").notNull().default("equipment"),
 
     /* ── Assets — technical identity ────────────────────────────── */

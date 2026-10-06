@@ -45,6 +45,7 @@ import {
 } from "./ops-primitives";
 import { OpsFilterBar, type FilterGroup } from "./ops-filter-bar";
 import { useQueryState } from "./ops-url-state";
+import { GroupedBoard, type Arrangement, type BoardGroup } from "../register/grouped-board";
 /* 2F — the shared predicate's filter half. The PREDICATE itself is not imported:
    the server sends `demo` on every row, and recomputing it here would be a
    second answer to the question. */
@@ -82,6 +83,8 @@ export type SiteListRow = {
   longitude: number | null;
   annualBudgetPence: number | null;
   updatedAt?: string | null;
+  /** The order on the Sites board (hold-and-drag). */
+  position?: number | null;
   metrics?: SiteMetricsPayload | null;
   completeness?: { missing: string[]; complete: boolean };
   managerDisplay?: string | null;
@@ -143,6 +146,8 @@ const FILTER_KEYS = [
 ] as const;
 
 const SORTS = [
+  /* The board's own order — what a hold-and-drag sets (2026-10-06). */
+  { key: "manual", label: "My order (drag to arrange)" },
   { key: "open", label: "Most open jobs" },
   { key: "compliance", label: "Least compliant" },
   { key: "name", label: "Site name (A–Z)" },
@@ -164,6 +169,13 @@ export function SitesList({
   headerActions,
   registerView = false,
   renderRegister,
+  siteGroups = [],
+  canArrange = false,
+  onArrange,
+  onAddGroup,
+  onRenameGroup,
+  onRecolourGroup,
+  onDeleteGroup,
 }: {
   sites: SiteListRow[];
   coverage: SiteCoverage | null;
@@ -202,9 +214,18 @@ export function SitesList({
    * the same question. Passing `data.sites` instead would be exactly that.
    */
   renderRegister?: (rows: SiteListRow[]) => React.ReactNode;
+  /** The site groups in their saved order — the board's lanes (2026-10-06). */
+  siteGroups?: Array<{ id: string; name: string; colourHex: string; siteIds: string[] }>;
+  /** May this caller drag sites and groups and edit groups? */
+  canArrange?: boolean;
+  onArrange?: (next: Arrangement) => Promise<void> | void;
+  onAddGroup?: (name: string, colour: string) => Promise<void> | void;
+  onRenameGroup?: (id: string, name: string) => Promise<void> | void;
+  onRecolourGroup?: (id: string, colour: string) => Promise<void> | void;
+  onDeleteGroup?: (group: BoardGroup, count: number) => Promise<void> | void;
 }) {
   const { params, setParams } = useQueryState();
-  const sort = params.get("sort") ?? "open";
+  const sort = params.get("sort") ?? "manual";
   const layout = params.get("layout") ?? "list";
   const query = (params.get("q") ?? "").trim().toLowerCase();
 
@@ -318,6 +339,8 @@ export function SitesList({
         }
         case "name":
           return byName(left, right);
+        case "manual":
+          return (left.position ?? 0) - (right.position ?? 0) || byName(left, right);
         case "updated":
           return String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")) ||
             byName(left, right);
@@ -476,6 +499,25 @@ export function SitesList({
 
   const maxOpen = Math.max(...sites.map((site) => site.metrics?.openJobs ?? 0), 1);
 
+  /* The board's lanes and rows. A site belongs to the FIRST group, in board
+     order, that holds it; one in no group sits in the "No group" lane. */
+  const boardGroups = useMemo<BoardGroup[]>(
+    () => siteGroups.map((group) => ({ id: group.id, name: group.name, colour: group.colourHex })),
+    [siteGroups],
+  );
+  const boardItems = useMemo(() => {
+    const home = new Map<string, string>();
+    for (const group of siteGroups) {
+      for (const siteId of group.siteIds) if (!home.has(siteId)) home.set(siteId, group.id);
+    }
+    return visible.map((site) => ({
+      id: site.id,
+      groupId: home.get(site.id) ?? null,
+      closed: site.status === "closed" || site.status === "other",
+      site,
+    }));
+  }, [siteGroups, visible]);
+
   return (
     <div className="ops-page">
       <link rel="stylesheet" href={opsCss} precedence="default" />
@@ -619,7 +661,7 @@ export function SitesList({
           <>
             <label>
               <span className="visually-hidden">Sort sites</span>
-              <select value={sort} onChange={(event) => setValue("sort", event.target.value, "open")}>
+              <select value={sort} onChange={(event) => setValue("sort", event.target.value, "manual")}>
                 {SORTS.map((entry) => (
                   <option key={entry.key} value={entry.key}>
                     {entry.label}
@@ -713,19 +755,55 @@ export function SitesList({
           )}
         </OpsCard>
       ) : (
-        <div className={layout === "grid" ? "ops-rows ops-grid-3" : "ops-rows"}>
-          {visible.map((site) => (
-            <SiteRow
-              key={site.id}
-              site={site}
-              maxOpen={maxOpen}
-              statusLabel={statusLabel}
-              onOpen={() => onOpenSite(site.id)}
-              onEdit={() => onEditSite(site)}
-              onClose={() => onCloseSite(site)}
-            />
-          ))}
-        </div>
+        layout === "grid" ? (
+          <div className="ops-rows ops-grid-3">
+            {visible.map((site) => (
+              <SiteRow
+                key={site.id}
+                site={site}
+                maxOpen={maxOpen}
+                statusLabel={statusLabel}
+                onOpen={() => onOpenSite(site.id)}
+                onEdit={() => onEditSite(site)}
+                onClose={() => onCloseSite(site)}
+              />
+            ))}
+          </div>
+        ) : (
+          /*
+           * THE GROUPED BOARD (2026-10-06). Sites sit in their group — the first
+           * group, in board order, that holds them — open ones first and closed
+           * ones at the bottom of each group. Dragging is offered in "My order"
+           * only: in a sorted view a drop would be undone by the sort at once.
+           */
+          <GroupedBoard
+            noun="site"
+            storageKey="maintsupp.sites.collapsed"
+            groups={boardGroups}
+            items={boardItems}
+            canArrange={canArrange && sort === "manual" && Boolean(onArrange)}
+            canEditGroups={canArrange}
+            onArrange={(next) => onArrange?.(next)}
+            onAddGroup={onAddGroup}
+            onRenameGroup={onRenameGroup}
+            onRecolourGroup={onRecolourGroup}
+            onDeleteGroup={onDeleteGroup}
+            renderItem={(item, controls) => (
+              <div className="gboard-row-shell">
+                {controls.handle ?? <span />}
+                <SiteRow
+                  site={item.site}
+                  maxOpen={maxOpen}
+                  statusLabel={statusLabel}
+                  onOpen={() => onOpenSite(item.site.id)}
+                  onEdit={() => onEditSite(item.site)}
+                  onClose={() => onCloseSite(item.site)}
+                />
+                {controls.menu ?? <span />}
+              </div>
+            )}
+          />
+        )
       )}
     </div>
   );

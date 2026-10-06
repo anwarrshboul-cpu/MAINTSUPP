@@ -1,3 +1,4 @@
+import { reconcileSiteUnits, reconcileSiteUnitsQuietly, siteUnitId } from "../../lib/site-units";
 import { and, count, desc, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
 import { ensureDatabase } from "../../../db/init";
 import {
@@ -401,26 +402,9 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
         }).onConflictDoNothing();
       }
 
-      await db.insert(units).values([
-        {
-          id: `${store.id}-retail`,
-          organisationId: orgId,
-          siteId: store.id,
-          name: `${store.name} — trading unit`,
-          category: store.type,
-          status: store.lifecycle === "Current" ? "Active" : "Inactive",
-          notes: "Customer-facing operational unit",
-        },
-        {
-          id: `${store.id}-services`,
-          organisationId: orgId,
-          siteId: store.id,
-          name: `${store.name} — service assets`,
-          category: "Asset group",
-          status: store.lifecycle === "Current" ? "Active" : "Inactive",
-          notes: "Shared mechanical, electrical and safety assets",
-        },
-      ]).onConflictDoNothing();
+      /* One asset per site, the store unit itself (app/lib/site-units.ts) —
+         the same rule every site in every workspace follows. */
+      await reconcileSiteUnits(db, orgId, [store.id]);
     }
   }
 
@@ -467,7 +451,7 @@ async function seedWorkspaceIfEmpty(db: WorkspaceDb, orgId: string) {
         id: `planned-${request.id.toLowerCase()}`,
         organisationId: orgId,
         siteId: request.siteId,
-        unitId: `${request.siteId}-services`,
+        unitId: siteUnitId(request.siteId),
         contractorId: request.contractor ? contractorIds.get(request.contractor) ?? null : null,
         title: request.title,
         category: request.category,
@@ -1932,6 +1916,7 @@ export async function POST(request: Request) {
 
     await logChange(db, orgId, entity, id, "created", actor.email, data);
     await auditWorkspaceChange(request, scope, entity, id, "created", data);
+    if (entity === "site") await reconcileSiteUnitsQuietly(db, orgId); /* one asset per site — app/lib/site-units.ts */
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be created.";
@@ -3907,6 +3892,7 @@ export async function PATCH(request: Request) {
 
     await logChange(db, orgId, entity, id, "updated", actor.email, data);
     await auditWorkspaceChange(request, scope, entity, id, "updated", data);
+    if (entity === "site") await reconcileSiteUnitsQuietly(db, orgId); /* one asset per site — app/lib/site-units.ts */
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be updated.";
@@ -4062,6 +4048,7 @@ export async function DELETE(request: Request) {
 
     await logChange(db, orgId, entity, id, "archived", actor.email, {});
     await auditWorkspaceChange(request, scope, entity, id, "archived", {});
+    if (entity === "site") await reconcileSiteUnitsQuietly(db, orgId); /* one asset per site — app/lib/site-units.ts */
     return Response.json({ ok: true, id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "The record could not be archived.";

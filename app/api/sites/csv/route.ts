@@ -1,3 +1,4 @@
+import { reconcileSiteUnitsQuietly } from "../../../lib/site-units";
 import { and, eq } from "drizzle-orm";
 import { ensureDatabase } from "../../../../db/init";
 import { sites } from "../../../../db/schema";
@@ -736,6 +737,7 @@ export async function POST(request: Request) {
       }
     }
 
+    if (!dryRun) await reconcileSiteUnitsQuietly(db, orgId); /* one asset per site — app/lib/site-units.ts */
     return Response.json({
       ok: true,
       dryRun,
