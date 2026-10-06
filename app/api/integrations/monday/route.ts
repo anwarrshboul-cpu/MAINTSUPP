@@ -1,4 +1,5 @@
 import { retirePlaceholderAssets, retireUnlistedSites } from "../../../lib/store-register-cleanup";
+import { realignCostPence } from "../../../lib/cost-pence-realign";
 import { reconcileStoreRegister } from "../../../lib/store-register-sync";
 import { getDb } from "../../../../db";
 import { ensureDatabase } from "../../../../db/init";
@@ -37,6 +38,7 @@ export const dynamic = "force-dynamic";
  *
  *   POST { action: "verify-store-docs" }
  *   POST { action: "retire-unlisted-sites" | "retire-placeholder-assets", apply? } one-off tidy-ups, dry run by default
+ *   POST { action: "realign-cost-pence", apply? } a job's pence back in step with its cost, every workspace, dry run by default
  *   POST { action: "sync-store-register" } sites, groups and site assets from Store Documentation
  *        read-only comparison of Store Documentation with monday
  *
@@ -114,6 +116,13 @@ export async function POST(request: Request) {
           { apply },
         )),
       });
+    }
+    if (body.action === "realign-cost-pence") {
+      /* A one-off, individually reconciled repair (app/lib/cost-pence-realign.ts):
+         lists every job whose stored pence disagree with its cost, and changes
+         them only with `apply: true`. */
+      const apply = (body as { apply?: unknown }).apply === true;
+      return Response.json({ ok: true, ...(await realignCostPence(await getDb(), { apply })) });
     }
     if (body.action === "sync-store-register") {
       /* The site register, its groups and every site's own asset, brought into

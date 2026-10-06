@@ -52,6 +52,13 @@ export type ComplianceRow = {
   siteName: string;
   kind: string;
   /**
+   * Inside the operational estate (`withinOperationalEstate` in
+   * `compliance-register.ts`): not a Closed or Europe store. Optional, and only
+   * an explicit `false` takes a row out of the score, so a caller that does not
+   * know keeps today's answer.
+   */
+  operational?: boolean;
+  /**
    * WHO CHASES THE CERTIFICATE — Contractor, Fire safety partner, Insurance
    * broker, and so on, falling back to the site manager. Derived per slot by
    * `responsibilityFor`, offered as the `?who=` filter.
@@ -238,8 +245,15 @@ export function dueBandToken(from: number, to: number): string {
  * client (or never asked). One predicate, read by the register's `scored`
  * filter and by the dashboard block, so the two count the same rows.
  */
-export function isScoredRow(row: { state: ComplianceState; dutyHolder?: string | null }): boolean {
-  return row.state !== "Not required" && countsTowardCompliance(row.dutyHolder);
+export function isScoredRow(row: {
+  state: ComplianceState;
+  dutyHolder?: string | null;
+  operational?: boolean;
+}): boolean {
+  /* A closed or European store is kept on the register but is not scored
+     (2026-10-06), so a dashboard figure and the register it opens with
+     `?scored=1` count the same rows. */
+  return row.operational !== false && row.state !== "Not required" && countsTowardCompliance(row.dutyHolder);
 }
 
 const STATES: ComplianceState[] = [
@@ -341,6 +355,7 @@ export function complianceRowsFrom(
     itemId: string | null;
     slotKey: string | null;
     providerContractorId?: string | null;
+    operational?: boolean;
   }>,
   managerById: ReadonlyMap<string, string>,
   /**
@@ -359,6 +374,7 @@ export function complianceRowsFrom(
       siteId: entry.siteId,
       siteName: entry.siteName,
       kind: entry.kind,
+      ...(entry.operational === undefined ? {} : { operational: entry.operational }),
       responsibility: responsibilityFor(entry.kind, managerById.get(entry.siteId) ?? ""),
       dutyHolder: entry.dutyHolder,
       state: entry.state,

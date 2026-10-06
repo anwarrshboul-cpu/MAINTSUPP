@@ -460,8 +460,6 @@ export async function loadSpendByMonth(
         sql`${dayOnly(maintenanceRequests.completedAt)} >= ${fromDay}`,
         sql`${dayOnly(maintenanceRequests.completedAt)} < ${endExclusive}`,
         isNotNull(maintenanceRequests.cost),
-        /* £0 is not spend — `spendLineOf` and `isCostedSql` agree (2026-10-06). */
-        sql`${maintenanceRequests.cost} > 0`,
       ),
     )
     .groupBy(sql`month`, maintenanceRequests.cost);

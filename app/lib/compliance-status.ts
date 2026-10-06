@@ -198,7 +198,7 @@ export type ComplianceCompletion = {
  * and that is the more dangerous of the two.
  */
 export function complianceCompletion(
-  records: readonly { state: ComplianceState; dutyHolder?: string | null }[],
+  records: readonly { state: ComplianceState; dutyHolder?: string | null; operational?: boolean }[],
 ): ComplianceCompletion {
   const counts: Record<ComplianceState, number> = {
     Compliant: 0,
@@ -236,13 +236,21 @@ export function complianceCompletion(
    * arrives here already carrying the `Not required` state, and must not be
    * subtracted twice.
    */
+  /*
+   * A record of a closed or European store (`operational === false`, set from
+   * `withinOperationalEstate`) is outside the score too (2026-10-06), so the
+   * register's header meter reads the same percentage as the dashboard block
+   * above it. Only an explicit false: a caller that does not say keeps
+   * today's arithmetic.
+   */
+  const scorable = (record: (typeof records)[number]) =>
+    record.operational !== false && countsTowardCompliance(record.dutyHolder);
   const excluded = records.filter(
-    (record) =>
-      record.state !== "Not required" && !countsTowardCompliance(record.dutyHolder),
+    (record) => record.state !== "Not required" && !scorable(record),
   ).length;
   const applicable = total - notRequired - excluded;
   const satisfied = records.filter(
-    (record) => record.state === "Compliant" && countsTowardCompliance(record.dutyHolder),
+    (record) => record.state === "Compliant" && scorable(record),
   ).length;
   return {
     satisfied,

@@ -514,10 +514,6 @@ async function applyMigrations(d1: D1DatabaseLike) {
      `ensureSiteUnitsAndGroupOrder`. */
   await ensureSiteUnitsAndGroupOrder(d1);
 
-  /* 2026-10-06 — a job's cost in pence brought back in step with its cost
-     where an edit left it behind. See `ensureCostPenceInStep`. */
-  await ensureCostPenceInStep(d1);
-
   await repairOrphanedSectionBoards(d1);
 
   /*
@@ -3903,30 +3899,6 @@ export async function seedBoardStructure(
   await reconcileDuplicateColumns(d1, organisationId, boardKey);
 }
 
-
-/**
- * A JOB'S COST IN PENCE, BACK IN STEP WITH ITS COST (2026-10-06).
- *
- * `cost_pence` was backfilled from `cost` once, and until 2026-10-06 no write
- * path kept it there: an edit changed `cost` only. Every SQL total reads
- * `coalesce(cost_pence, round(cost * 100))` (app/lib/cost-sql.ts) while the
- * Reports and Overview spend read `cost`, so one edited job made Contractors and
- * the cost cards disagree with Reports. The writes now keep both together
- * (request-fields.ts, the import, the duplicate); this realigns the rows an
- * earlier edit left behind, taking `cost` — the value people see and edit — as
- * the truth. Only rows that already hold a pence value are touched: an empty
- * one already falls back to `cost`, which is the same answer.
- */
-async function ensureCostPenceInStep(d1: D1DatabaseLike) {
-  await d1
-    .prepare(
-      `UPDATE maintenance_requests
-          SET cost_pence = CASE WHEN cost IS NULL THEN NULL ELSE CAST(ROUND(cost * 100) AS INTEGER) END
-        WHERE cost_pence IS NOT NULL
-          AND (cost IS NULL OR cost_pence <> CAST(ROUND(cost * 100) AS INTEGER))`,
-    )
-    .run();
-}
 
 /**
  * ONE ASSET PER SITE, AND CLOSED GROUPS LAST (2026-10-06).

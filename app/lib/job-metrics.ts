@@ -390,7 +390,21 @@ export function needsAttention(
 /** The count the sidebar badge and the Overview's first tile both print. */
 export function openJobCount(
   requests: readonly Pick<MaintenanceRequest, "stage" | "status">[],
+  /**
+   * The workspace's CONFIGURED closed statuses (`closedStatusKeys` of its job
+   * status map), when the caller has them — then open is exactly the server's
+   * `closedJobSqlFor` negated: not Completed, and not a status mapped closed.
+   * Omitted, the built-in rule (`isOpenJob`) answers, as it always has.
+   */
+  closedKeys?: readonly string[],
 ): number {
+  if (closedKeys) {
+    return requests.reduce(
+      (total, request) =>
+        total + (request.stage !== COMPLETED_STAGE && !closedKeys.includes(statusKey(request.status)) ? 1 : 0),
+      0,
+    );
+  }
   return requests.reduce((total, request) => total + (isOpenJob(request) ? 1 : 0), 0);
 }
 
@@ -857,9 +871,7 @@ export function spendLineOf(job: {
 }): { pence: number; day: string } | null {
   if (job.cost === null || job.cost === undefined) return null;
   const pence = poundsToPence(Number(job.cost));
-  /* A £0 job is not a spend line — the same rule as `isCostedSql` in
-     cost-sql.ts, so "costed jobs" counts agree on every screen (2026-10-06). */
-  if (pence === null || pence <= 0) return null;
+  if (pence === null) return null;
   const day = String(job.completedAt ?? "").trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
   return { pence, day };

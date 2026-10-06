@@ -503,8 +503,8 @@ function executiveSummary(maintenance: MaintenanceSection, currency: string): Do
     [textCell("Open jobs"), numberCell(counts.openJobs), blank("number")],
     [textCell("Cancelled jobs"), numberCell(counts.cancelledJobs), blank("number")],
     [textCell("Jobs measurable against an SLA"), numberCell(counts.measurableJobs), blank("number")],
-    [textCell("Within SLA"), numberCell(counts.withinSla), blank("number")],
-    [textCell("Outside SLA"), numberCell(counts.outsideSla), blank("number")],
+    [textCell("Met SLA target"), numberCell(counts.withinSla), blank("number")],
+    [textCell("Missed SLA target"), numberCell(counts.outsideSla), blank("number")],
     [textCell("SLA performance"), percentCell(counts.slaPercent), blank("percent")],
     [textCell("Jobs with an approved hold"), numberCell(counts.jobsWithApprovedHolds), blank("number")],
     [textCell("Open past target"), numberCell(counts.openPastTarget), blank("number")],
@@ -523,7 +523,11 @@ function executiveSummary(maintenance: MaintenanceSection, currency: string): Do
     paragraphs: maintenance.executive.narrative,
     keyValues: [
       {
-        label: "Completed maintenance expenditure",
+        /* Jobs RAISED in the period, costed once complete — the report's whole
+           population. Said on the label because the Overview and Reports
+           dashboards date spend by the completion day instead, and the two
+           figures differ whenever a job crosses a month end. */
+        label: "Completed maintenance expenditure (jobs raised in this period)",
         value: formatMoney(maintenance.spend.completedMaintenancePence, currency),
         audience: "all",
         emphasis: true,
@@ -726,8 +730,11 @@ function slaPerformance(maintenance: MaintenanceSection): DocSection {
     paragraphs: [],
     keyValues: [
       { label: "Measurable jobs", value: formatCount(counts.measurableJobs), audience: "all" },
-      { label: "Within SLA", value: formatCount(counts.withinSla), audience: "all" },
-      { label: "Outside SLA", value: formatCount(counts.outsideSla), audience: "all" },
+      /* "Met" and "Missed", not "Within SLA": on the Overview "Within SLA"
+         means OPEN jobs not yet overdue, a different population. The report
+         measures jobs raised in the period against their own target. */
+      { label: "Met SLA target", value: formatCount(counts.withinSla), audience: "all" },
+      { label: "Missed SLA target", value: formatCount(counts.outsideSla), audience: "all" },
       {
         label: "SLA performance",
         value: formatPercent(counts.slaPercent, "No measurable job in this period"),

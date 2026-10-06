@@ -1039,7 +1039,7 @@ function JobIntelSection({ query, onJobs }: { query: Query<OvOverview>; onJobs: 
             className="oi-ttc__figure"
             href={completedDrill.href}
             onActivate={completedDrill.go}
-            label={`Average time to close: ${timeToClose.averageDays === null ? "no job closed" : days(timeToClose.averageDays)} over ${plural(timeToClose.jobs, "job", "jobs")} completed in ${range.label}. ${ttcLine.text}. Opens those jobs.`}
+            label={`Average time to close: ${timeToClose.averageDays === null ? "no job closed" : days(timeToClose.averageDays)} over ${plural(timeToClose.jobs, "job", "jobs")} completed in ${range.label}. ${ttcLine.text}. Opens every job completed in ${range.label}; a job with no request date is listed but not averaged.`}
           >
             <span className="oi-ttc__value">
               {ttcValue}

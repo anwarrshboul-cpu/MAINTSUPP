@@ -144,7 +144,7 @@ export function buildNarrative(input: NarrativeInput): string[] {
 
   /* 7. Money — five figures, never added together. The sentence says so. */
   sentences.push(
-    `Completed maintenance in the period cost ${money(spend.completedMaintenancePence)}, with ${money(spend.openCommittedPence)} committed on jobs still open.`,
+    `Jobs raised in the period and since completed cost ${money(spend.completedMaintenancePence)}, with ${money(spend.openCommittedPence)} committed on jobs still open.`,
   );
   if (spend.projectPence > 0 || spend.routinePence > 0) {
     sentences.push(

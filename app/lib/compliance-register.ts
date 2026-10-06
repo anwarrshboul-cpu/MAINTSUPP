@@ -305,6 +305,13 @@ export type RegisterEntry = {
    * False when there is no linked site to ask.
    */
   siteClosed: boolean;
+  /**
+   * `withinOperationalEstate(this)`, worked out once here so every screen that
+   * builds rows from the register carries it: a closed or European store's
+   * record is listed everywhere and scored nowhere (2026-10-06). See
+   * `isScoredRow` and `complianceCompletion`.
+   */
+  operational: boolean;
 };
 
 export type ComplianceRegister = {
@@ -936,6 +943,10 @@ export async function readComplianceRegister(
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
+        operational: withinOperationalEstate({
+          boardGroup: groupByItemId.get(store.id) ?? null,
+          siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
+        }),
       });
       if (linkedSiteId) {
         remember(linkedSiteId, {
@@ -1019,6 +1030,10 @@ export async function readComplianceRegister(
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,
       siteClosed: siteClosedById.get(row.siteId) ?? false,
+      operational: withinOperationalEstate({
+        boardGroup: null,
+        siteClosed: siteClosedById.get(row.siteId) ?? false,
+      }),
     });
     remember(row.siteId, {
       kind: row.kind,

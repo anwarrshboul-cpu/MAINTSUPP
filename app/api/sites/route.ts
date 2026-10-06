@@ -12,7 +12,7 @@ import {
 } from "../../../db/schema";
 import { anonymousRefusal, scopedDb, scopedDbWithCapability } from "../../lib/tenant-db";
 import { listOptionValues } from "../../lib/options-repository";
-import { readComplianceRegister, readSiteComplianceRecords, withinOperationalEstate } from "../../lib/compliance-register";
+import { readComplianceRegister, readSiteComplianceRecords } from "../../lib/compliance-register";
 import { complianceCompletion } from "../../lib/compliance-status";
 import { memberSiteSet, withinMemberScope } from "../../lib/member-site-scope";
 import { siteCreationRefusal } from "../../lib/job-site-scope";
@@ -1045,14 +1045,15 @@ export async function GET(request: Request) {
      * same member — which `resolveDashboardPortfolio` confines the same way — and
      * an unrestricted member's tile is exactly what it was.
      */
+    /* Each register entry carries `operational`, and `complianceCompletion`
+       leaves a closed or European store's records out of the percentage
+       (2026-10-06) — the same score the Overview and Compliance page print. */
     const portfolioCompliance =
       scope === CANONICAL_REGISTER
         ? complianceCompletion(
-            /* The operational estate, as the Overview and Compliance page score
-               it (2026-10-06): closed stores do not pull the figure down. */
-            register.entries.filter(
-              (entry) => withinOperationalEstate(entry) && (!allowed || withinMemberScope(allowed, entry.siteId)),
-            ),
+            allowed
+              ? register.entries.filter((entry) => withinMemberScope(allowed, entry.siteId))
+              : register.entries,
           )
         : null;
 

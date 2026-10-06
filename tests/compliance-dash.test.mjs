@@ -437,7 +437,11 @@ test("the route reuses the register, the rows builder and the canonical classifi
   assert.match(route, /readComplianceRegister\(db, orgId, \{ today \}\)/);
   /* Re-pointed: the one row builder now also names each linked renewal
      contractor (`providerNames`), so "Who's renewing" can group by the record. */
-  assert.match(route, /complianceRowsFrom\(register\.entries, managerById, providerNames\)/);
+  /* Re-pointed (2026-10-06): the block scores the OPERATIONAL estate — a
+     closed or European store stays on the register but is not scored — so the
+     entries are narrowed by the register's own `withinOperationalEstate`
+     before the same one row builder runs. */
+  assert.match(route, /complianceRowsFrom\(register\.entries\.filter\(withinOperationalEstate\), managerById, providerNames\)/);
   assert.match(route, /scopedDbWithCapability\(request, "board\.view"\)/);
   assert.match(route, /resolveDashboardPortfolio\(db, orgId, url\.searchParams\.get\("portfolio"\), siteScope\)/,
     "the membership's site restriction reaches the figures and the export");

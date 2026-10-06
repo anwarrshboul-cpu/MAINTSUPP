@@ -218,7 +218,7 @@ import type { ContractorRow } from "./ops/contractors-list";
  * badge and the Overview both read it, which is what stops the two disagreeing
  * about the same workspace.
  */
-import { JOBS_BOARD_KEY, isOnJobsBoard, openJobCount, spendLineOf, statusKey } from "../../lib/job-metrics";
+import { JOBS_BOARD_KEY, isOnJobsBoard, openJobCount, spendLineOf } from "../../lib/job-metrics";
 import { jobTypeChoices, jobTypeLabel, useJobTypes } from "./use-job-types";
 import { JobTypeDrawerField } from "./cells/job-type-cell";
 import { JobTypesSettings } from "./admin/job-types-settings";
@@ -3125,14 +3125,7 @@ export default function PortalApp({
   const { closedStatusKeys: badgeClosedKeys, loaded: badgeClosedKeysLoaded } =
     useDrillStatusMap(jobListLoaded);
   const openCount = jobListLoaded
-    ? badgeClosedKeysLoaded
-      ? requests
-          .filter(countsAsWorkOrder)
-          .filter(
-            (request) =>
-              request.stage !== "Completed" && !badgeClosedKeys.includes(statusKey(request.status)),
-          ).length
-      : openJobCount(requests.filter(countsAsWorkOrder))
+    ? openJobCount(requests.filter(countsAsWorkOrder), badgeClosedKeysLoaded ? badgeClosedKeys : undefined)
     : (serverOpenJobs ?? 0);
   const notificationItems = useMemo(
     () =>

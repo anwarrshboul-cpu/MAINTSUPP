@@ -255,7 +255,10 @@ test("the sidebar badge and the Overview read one definition of open", async () 
      list IS loaded, the count is still exactly this expression. */
   assert.match(
     codeOnly(portal),
-    /const openCount = jobListLoaded\s*\?\s*openJobCount\(requests\.filter\(countsAsWorkOrder\)\)/,
+    /* Re-pointed 2026-10-06: the same expression, now also handed the
+       workspace's configured closed statuses once they have loaded, so a status
+       an administrator mapped closed stops counting here as it does in SQL. */
+    /const openCount = jobListLoaded\s*\?\s*openJobCount\(requests\.filter\(countsAsWorkOrder\), badgeClosedKeysLoaded \? badgeClosedKeys : undefined\)/,
     "and applies the same lifecycle scope the aggregates apply in SQL",
   );
   assert.match(codeOnly(portal), /badges=\{\{ maintenance: openCount \}\}/);
