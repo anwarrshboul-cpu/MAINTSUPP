@@ -135,7 +135,13 @@ test("the page names the two populations: scored requirements and dated certific
 
 test("neither calculation moved: the same predicates and the same counting", async () => {
   const view = await read("app/lib/compliance-view.ts");
-  assert.match(view, /return row\.state !== "Not required" && countsTowardCompliance\(row\.dutyHolder\);/);
+  /* Re-pointed (2026-10-06): the predicate gained one leading clause — a row
+     explicitly outside the operational estate (a closed or European store) is
+     not scored. The two clauses that were here are unchanged. */
+  assert.match(
+    view,
+    /return row\.operational !== false && row\.state !== "Not required" && countsTowardCompliance\(row\.dutyHolder\);/,
+  );
   const builder = await read("app/lib/compliance-dash.ts");
   assert.match(builder, /const renewing = scored\.filter\(\(row\) => row\.state === "Expired" \|\| row\.state === "Expiring soon"\);/);
   const insights = await read("app/(app)/portal/dashboard-insights.tsx");

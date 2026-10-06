@@ -1045,6 +1045,9 @@ export async function GET(request: Request) {
      * same member — which `resolveDashboardPortfolio` confines the same way — and
      * an unrestricted member's tile is exactly what it was.
      */
+    /* Each register entry carries `operational`, and `complianceCompletion`
+       leaves a closed or European store's records out of the percentage
+       (2026-10-06) — the same score the Overview and Compliance page print. */
     const portfolioCompliance =
       scope === CANONICAL_REGISTER
         ? complianceCompletion(

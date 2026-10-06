@@ -34,7 +34,12 @@ test("controls a client cannot use are not offered to one", async () => {
    count under the job feed's own scope. */
 test("the Overview's bell and Jobs badge do not depend on the job list", async () => {
   const route = await read("app/api/notifications/route.ts");
-  assert.match(route, /liveWorkOrderCondition\(orgId\),\s*memberSiteCondition\(maintenanceRequests\.siteId, siteScope\),\s*sql`not \$\{closedJobSql\}`/);
+  // Re-pointed 2026-10-06: the badge's closure test is the workspace's own
+  // "counts as open" settings (closedJobSqlFor over closedStatusKeys), the rule
+  // the Overview applies, falling back to the shipped closedJobSql when none
+  // are configured — so the badge and the Overview's open count agree.
+  assert.match(route, /liveWorkOrderCondition\(orgId\),\s*memberSiteCondition\(maintenanceRequests\.siteId, siteScope\),\s*sql`not \$\{closedSql\}`/);
+  assert.match(route, /const closedSql = statusRows\.length\s*\?\s*closedJobSqlFor\(/);
   assert.match(route, /candidates: candidates\.map\(\(row\) => exposeRequest\(row\)\)/);
   const app = await read("app/(app)/portal/portal-app.tsx");
   assert.match(app, /jobListLoaded \? notificationCandidates\(requests\) : serverNotificationCandidates/);

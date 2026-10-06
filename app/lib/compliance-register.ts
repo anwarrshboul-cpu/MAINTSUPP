@@ -38,7 +38,7 @@
  * Nothing here writes, and nothing here drops a row.
  */
 
-import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, max } from "drizzle-orm";
 import type { getDb } from "../../db";
 import {
   attachments,
@@ -305,6 +305,13 @@ export type RegisterEntry = {
    * False when there is no linked site to ask.
    */
   siteClosed: boolean;
+  /**
+   * `withinOperationalEstate(this)`, worked out once here so every screen that
+   * builds rows from the register carries it: a closed or European store's
+   * record is listed everywhere and scored nowhere (2026-10-06). See
+   * `isScoredRow` and `complianceCompletion`.
+   */
+  operational: boolean;
 };
 
 export type ComplianceRegister = {
@@ -397,7 +404,9 @@ export function withinOperationalEstate(entry: {
 /** The `sites` lifecycle/status words that mean a store is not trading. */
 const CLOSED_SITE_WORDS = new Set(["closed", "archived", "inactive"]);
 
-function siteIsClosed(site: { lifecycle?: string | null; status?: string | null }) {
+/* Exported (2026-10-06) so every compliance figure that asks "is this site
+   trading?" asks the same question — see `api/compliance/metrics`. */
+export function siteIsClosed(site: { lifecycle?: string | null; status?: string | null }) {
   const lifecycle = (site.lifecycle ?? "").trim().toLowerCase();
   const status = (site.status ?? "").trim().toLowerCase();
   return CLOSED_SITE_WORDS.has(lifecycle) || CLOSED_SITE_WORDS.has(status);
@@ -559,6 +568,7 @@ async function readStoreDocumentationRows(
         requestId: attachments.requestId,
         columnId: attachments.boardColumnId,
         count: count(),
+        expiry: max(attachments.expiryDate),
       })
       .from(attachments)
       .where(
@@ -585,8 +595,8 @@ async function readStoreDocumentationRows(
       cells: cellRows,
       fileCounts: fileRows.filter(
         (
-          row: { requestId: string | null; columnId: string | null; count: number },
-        ): row is { requestId: string; columnId: string; count: number } =>
+          row: { requestId: string | null; columnId: string | null; count: number; expiry: string | null },
+        ): row is { requestId: string; columnId: string; count: number; expiry: string | null } =>
           Boolean(row.requestId) &&
           Boolean(row.columnId) &&
           columnIds.has(row.columnId ?? "") &&
@@ -933,6 +943,10 @@ export async function readComplianceRegister(
         lastAlertStage: registerRow?.lastAlertStage ?? null,
         boardGroup: groupByItemId.get(store.id) ?? null,
         siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
+        operational: withinOperationalEstate({
+          boardGroup: groupByItemId.get(store.id) ?? null,
+          siteClosed: linkedSiteId ? (siteClosedById.get(linkedSiteId) ?? false) : false,
+        }),
       });
       if (linkedSiteId) {
         remember(linkedSiteId, {
@@ -1016,6 +1030,10 @@ export async function readComplianceRegister(
       /* No board row, so no group. The site's own lifecycle is all there is. */
       boardGroup: null,
       siteClosed: siteClosedById.get(row.siteId) ?? false,
+      operational: withinOperationalEstate({
+        boardGroup: null,
+        siteClosed: siteClosedById.get(row.siteId) ?? false,
+      }),
     });
     remember(row.siteId, {
       kind: row.kind,

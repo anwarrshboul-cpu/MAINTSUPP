@@ -193,7 +193,16 @@ test("the metrics reuse the product's existing definitions", async () => {
    * the status map and whose overdue figure does not disagrees with itself
    * inside `sla.percent`, which is computed from both.
    */
-  assert.match(source, /const overdueSql = overdueOpenSql\(now, closedSql\);/);
+  /*
+   * RE-POINTED (2026-10-06): an open status whose "counts as overdue" is
+   * switched off (On hold, Awaiting parts …) is never late on the Jobs board,
+   * so the Overview now hands overdue the same closure test PLUS those parked
+   * statuses. With none configured it is exactly the closure test, as before.
+   */
+  assert.match(
+    source,
+    /const overdueSql = overdueExempt\.length\s*\?\s*overdueOpenSql\(now, closedJobSqlFor\(\[\.\.\.new Set\(\[\.\.\.closedKeys, \.\.\.overdueExempt\]\)\]\)\)\s*:\s*overdueOpenSql\(now, closedSql\);/,
+  );
 
   /*
    * A job counts as work at all by the same exclusions as everywhere.

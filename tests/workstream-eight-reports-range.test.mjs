@@ -341,7 +341,9 @@ test("subitems and archived rows are not counted as work orders", async () => {
   }
   assert.match(
     source,
-    /openJobCount\(requests\.filter\(countsAsWorkOrder\)\)/,
+    /* Re-pointed 2026-10-06: the badge also passes the configured closed
+       statuses as a second argument; the work-order filter is unchanged. */
+    /openJobCount\(requests\.filter\(countsAsWorkOrder\)[,)]/,
     "and the sidebar badge applies it too",
   );
 

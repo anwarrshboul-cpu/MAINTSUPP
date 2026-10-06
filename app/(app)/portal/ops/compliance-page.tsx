@@ -557,7 +557,7 @@ export function CompliancePage({
               Missing only
             </button>
             <button type="button" className="ops-option" onClick={() => applyPreset("due")}>
-              Due in 30 days
+              Expired or due in 30 days
             </button>
           </>
         }
@@ -738,8 +738,8 @@ function PortfolioBand({
       {portfolio.completion.excluded > 0 ? (
         <p className="ops-card__note">
           {portfolio.completion.excluded} of {plural(portfolio.total, "requirement")} are outside
-          the percentage because their responsibility is unconfirmed, or belongs to a landlord or
-          shopping centre.
+          the percentage because their responsibility is unconfirmed or belongs to a landlord or
+          shopping centre, or because the store is closed or outside the UK.
         </p>
       ) : null}
       {/*

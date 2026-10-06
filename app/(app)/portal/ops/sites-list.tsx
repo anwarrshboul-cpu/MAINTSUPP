@@ -558,7 +558,10 @@ export function SitesList({
             onClick={() => setValue("hasJobs", "yes", "")}
           >
             <span className="ops-tile__value">{totals.openJobs}</span>
-            <span className="ops-tile__label">Open jobs</span>
+            {/* "at these sites": a job with no site is on the Jobs board and the
+                Overview but belongs to no row here, so the two figures differ by
+                exactly those jobs (2026-10-06). */}
+            <span className="ops-tile__label">Open jobs at these sites</span>
           </button>
           <div className="ops-row__meter">
             <span className="ops-tile__value">
@@ -970,7 +973,7 @@ function SiteRow({
       */}
       <p className="ops-row__secondary">
         {parts.length ? parts.join(" · ") : "No details recorded"}
-        {metrics && metrics.spend > 0 ? ` · ${money(metrics.spend)} spent` : ""}
+        {metrics && metrics.spend > 0 ? ` · ${money(metrics.spend)} spent to date` : ""}
         {missing.length ? (
           <>
             {" · "}

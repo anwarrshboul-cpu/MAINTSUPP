@@ -262,6 +262,8 @@ export function statusKey(value: string | null | undefined): string {
 export type StatusOpenness = {
   sourceStatusLabel: string;
   countsAsOpen: boolean;
+  /** Absent means eligible. `false` keeps a parked status (On hold …) from going overdue. */
+  countsAsOverdueEligible?: boolean | null;
   /** Absent means active; only an explicit `false` retires a row. */
   active?: boolean | null;
 };
@@ -283,6 +285,20 @@ export function closedStatusKeys(mappings: readonly StatusOpenness[]): string[] 
     if (!configured.has(key)) closed.add(key);
   }
   return [...closed].sort();
+}
+
+/**
+ * OPEN STATUSES THAT NEVER GO OVERDUE — "counts as overdue" switched off for a
+ * parked status such as On hold or Awaiting parts. The Jobs board's chip
+ * (`jobIsOverdue`) has always honoured it; the Overview's Overdue and SLA
+ * figures and their drill-down now do too (2026-10-06), so a job the board
+ * shows as on time is never counted late on the Overview.
+ */
+export function overdueExemptStatusKeys(mappings: readonly StatusOpenness[]): string[] {
+  return mappings
+    .filter((row) => row.active !== false && row.countsAsOverdueEligible === false)
+    .map((row) => statusKey(row.sourceStatusLabel))
+    .sort();
 }
 
 /** Statuses met at runtime that `STATUS_FAMILY` has no entry for. */
@@ -374,7 +390,21 @@ export function needsAttention(
 /** The count the sidebar badge and the Overview's first tile both print. */
 export function openJobCount(
   requests: readonly Pick<MaintenanceRequest, "stage" | "status">[],
+  /**
+   * The workspace's CONFIGURED closed statuses (`closedStatusKeys` of its job
+   * status map), when the caller has them — then open is exactly the server's
+   * `closedJobSqlFor` negated: not Completed, and not a status mapped closed.
+   * Omitted, the built-in rule (`isOpenJob`) answers, as it always has.
+   */
+  closedKeys?: readonly string[],
 ): number {
+  if (closedKeys) {
+    return requests.reduce(
+      (total, request) =>
+        total + (request.stage !== COMPLETED_STAGE && !closedKeys.includes(statusKey(request.status)) ? 1 : 0),
+      0,
+    );
+  }
   return requests.reduce((total, request) => total + (isOpenJob(request) ? 1 : 0), 0);
 }
 

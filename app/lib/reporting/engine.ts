@@ -238,6 +238,11 @@ function toReportSite(row: typeof sitesTable.$inferSelect): ReportSite {
   };
 }
 
+function isPlaceholderSiteId(siteId: string | null | undefined) {
+  if (!siteId || !siteId.trim()) return true;
+  return siteId === "site-unassigned" || siteId.startsWith("site-website-intake-");
+}
+
 function toReportJob(
   row: typeof maintenanceRequests.$inferSelect,
   siteNames: Map<string, string>,
@@ -246,13 +251,21 @@ function toReportJob(
 ): ReportJob {
   const rawCost = row.cost;
   const costPence = poundsToPence(rawCost);
+  /*
+   * The placeholders that mean "no site" (the board's `site-unassigned`, the
+   * old web-form bucket, an empty string) are not sites. Left as ids, the
+   * report's Site summary gave them a row of their own named after whatever
+   * location the first such job happened to record, beside a separate "No
+   * site" row — one population split in two under a misleading name.
+   */
+  const siteId = isPlaceholderSiteId(row.siteId) ? null : row.siteId;
   return {
     id: row.id,
     reference: row.reference ?? null,
     title: row.title,
     description: row.description,
-    siteId: row.siteId ?? null,
-    siteName: row.siteId ? siteNames.get(row.siteId) ?? "" : "",
+    siteId,
+    siteName: siteId ? siteNames.get(siteId) ?? "" : "",
     recordedSiteName: row.location || null,
     status: row.status,
     stage: row.stage,

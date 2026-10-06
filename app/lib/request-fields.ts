@@ -238,7 +238,14 @@ export function requestFieldValues(fields: Record<string, unknown>): RequestFiel
      `invalidRequestFields` on a person's PATCH. */
   if ("cost" in fields) {
     const cost = normaliseCost(fields.cost);
-    if (cost !== undefined) values.cost = cost;
+    if (cost !== undefined) {
+      values.cost = cost;
+      /* The same money in whole pence, written WITH it (2026-10-06). Every
+         SQL total reads `coalesce(cost_pence, cost)` (app/lib/cost-sql.ts);
+         a pence column left behind by an edit made Contractors and the cost
+         cards disagree with Reports, which reads `cost`. */
+      values.costPence = cost === null ? null : poundsToPence(cost);
+    }
   }
 
   for (const key of ["requestedAt", "completedAt", "dueAt", "nextUpdateAt"] as const) {
