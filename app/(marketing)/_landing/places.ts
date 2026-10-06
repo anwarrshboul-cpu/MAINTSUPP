@@ -306,8 +306,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and kiosk maintenance at Westfield Stratford City",
     lede: "Repairs, trades, kiosk installs and store works for retailers trading at Westfield Stratford City, in Newham. MAINTSUPP has coordinated jobs inside the centre for an existing retail client, so the permit, access and out-of-hours routine is familiar ground. One-off jobs are welcome, and the emergency line is answered 24 hours a day.",
     photo: {
-      src: "/assets/pages/service-projects-v1.jpg",
-      alt: "A fitting team installing a glass display kiosk in a shopping centre, one fitting a panel while another checks a drawing",
+      src: "/assets/pages/london-contractors-mall-walkway-v1.jpg",
+      alt: "Two contractors in hi-vis vests wheeling tool trolleys and a stepladder along a quiet shopping-centre walkway under a glass roof",
     },
     cards: {
       eyebrow: "What we do here",
@@ -360,8 +360,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and kiosk maintenance at Westfield London, White City",
     lede: "For retailers trading at Westfield London in White City: repairs when something fails, the trades a unit needs, and the works to open, move or close a shop or kiosk. MAINTSUPP has coordinated jobs inside the centre and arranges the permits, the paperwork and the overnight access for each one.",
     photo: {
-      src: "/assets/pages/case-work-v1.jpg",
-      alt: "A contractor in a hi-vis vest carrying a toolbag into a shopping centre while checking the job on his phone",
+      src: "/assets/pages/london-ladder-shopfront-ceiling-v1.jpg",
+      alt: "A contractor on a yellow stepladder working on a ceiling fitting above a shop entrance in a shopping centre, while a second person steadies the ladder",
     },
     cards: {
       eyebrow: "What we do here",
@@ -413,8 +413,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and kiosk maintenance at Brent Cross Shopping Centre",
     lede: "Brent Cross is our priority centre in North London. MAINTSUPP has coordinated jobs inside it, and takes repairs, trades, kiosk works and shop openings and closures for the retailers who trade there — one job at a time, or as part of a plan across every store you run.",
     photo: {
-      src: "/assets/pages/page-case-study-hero-v1.jpg",
-      alt: "A tradesperson adjusting a spotlight on a dark green and gold fragrance kiosk in a shopping centre",
+      src: "/assets/pages/london-technician-kiosk-base-v1.jpg",
+      alt: "A technician crouching at a white kiosk in a shopping centre, working inside its open base cabinet, with a tool bag on the floor beside him",
     },
     cards: {
       eyebrow: "What we do here",
@@ -469,8 +469,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and commercial maintenance in North London",
     lede: "Repairs, commercial trades, kiosk installs and store works for shops and commercial premises across North and North-West London — Barnet, Brent, Camden, Enfield, Haringey, Harrow and Islington — with Brent Cross as the priority centre.",
     photo: {
-      src: "/assets/pages/page-services-hero-v1.jpg",
-      alt: "A tradesperson in a hi-vis vest on a stepladder repairing an illuminated shopfront sign on a rain-wet high street at dusk",
+      src: "/assets/pages/london-shutter-high-street-v1.jpg",
+      alt: "A tradesperson in a hi-vis vest working on a black roller shutter on a high street of brick buildings, with a ladder propped against the shopfront",
     },
     cards: {
       eyebrow: "What we do",
@@ -533,8 +533,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and commercial maintenance in East London",
     lede: "Repairs, commercial trades, kiosk installs and store works for shops and commercial premises across East London — Newham, Tower Hamlets, Hackney, Waltham Forest, Redbridge, Barking and Dagenham, and Havering — with Westfield Stratford City as the priority centre.",
     photo: {
-      src: "/assets/pages/service-reactive-v1.jpg",
-      alt: "A tradesperson kneeling at a shop entrance to repair a jammed roller shutter, with an open toolbox and phone beside him",
+      src: "/assets/pages/london-glaziers-shopfront-v1.jpg",
+      alt: "Two glaziers using suction lifters to fit a large pane of glass into a shopfront, with the pavement behind them coned off",
     },
     cards: {
       eyebrow: "What we do",
@@ -595,8 +595,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and commercial maintenance in West London",
     lede: "Repairs, commercial trades, kiosk installs and store works for shops and commercial premises across West London — Hammersmith and Fulham, Kensington and Chelsea, Ealing, Hounslow and Hillingdon — with Westfield London at White City as the priority centre.",
     photo: {
-      src: "/assets/pages/trade-cctv-v1.jpg",
-      alt: "A tradesperson on a stepladder adjusting a ceiling-mounted camera beside a store entrance with an access-control keypad",
+      src: "/assets/pages/london-decorator-shopfront-frame-v1.jpg",
+      alt: "A decorator in a hi-vis vest working on the dark blue painted frame of a shopfront on a street of small boutiques, with sheeting over the windows",
     },
     cards: {
       eyebrow: "What we do",
@@ -652,8 +652,8 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     h1: "Shop and commercial maintenance in South London",
     lede: "Repairs, commercial trades, kiosk installs and store works for shops and commercial premises across South London — Wandsworth, Lambeth, Southwark, Lewisham, Greenwich, Bromley, Croydon, Kingston, Merton and Sutton.",
     photo: {
-      src: "/assets/pages/service-compliance-v1.jpg",
-      alt: "A technician testing an emergency light beside a red fire alarm panel in a back-of-house corridor",
+      src: "/assets/pages/london-light-fitting-brick-arch-v1.jpg",
+      alt: "An electrician on a stepladder fitting an outside light above a shop entrance set in a brick arch, at dusk",
     },
     cards: {
       eyebrow: "What we do",

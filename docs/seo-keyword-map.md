@@ -182,7 +182,26 @@ A fresh-eyes review of the pages after release found three things, all fixed in 
 
 ## Pictures on the London pages
 
-Each page ships with a photograph from the approved pack, and nine of the seventeen shared one with another page or showed the wrong trade. The owner changes them from the console, without a release:
+Each page ships with a photograph. Until October 2026 they all came from the approved pack, and nine of the seventeen shared one with another page or showed the wrong trade. On 6 October 2026 the owner supplied twelve generated pictures, one per service and area page, and they now ship with those pages:
+
+| Page | Picture (`public/assets/pages/`) |
+| --- | --- |
+| `/london/commercial-painters-decorators` | `london-decorator-shop-wall-v1` |
+| `/london/commercial-carpentry` | `london-carpenter-shop-counter-v1` |
+| `/london/commercial-handyman` | `london-handyman-shelving-v1` |
+| `/london/shop-strip-out` | `london-shop-strip-out-v1` |
+| `/london/emergency-repairs` | `london-night-shutter-repair-v1` |
+| `/london/westfield-stratford-city` | `london-contractors-mall-walkway-v1` |
+| `/london/westfield-london-white-city` | `london-ladder-shopfront-ceiling-v1` |
+| `/london/brent-cross` | `london-technician-kiosk-base-v1` |
+| `/london/north-london` | `london-shutter-high-street-v1` |
+| `/london/east-london` | `london-glaziers-shopfront-v1` |
+| `/london/west-london` | `london-decorator-shopfront-frame-v1` |
+| `/london/south-london` | `london-light-fitting-brick-arch-v1` |
+
+The hub, kiosk installation, shop fit-out, commercial electrician and shop maintenance keep their approved-pack photographs. Before install the twelve were lightly retouched, and nothing else was changed: the generator had misspelt the MAINTSUPP wordmark on most of the workwear (for example "MAINT3UPP"), so that lettering was taken off and the M mark kept (the two pictures where it is spelt correctly, carpentry and handyman, keep it); and five had hard-edged blur boxes over shop signs, which were softened into a graduated background blur. Each was cropped to the hero's 16:10. Files are named for what they show, never after a centre; `tests/seo-london-pages.test.mjs` checks that, and that every variant the manifest lists exists.
+
+The owner can still change any of them from the console, without a release:
 
 - an image in the media library (`/admin/media`) whose **title is the page's address** — `/london/brent-cross` — and which has **alt text** is that page's picture, within a minute;
 - no alt text, no picture: the page keeps the photograph it ships with;

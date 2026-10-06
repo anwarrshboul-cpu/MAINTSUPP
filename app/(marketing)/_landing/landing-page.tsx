@@ -31,7 +31,9 @@ import { EMAIL, PHONE_DISPLAY, PHONE_HREF, type LandingCard, type LandingPage as
  * inbox which page it came from.
  *
  * THE PICTURE CAN BE CHANGED FROM THE CONSOLE. Each page ships with a
- * photograph from the approved pack. An image in the media library whose title
+ * photograph: the twelve service and area pages with their own pictures
+ * (October 2026, `scripts/install-page-photos.mjs`), the hub and four service
+ * pages with one from the approved pack. An image in the media library whose title
  * is the page's address — `/london/brent-cross` — and which has alt text takes
  * its place (`app/lib/page-pictures.ts` gives the rule and the reasons). The
  * read is cached and can only ever answer "no library picture", so a page is
