@@ -1117,14 +1117,18 @@ test("the footer carries the legal line verbatim", async () => {
   for (const fragment of [
     "MAINTSUPP LTD",
     "company no. 17262302",
-    "C/O MJR Accounting & Tax Services",
-    "One Canada Square, London, E14 5AA",
+    "Registered office: 37th Floor, One Canada Square, London, E14 5AA.",
   ]) {
     assert.ok(
       chrome.replace(/&amp;/g, "&").includes(fragment),
       `the legal line is missing: ${fragment}`,
     );
   }
+});
+
+test("the footer no longer names the accountant c/o line", async () => {
+  const chrome = await read("app/(marketing)/_sections/chrome.tsx");
+  assert.ok(!chrome.includes("MJR"), "the C/O MJR line must not appear");
 });
 
 /* ── 5. Live, in a real browser ──────────────────────────────────────────── */
