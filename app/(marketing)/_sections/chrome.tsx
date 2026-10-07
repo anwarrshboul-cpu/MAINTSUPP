@@ -621,8 +621,7 @@ export function SiteFooter({ navigation }: { navigation: PublicNavigation }) {
             registered office, which was missing. */}
         <p>
           MAINTSUPP LTD. Registered in England &amp; Wales,
-          company no. 17262302. Registered office: C/O MJR Accounting &amp; Tax Services
-          Limited, 37th Floor, One Canada Square, London, E14 5AA.
+          company no. 17262302. Registered office: 37th Floor, One Canada Square, London, E14 5AA.
         </p>
         <p>
           Technical inspection, testing and certification are carried out by competent
