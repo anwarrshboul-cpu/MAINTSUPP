@@ -534,9 +534,9 @@ test("the pricing band buttons do not move under the thumb that pressed them", a
      cost FAQ began deriving the entry rates too — and at the commercial
      update's approved figures. */
   const rates = await read("app/(marketing)/_sections/rates.ts");
-  assert.match(rates, /essential: 60, compliance: 55, complete: 100/);
-  assert.match(rates, /essential: 56, compliance: 51, complete: 92/);
-  assert.match(rates, /essential: 52, compliance: 47, complete: 84/);
+  assert.match(rates, /essential: 65, compliance: 55, complete: 100/);
+  assert.match(rates, /essential: 61, compliance: 51, complete: 92/);
+  assert.match(rates, /essential: 57, compliance: 47, complete: 84/);
   /*
    * THE FOURTH BAND'S ARITHMETIC RISK IS GONE WITH THE SENTENCE THAT HAD IT.
    *

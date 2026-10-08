@@ -217,7 +217,7 @@ test("no price is shown + VAT", async () => {
   const rates = await read("app/(marketing)/_sections/rates.ts");
 
   for (const figure of [
-    "export const PORTFOLIO_MINIMUM = 300",
+    "export const PORTFOLIO_MINIMUM = 325",
     "export const INCLUDED_JOBS = 4",
     "export const ADDITIONAL_JOB = 50",
     "export const ONBOARDING_PER_STORE = 75",
@@ -322,9 +322,9 @@ test("the Total Care saving is derived from the prices above it", async () => {
 
   /* The approved figures, pinned because they are quoted to clients. */
   assert.deepEqual(bands, [
-    { essential: 60, compliance: 55, complete: 100 },
-    { essential: 56, compliance: 51, complete: 92 },
-    { essential: 52, compliance: 47, complete: 84 },
+    { essential: 65, compliance: 55, complete: 100 },
+    { essential: 61, compliance: 51, complete: 92 },
+    { essential: 57, compliance: 47, complete: 84 },
   ]);
 
   /* The badge claims a saving per band; each band's cards must produce it. It
@@ -334,7 +334,7 @@ test("the Total Care saving is derived from the prices above it", async () => {
      a coincidence worth hiding. */
   assert.deepEqual(
     bands.map((band) => band.essential + band.compliance - band.complete),
-    [15, 15, 15],
+    [20, 20, 20],
   );
 
   /* The fourth band exists and carries no rate. A figure here would be a price
