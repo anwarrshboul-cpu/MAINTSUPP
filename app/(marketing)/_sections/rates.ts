@@ -35,16 +35,17 @@ export type RateKey = "essential" | "compliance" | "complete";
  * than 0 or a sentinel string so that anything printing a figure has to handle
  * its absence in the type system rather than by remembering to.
  *
- * COMPLETE IS EXACTLY 15 BELOW BUYING THE OTHER TWO SEPARATELY, at every band
- * that carries numbers: 60+55-100, 56+51-92, 52+47-84. The badge on the card
+ * COMPLETE IS EXACTLY 20 BELOW BUYING THE OTHER TWO SEPARATELY, at every band
+ * that carries numbers: 65+55-100, 61+51-92, 57+47-84 (owner, 2026-10-08:
+ * Essential up 5 at every band; Compliance and Complete unchanged). The badge on the card
  * derives that subtraction rather than stating it, so the two cannot drift
  * apart — and `tests/stage-twentyeight-landing-rebuild.test.mjs` recomputes it
  * from this table and fails if any band breaks the pattern.
  */
 export const BANDS = [
-  { id: "b5", label: "5–10 stores", min: 5, max: 10, essential: 60, compliance: 55, complete: 100 },
-  { id: "b11", label: "11–25 stores", min: 11, max: 25, essential: 56, compliance: 51, complete: 92 },
-  { id: "b26", label: "26–50 stores", min: 26, max: 50, essential: 52, compliance: 47, complete: 84 },
+  { id: "b5", label: "5–10 stores", min: 5, max: 10, essential: 65, compliance: 55, complete: 100 },
+  { id: "b11", label: "11–25 stores", min: 11, max: 25, essential: 61, compliance: 51, complete: 92 },
+  { id: "b26", label: "26–50 stores", min: 26, max: 50, essential: 57, compliance: 47, complete: 84 },
   {
     id: "b51",
     label: "51+ stores",
@@ -82,7 +83,7 @@ export const SLIDER_MAX = 60;
 export const MINIMUM_SITES = 5;
 
 /* Everything the footnotes quote, once each. */
-export const PORTFOLIO_MINIMUM = 300;
+export const PORTFOLIO_MINIMUM = 325;
 export const INCLUDED_JOBS = 4;
 export const ADDITIONAL_JOB = 50;
 export const ONBOARDING_PER_STORE = 75;
