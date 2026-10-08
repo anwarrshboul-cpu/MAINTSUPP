@@ -108,7 +108,7 @@ test("Complete is £20 below buying the two parts, at every band", () => {
 
 test("the minimum and the entry rate cannot contradict each other", () => {
   /*
-   * §10.3. £300 must equal 5 × £60 — otherwise the calculator's readout at five
+   * §10.3. £325 must equal 5 × £65 — otherwise the calculator's readout at five
    * stores and the footnote beneath it say different things about the same
    * portfolio, and a reader doing the multiplication finds the page wrong.
    *
@@ -180,18 +180,20 @@ test("the monthly totals in the brief are what rate × count produces", () => {
  * correct. "21 stores" is excluded for the same reason — forbidden in the
  * pricing totals, kept in the hero chip and the case study, which is where the
  * portfolio actually is.
+ *
+ * "£65" and "save £20 per store" were removed from this list on 2026-10-08:
+ * the owner raised Essential by 5 at every band, so £65 is now the 5–10 store
+ * Essential rate and £20 is the Complete saving at every band.
  */
 const WITHDRAWN = [
   "£85",
   "£90",
   "£275",
   "£125",
-  "£65",
   "2 coordinated jobs",
   "3 coordinated jobs",
   "1–5 stores",
   "1–4 stores",
-  "save £20 per store",
   "waived on a 12-month term",
   "Waived on a 12-month term",
   "£375 at 5 stores",
