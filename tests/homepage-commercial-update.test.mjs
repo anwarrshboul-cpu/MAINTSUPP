@@ -85,23 +85,23 @@ test("the approved rates, exactly as they are quoted to clients", () => {
   assert.deepEqual(
     rates.BANDS.map((band) => [band.label, band.essential, band.complete, band.compliance]),
     [
-      ["5–10 stores", 60, 100, 55],
-      ["11–25 stores", 56, 92, 51],
-      ["26–50 stores", 52, 84, 47],
+      ["5–10 stores", 65, 100, 55],
+      ["11–25 stores", 61, 92, 51],
+      ["26–50 stores", 57, 84, 47],
       ["51+ stores", null, null, null],
     ],
   );
 });
 
-test("Complete is £15 below buying the two parts, at every band", () => {
+test("Complete is £20 below buying the two parts, at every band", () => {
   /* The brief states it as a rule rather than as three coincidences, so it is
      held as one: any band that carries rates must satisfy it. */
   for (const band of rates.BANDS) {
     if (band.complete === null) continue;
     assert.equal(
       band.essential + band.compliance - band.complete,
-      15,
-      `${band.label} breaks the £15 rule`,
+      20,
+      `${band.label} breaks the £20 rule`,
     );
   }
 });
@@ -117,7 +117,7 @@ test("the minimum and the entry rate cannot contradict each other", () => {
    * that guards itself can still be given two numbers that agree and are both
    * wrong.
    */
-  assert.equal(rates.PORTFOLIO_MINIMUM, 300);
+  assert.equal(rates.PORTFOLIO_MINIMUM, 325);
   assert.equal(rates.MINIMUM_SITES, 5);
   assert.equal(rates.ENTRY_BAND.essential * rates.MINIMUM_SITES, rates.PORTFOLIO_MINIMUM);
 });
@@ -153,13 +153,13 @@ test("the monthly totals in the brief are what rate × count produces", () => {
    * only source of that.
    */
   const expected = [
-    [5, 300, 500],
-    [8, 480, 800],
-    [10, 600, 1000],
-    [15, 840, 1380],
-    [20, 1120, 1840],
-    [30, 1560, 2520],
-    [40, 2080, 3360],
+    [5, 325, 500],
+    [8, 520, 800],
+    [10, 650, 1000],
+    [15, 915, 1380],
+    [20, 1220, 1840],
+    [30, 1710, 2520],
+    [40, 2280, 3360],
   ];
   for (const [count, essential, complete] of expected) {
     const band = rates.bandForCount(count);
