@@ -65,8 +65,8 @@ import {
  * company rather than a qualifier on a number.
  *
  * THE SAVING IS COMPUTED, NOT TYPED. Essential + Compliance − Complete at
- * whatever band is showing: £15 at every band that has numbers (60+55−100,
- * 56+51−92, 52+47−84). Deriving it means the badge cannot come to contradict
+ * whatever band is showing: £20 at every band that has numbers (65+55−100,
+ * 61+51−92, 57+47−84). Deriving it means the badge cannot come to contradict
  * the cards above it after a price change.
  */
 
