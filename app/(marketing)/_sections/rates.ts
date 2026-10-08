@@ -118,8 +118,8 @@ export function inWords(value: number): string {
 /**
  * The published minimum and the entry rate cannot contradict each other.
  *
- * §10.3 of the brief: "The stated minimum (£300) equals 5 × the Essential entry
- * rate (£60). No contradiction between calculator readout and any footnote."
+ * §10.3 of the brief: "The stated minimum (£325) equals 5 × the Essential entry
+ * rate (£65). No contradiction between calculator readout and any footnote."
  * Asserted here rather than in a test alone, because the failure it prevents is
  * a reader doing the multiplication themselves and finding the page wrong.
  */
