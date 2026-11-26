@@ -405,152 +405,107 @@ test("Contact Us is in both navs, and both send you to the section the footer al
   );
   assert.match(finalCta, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "drawn by the section");
   /* RE-POINTED (decision L): the line beneath the heading is
-     `HOME_COPY.finalCta.lede`, and the section draws it (asserted just above). */
+     `HOME_COPY.finalCta.lede`, and the section draws it (asserted just above).
+
+     RE-POINTED AGAIN 2026-11-25, with the owner's move to pay-per-job. The
+     lede led with the review and offered the form second ("Or use the same
+     form to tell us what you need."). It now leads with the enquiry — tell us
+     what you need and get a price — and offers the review second, to the
+     reader running several sites. The rule three comments up is the reason
+     for BOTH halves and is unchanged: a reader who clicked Contact Us must be
+     offered more than a portfolio review. So both halves are pinned. */
+  const finalLede = await read("app/(marketing)/_sections/copy.ts");
+  assert.match(finalLede, /Tell us what you need and we will come back to you with a price\./);
   assert.match(
-    await read("app/(marketing)/_sections/copy.ts"),
-    /Or use the same form to tell us what you need\./,
+    finalLede,
+    /Running several sites\? Book a free portfolio review — 30 minutes, no obligation\./,
   );
 });
 
-test("the pricing band buttons do not move under the thumb that pressed them", async () => {
+test("there are no pricing band buttons left to move under a thumb", async () => {
   /*
-   * The handler was never the defect: a tap on any band moved the pill, the
-   * slider and the prices in both Chromium and WebKit. What moved was the
-   * row itself — the note above it is one line on 1–10 and two lines on the
-   * other two bands, so the card grew by a line the moment 11–25 or 26+ was
-   * pressed (+21px at 390 and 430, measured). The note reads the same shape
-   * for every band now, and the room it takes is reserved.
+   * RE-POINTED 2026-11-25, on the owner's decision and not on a refactor.
    *
-   * 722 and 384, not 700 and 360: both breakpoints were set from those two
-   * measurements alone, and a 320-800px sweep in both engines against the
-   * preview found the row still moving +21px wherever the reservation was a
-   * line short of what the longest note actually wraps to.
+   * WHAT THIS HELD, and it took three attempts to hold: pressing a band button
+   * must not move the row of buttons. The handler was never the defect — a tap
+   * moved the pill, the slider and the prices in both Chromium and WebKit. What
+   * moved was the row itself: the note above it wrapped to a different number
+   * of lines per band, so the card grew by a line the moment 11–25 or 26+ was
+   * pressed (+21px at 390 and 430, measured). Two rounds of hand-measured
+   * breakpoints each broke on the next copy change. The fix that stuck was
+   * structural — every band's note rendered into ONE grid cell with all but
+   * the current one hidden, so the row is as tall as its tallest note at every
+   * width, derived rather than typed.
    *
-   * RE-POINTED, AND THE RULE IS NOW STRONGER THAN THE ONE IT REPLACES.
+   * The published monthly plans are withdrawn (`_sections/rates.ts` records
+   * it): there are no bands, no buttons and no note. The defect cannot occur
+   * in a section with nothing to press, so the first thing held is exactly
+   * that — the control and everything it needed are gone from the markup, not
+   * hidden in it.
    *
-   * That is twice the reservation has been measured against the copy of the
-   * day, and the pricing rebuild broke it a third time: new sentences, a
-   * fourth band, and a fresh 320-900px sweep showing +21px at 390px and 768px
-   * because what the notes now need is three lines to 407px and two to 789px.
-   *
-   * Chasing the numbers a third time would leave the same trap set for the
-   * next copy change, so the reservation is no longer measured. All four band
-   * notes render into one grid cell with three of them hidden, and a grid row
-   * is as tall as its tallest item — the height reserved is therefore exactly
-   * the height the longest note needs, at every width, derived rather than
-   * typed. This test now pins THAT, which is the property the two media
-   * queries were only ever approximating, and it took both bespoke
-   * breakpoints out of the stylesheet.
-   *
-   * Re-measured after the change: 0px of movement across all four bands at
-   * 320/360/375/384/390/414/430/700/722/768/1440.
+   * THE RESERVATION IS KEPT AS A CONDITION, NOT DELETED. The stylesheet rules
+   * were left in place, unused, when the markup went. If a band note ever
+   * returns it has to return in the same one-cell grid, or the +21px jump
+   * returns with it; so the pins that made that a contract still run whenever
+   * the rule is in the file.
    */
+  const strip = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const pricing = strip(await read("app/(marketing)/_sections/pricing.tsx"));
+  for (const part of ["switcher", "pricing__band-note", "noteForBand", "data-active", "<button", "BANDS", "SLIDER_MAX"]) {
+    assert.ok(!pricing.includes(part), `pricing.tsx still carries ${part}`);
+  }
+
   const css = await read("app/(marketing)/marketing.css");
-  assert.match(css, /\.pricing__band-note\{display:grid;[^}]*line-height:1\.6;/,
-    "one grid cell, so the row is as tall as the tallest note in it");
-  /* The count changes the wrap as well as the band does, so the twins carry
-     each band's highest count and the digits are fixed-width — without which
-     a twin at the top of its band does not cover the counts below it. */
-  assert.match(css, /\.pricing__band-note\{[^}]*font-variant-numeric:tabular-nums\}/,
-    "fixed-width digits, or a two-digit count is wider than the twin reserving for it");
-  assert.match(css, /\.pricing__band-note>span\{grid-area:1\/1;visibility:hidden\}/,
-    "every band's note is stacked in that cell and hidden by default");
-  assert.match(css, /\.pricing__band-note>span\[data-active\]\{visibility:visible\}/,
-    "and exactly the current one is shown");
-  /* visibility, never display — a hidden note that takes no space reserves
-     nothing, which is the defect this test exists for. */
-  assert.doesNotMatch(css, /\.pricing__band-note>span\{[^}]*display:none/);
-  /* The two hand-measured breakpoints are gone, not merely bypassed. */
+  if (css.includes(".pricing__band-note{")) {
+    assert.match(css, /\.pricing__band-note\{display:grid;[^}]*line-height:1\.6;/,
+      "one grid cell, so the row is as tall as the tallest note in it");
+    /* The count changes the wrap as well as the band does, so the twins carry
+       each band's highest count and the digits are fixed-width — without which
+       a twin at the top of its band does not cover the counts below it. */
+    assert.match(css, /\.pricing__band-note\{[^}]*font-variant-numeric:tabular-nums\}/,
+      "fixed-width digits, or a two-digit count is wider than the twin reserving for it");
+    assert.match(css, /\.pricing__band-note>span\{grid-area:1\/1;visibility:hidden\}/,
+      "every band's note is stacked in that cell and hidden by default");
+    assert.match(css, /\.pricing__band-note>span\[data-active\]\{visibility:visible\}/,
+      "and exactly the current one is shown");
+    /* visibility, never display — a hidden note that takes no space reserves
+       nothing, which is the defect this test exists for. */
+    assert.doesNotMatch(css, /\.pricing__band-note>span\{[^}]*display:none/);
+    assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
+  }
+  /* The two hand-measured breakpoints are gone, not merely bypassed — and stay
+     gone whether or not the rule above is ever used again. */
   assert.doesNotMatch(css, /\.pricing__band-note\{min-height/);
   assert.doesNotMatch(css, /max-width:(722|384|407|789)px\)\{\.pricing__band-note/);
-  assert.match(css, /\.switcher button\{touch-action:manipulation\}/, "a tap is a tap, not half a double-tap");
 
-  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  /* RE-POINTED: the note is ONE sentence now for every band, so the shape ends
-     at the rate rather than running on into a per-store comparison. The claim
-     is unchanged and is the reason the pin exists — the sentence is built from
-     whichever band it is given, never typed per band. */
-  assert.match(
-    pricing,
-    /you are on the \$\{entry\.label\} rate\.`;/,
-    "one sentence shape for every band, built for whichever band it is given",
-  );
-  assert.match(
-    pricing,
-    /<span data-active="true">\{noteForBand\(band, storeCount\)\}<\/span>/,
-    "exactly one sentence is shown, and it is the reader's own band and count",
-  );
-  assert.match(
-    pricing,
-    /\{BANDS\.map\(\(entry\) => \(/,
-    "and a twin of every band's is rendered, to reserve the height",
-  );
-  assert.match(
-    pricing,
-    /noteForBand\(entry, Math\.min\(entry\.max, SLIDER_MAX\)\)/,
-    "each twin at the highest count its band can reach, because the count wraps too",
-  );
-  assert.match(
-    pricing,
-    /<span key=\{entry\.id\} aria-hidden="true">/,
-    "with the twins kept out of the accessibility tree",
-  );
   assert.ok(!pricing.includes("You have unlocked"), "the contradictory 'save £N' note is gone");
   /*
-   * RE-POINTED TWICE, AND THE SECOND TIME IT WITHDRAWS THE FIGURE ENTIRELY.
+   * RE-POINTED THREE TIMES, AND EACH TIME THE FIGURE IN THE NOTE GOT SMALLER.
    *
    * The note used to end "— £7 per store below the 5–10 stores rate on
    * Complete", and this pinned that the figure named which rate it was below,
    * because a bare "£7 cheaper" is a number with nothing behind it. The
-   * commercial update replaces the run-on with one sentence that quotes no
-   * figure at all, which answers the same worry by removing its subject: the
-   * only saving still claimed on this section is the card badge, which names
-   * both things it is comparing.
+   * commercial update replaced that with one sentence quoting no figure, and
+   * left the card badge as the only saving the section claimed. The badge and
+   * the band table it was computed from are withdrawn now too.
    *
-   * So what is held now is that the note carries NO figure. A number
-   * reappearing here without a sentence saying what it is below is the defect,
-   * and this is where it would show up.
+   * So what is held is the end of that road: the section carries NO figure
+   * and claims NO saving. A number reappearing here would have nothing to be
+   * derived from, and this is where it would show up.
    */
-  const note = pricing.slice(pricing.indexOf("const noteForBand"), pricing.indexOf("const rateFor"));
-  assert.doesNotMatch(note, /£/, "the band note quotes no figure, so none can be unexplained");
-  assert.match(
-    pricing,
-    /Most popular — save £\{saving\} per store/,
-    "the one saving the section claims is the badge, and it is derived",
-  );
+  assert.doesNotMatch(pricing, /£/, "the section quotes no figure, so none can be unexplained");
+  assert.ok(!pricing.includes("Most popular"), "and it claims no saving");
 
-  /*
-   * RE-POINTED to the approved rates and the new plan names, and extended to
-   * the fourth band. The reason this list is here is unchanged: the note above
-   * the buttons quotes a difference against the entry band, so a rate change
-   * that misses this test is a note that contradicts the cards below it.
-   *
-   * THE FOURTH BAND IS THE NEW RISK and is pinned deliberately. 51+ carries no
-   * rate, so `entryBand.complete - band.complete` is arithmetic on `null`. The
-   * note has to ask before it subtracts, and the assertion below is what makes
-   * that a contract rather than a coincidence.
-   */
-  /* RE-POINTED at `rates.ts`, which is where the band table lives since the
-     cost FAQ began deriving the entry rates too — and at the commercial
-     update's approved figures. */
-  const rates = await read("app/(marketing)/_sections/rates.ts");
-  assert.match(rates, /essential: 65, compliance: 55, complete: 100/);
-  assert.match(rates, /essential: 61, compliance: 51, complete: 92/);
-  assert.match(rates, /essential: 57, compliance: 47, complete: 84/);
-  /*
-   * THE FOURTH BAND'S ARITHMETIC RISK IS GONE WITH THE SENTENCE THAT HAD IT.
-   *
-   * The note used to subtract one band's rate from another's, which is
-   * arithmetic on `null` in a band that carries no rate — so it had to ask
-   * first. The single sentence does no arithmetic at all, so the guard that
-   * made asking a contract is replaced by the stronger fact: there is nothing
-   * left in the note to subtract.
-   */
+  /* The rates the note compared — pinned here because a rate change that
+     missed this test was a note contradicting the cards — are gone with the
+     band table, which is asserted rather than assumed. */
+  const rates = strip(await read("app/(marketing)/_sections/rates.ts"));
   assert.doesNotMatch(
-    pricing.slice(pricing.indexOf("const noteForBand"), pricing.indexOf("const rateFor")),
-    /entryBand|- (band|entry)\./,
-    "the band note does no arithmetic, so it cannot do arithmetic on null",
+    rates,
+    /essential: \d+, compliance: \d+, complete: \d+/,
+    "no band rates are left for a note to contradict",
   );
+  assert.doesNotMatch(rates, /entryBand|bandForCount/, "nor anything to do arithmetic on them");
 });
 
 test("the hero feed keeps one height, so the page below it stops jumping", async () => {

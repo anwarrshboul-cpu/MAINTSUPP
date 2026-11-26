@@ -1,76 +1,69 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import Link from "next/link";
 import { HOME_COPY, type HomeCopy } from "./copy";
-import {
-  ADDITIONAL_JOB,
-  BANDS,
-  ENTRY_BAND,
-  INCLUDED_JOBS,
-  ONBOARDING_CAP,
-  ONBOARDING_PER_STORE,
-  OUT_OF_HOURS_P1,
-  PORTFOLIO_MINIMUM,
-  PROJECT_MINIMUM,
-  PROJECT_PERCENT,
-  SLIDER_MAX,
-  SLIDER_MIN,
-  bandForCount,
-  type Band,
-} from "./rates";
+import { TERMS } from "./rates";
 
 /**
  * SECTION 7 — Pricing.
  *
- * WHAT THE PAGE SAYS: two plans a reader chooses between, four portfolio bands,
- * and the actual numbers — except above fifty stores, where the honest answer is
- * a conversation and the card says so rather than inventing a rate.
+ * WHAT THE PAGE SAYS NOW: you pay per job, and you have the price before any
+ * work starts. Three cards say the three things a first-time buyer needs to
+ * know before they send a job — how it is priced, what a call-out costs, and
+ * what comes with it — and one line beneath them says a managed monthly plan
+ * exists for portfolios, on request.
  *
- * THE READER GIVES ONE NUMBER. A slider for how many stores they have; the band
- * follows, the per-store rate follows, and each card shows what that costs them
- * per month. Asking someone to pick a band first asks them to work out which
- * band fourteen stores is in, which is the calculator's job.
+ * ── WHAT WAS HERE, AND WHY IT WENT ────────────────────────────────────────
  *
- * ── WHAT CHANGED IN THIS REVISION, AND WHY EACH ONE MATTERS ───────────────
+ * Until 2026-11-25 this section was a calculator: a store-count slider, four
+ * portfolio bands, two plan cards (Essential and Complete) with per-store
+ * monthly rates, a full rate card behind a disclosure, and thirteen footnotes —
+ * portfolio minimum, included jobs, onboarding fee, out-of-hours fee, project
+ * percentage, initial term. All of it described ONE product: a monthly
+ * coordination subscription for portfolios of five sites and above.
  *
- * THE RATES MOVED OUT, to `./rates.ts`. The cost FAQ now quotes the entry rates
- * too, and the brief requires every figure to agree across the cards, the rate
- * card, the totals, the footnotes and that answer. One module knows the numbers
- * and three places render them; see the header there for the rule this keeps
- * rather than breaks.
+ * The owner withdrew it (decided 2026-11-19, released 2026-11-25). Nobody was
+ * buying the subscription, the outreach that sends people here promises "no
+ * subscription", and the reader this page is now written for runs one shop or
+ * one kiosk and wants one thing fixed. A slider that opens at five stores told
+ * that reader the page was not for them. `./rates.ts` records the decision and
+ * what would have to be true to publish a rate again.
  *
- * TWO CARDS, AND NO THIRD. Essential and Complete are the decision. Compliance
- * administration is still sold on its own and is still priced — it is a LINE OF
- * SMALL PRINT under the cards and a row in the rate card, not a card. It was a
- * card, and an equal-looking third option asked the reader to compare three
- * things when only two of them are the choice.
+ * ── THE RULES THAT SURVIVE ────────────────────────────────────────────────
  *
- * THE PORTFOLIO TOTAL IS THE BIG NUMBER NOW. The per-store rate is the unit;
- * the total is what the client actually pays, and it was the smaller of the two.
+ * NO FIGURE IS TYPED HERE — and now none is derived here either. This file was
+ * the one place in the marketing tree allowed a pound sign followed by a digit;
+ * `tests/homepage-v3.test.mjs` no longer makes that exception, because there is
+ * no price left to print. Do not add one to a card to "make it concrete": a
+ * typed rate is the thing that goes stale, and the owner quotes each job.
  *
- * THE BAND NOTE IS ONE SENTENCE. It used to run on — "At 5 stores you are on the
- * 5-10 stores rate — £7 per store below the 5-10 stores rate on Complete" — which
- * says the same thing twice at the entry band and does arithmetic the cards
- * already show.
+ * THE TERMS ARE QUOTED, NOT RESTATED. The call-out line is a promise about
+ * money. It is written once, in `rates.ts` (`TERMS`), and this section, the
+ * cost FAQ, `/pricing` and the London pages all read it from there, so the
+ * promise cannot come to be worded two ways.
  *
- * THE FULL RATE CARD IS BEHIND A DISCLOSURE, using the page's existing
- * `<details>`/`<summary>` pattern — the same one the FAQ uses — because a
- * twelve-cell table above the fold competes with the two cards that are the
- * actual decision. It scrolls horizontally rather than overflowing; see
- * `.ratecard__scroll` in marketing.css.
+ * THE CALL-OUT IS FREE WITH THE REPAIR, NOT FREE. The owner chose that form
+ * deliberately (2026-11-25): a contractor who attends and repairs nothing
+ * still has to be paid, so an unconditional "no call-out fee" would be a cost
+ * the business absorbs every time a visit finds nothing to fix. The second
+ * half — a visit with no repair to follow is priced first — is on the same
+ * card for that reason and must stay beside the first.
  *
- * NO PRICE CARRIES "+ VAT", AND THAT IS STILL THE RULE. What the footnotes now
- * say instead is the positive form — the price shown is the price payable, and
- * MAINTSUPP LTD is not VAT registered — which is a statement of fact about the
- * company rather than a qualifier on a number.
+ * THREE CARDS, EQUAL. The old section had two cards and a highlighted one
+ * because it was a choice between plans. These are not a choice: every job
+ * gets all three, so none of them carries the `is-match` highlight or a flag.
  *
- * THE SAVING IS COMPUTED, NOT TYPED. Essential + Compliance − Complete at
- * whatever band is showing: £20 at every band that has numbers (65+55−100,
- * 61+51−92, 57+47−84). Deriving it means the badge cannot come to contradict
- * the cards above it after a price change.
+ * NO PRICE CARRIES "+ VAT", AND THAT IS STILL THE RULE. The footnote keeps the
+ * positive form — the price quoted is the price payable, and MAINTSUPP LTD is
+ * not VAT registered — which is a statement of fact about the company rather
+ * than a qualifier on a number.
+ *
+ * NO NEW CSS. The cards reuse `.pkgs` / `.pkg` and the notes reuse
+ * `.pricing__notes` from marketing.css, so the section keeps the page's
+ * rhythm and adds no breakpoint. The calculator and rate-card rules are left
+ * in the stylesheet, unused, rather than deleted in the same change.
  */
-
-type PlanKey = "essential" | "complete";
 
 const CHECK = <path d="M20 6 9 17l-5-5" />;
 
@@ -91,113 +84,7 @@ function Tick() {
   );
 }
 
-const REVIEW = "Book a Portfolio Review";
-
-/** Pounds, with a thousands separator and no decimals. */
-function money(amount: number) {
-  return amount.toLocaleString("en-GB");
-}
-
-/**
- * The price line.
- *
- * `amount` is `null` in the top band, where the card offers a conversation
- * instead of a number. `was` is the same plan's entry-band rate, struck through
- * only once the reader has moved past that band — a "was £60" beside £60 is
- * noise, and beside £52 it is the discount.
- */
-function Price({ amount, was }: { amount: number | null; was: number }) {
-  if (amount === null) {
-    return (
-      <div className="pkg__price pkg__price--talk">
-        <span className="pkg__talk">{REVIEW}</span>
-        <span className="pkg__per">for portfolios over 50 stores</span>
-      </div>
-    );
-  }
-  return (
-    <div className="pkg__price">
-      <span className="pkg__num">£{amount}</span>
-      {was > amount && (
-        <s className="pkg__was" aria-label={`Down from £${was} per store`}>
-          £{was}
-        </s>
-      )}
-      <span className="pkg__per">per store / month</span>
-    </div>
-  );
-}
-
-type Plan = {
-  key: PlanKey;
-  title: string;
-  for: string;
-  icon: ReactNode;
-  /** The plans whose entire feature set this plan contains. */
-  rollup?: readonly PlanKey[];
-};
-
-/**
- * The two plans the reader is choosing between, and there are only two.
- *
- * Compliance administration is deliberately NOT a plan object any more. It is a
- * rate (`BANDS[].compliance`) rendered as one line of small print beneath the
- * cards and as one row of the rate card. Keeping it out of this list is what
- * stops a later edit quietly restoring it to a third equal column.
- */
-const MAIN_PLANS: readonly Plan[] = [
-  {
-    key: "essential",
-    title: "Essential",
-    for: "Reactive repairs, run end to end.",
-    icon: <path d="M14.7 6.3a4 4 0 1 0 5 5L21 21H3l9.7-9.7a4 4 0 0 1 2-4.9Z" />,
-  },
-  {
-    key: "complete",
-    title: "Complete",
-    for: "Repairs and compliance together, plus a quarterly portfolio review.",
-    icon: (
-      <>
-        <path d="m12 2 9 5v10l-9 5-9-5V7Z" />
-        <path d="m3 7 9 5 9-5M12 12v10" />
-      </>
-    ),
-    rollup: ["essential"],
-  },
-];
-
-/* Every feature, once, against the plan that introduces it. The cards derive
-   their bullet lists from this, so "Everything in Essential" on the Complete
-   card cannot come to describe a set the Essential card no longer lists. */
-const FEATURES: readonly { label: string; plan: PlanKey }[] = [
-  { label: "Intake & triage", plan: "essential" },
-  { label: "Contractor assignment", plan: "essential" },
-  { label: "Quote control", plan: "essential" },
-  { label: "Attendance chasing", plan: "essential" },
-  { label: "Photo-verified close-out", plan: "essential" },
-  { label: "Monthly report", plan: "essential" },
-  { label: "Certificate register", plan: "complete" },
-  { label: "90/60/30-day reminders", plan: "complete" },
-  { label: "Provider booking and certificate chasing", plan: "complete" },
-  { label: "Remedial tracking", plan: "complete" },
-  { label: "Traffic-light compliance dashboard", plan: "complete" },
-  { label: "Quarterly portfolio review", plan: "complete" },
-];
-
-/**
- * The card's bullet list: a plan's own features, preceded by one line per
- * rolled-up plan. Complete therefore reads "Everything in Essential" and then
- * the compliance and review lines — derived, so it cannot drift from what the
- * other card claims.
- */
-function cardPoints(plan: Plan) {
-  const own = FEATURES.filter((feature) => feature.plan === plan.key).map((f) => f.label);
-  if (!plan.rollup) return own;
-  const titleOf = (key: PlanKey) => MAIN_PLANS.find((entry) => entry.key === key)?.title ?? key;
-  return [...plan.rollup.map((key) => `Everything in ${titleOf(key)}`), ...own];
-}
-
-function PlanIcon({ icon }: { icon: ReactNode }) {
+function CardIcon({ icon }: { icon: ReactNode }) {
   return (
     <span className="pkg__icon">
       <svg
@@ -216,51 +103,76 @@ function PlanIcon({ icon }: { icon: ReactNode }) {
   );
 }
 
-/** A rate as it appears in the rate-card table: a figure, or "Bespoke". */
-function rateCell(value: number | null) {
-  return value === null ? "Bespoke" : `£${value}`;
-}
+type Card = {
+  key: string;
+  title: string;
+  for: string;
+  icon: ReactNode;
+  points: readonly string[];
+};
+
+/**
+ * What a first-time buyer is told, in the order they ask it: what will it
+ * cost, what does a visit cost, and what do I get.
+ *
+ * The first two points of the call-out card are sentences from `TERMS`, so
+ * the card and the FAQ answer are the same words. They are whole sentences
+ * with their full stops, which is why the third point on that card has one
+ * too and the fragments on the other two cards do not.
+ */
+const CARDS: readonly Card[] = [
+  {
+    key: "per-job",
+    title: "Priced per job",
+    for: "One price for the job, confirmed before work starts.",
+    /* A price tag: the card is about what the job will cost. */
+    icon: (
+      <>
+        <path d="M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4Z" />
+        <path d="M7.5 7.5h.01" />
+      </>
+    ),
+    points: [
+      "You approve the price before anything is booked",
+      "No subscription and no minimum term",
+      "No minimum number of sites: one kiosk, one job",
+    ],
+  },
+  {
+    key: "call-out",
+    title: "No call-out charge with the repair",
+    for: "When we carry out the repair, you pay for the repair.",
+    icon: (
+      <>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+        <path d="m9 12 2 2 4-4" />
+      </>
+    ),
+    points: [
+      TERMS.callOut,
+      TERMS.noRepairVisit,
+      "Emergencies in London: the price and the attendance time before you commit.",
+    ],
+  },
+  {
+    key: "portal",
+    title: "Portal included",
+    for: "Every customer gets the MAINTSUPP portal at no extra cost.",
+    icon: (
+      <>
+        <rect x="3" y="4" width="18" height="14" rx="2" />
+        <path d="M3 9h18M8 22h8M12 18v4" />
+      </>
+    ),
+    points: [
+      "Live status for every job",
+      "Before and after photographs",
+      "Reports and documents in one place",
+    ],
+  },
+];
 
 export function Pricing({ copy = HOME_COPY.pricing }: { copy?: HomeCopy["pricing"] }) {
-  /*
-   * The store count is the single input, and the band follows from it. The
-   * band buttons stay as a keyboard-friendly way to jump between bands, and
-   * setting one moves the slider to that band's low end so the two controls
-   * can never disagree.
-   *
-   * IT OPENS AT FIVE, which is the floor rather than a default — Maintsupp
-   * coordinates portfolios of five sites and above, so the calculator must not
-   * be able to describe a portfolio the business will not take.
-   */
-  const [storeCount, setStoreCount] = useState(SLIDER_MIN);
-  const band = bandForCount(storeCount);
-  const bandId = band.id;
-  const setBandId = (id: Band["id"]) => {
-    const target = BANDS.find((entry) => entry.id === id) ?? BANDS[0];
-    setStoreCount(target.min);
-  };
-
-  const entryBand = ENTRY_BAND;
-  /* Both parts bought separately, against Complete — computed, never typed,
-     and absent in the band that carries no rates. */
-  const saving =
-    band.essential !== null && band.compliance !== null && band.complete !== null
-      ? band.essential + band.compliance - band.complete
-      : null;
-
-  const plural = storeCount === 1 ? "store" : "stores";
-
-  /* The sentence under the slider, for ANY band at ANY count rather than only
-     the current pair — hidden twins of it are what reserve the row's height. */
-  const noteForBand = (entry: Band, count: number) =>
-    `At ${count} ${count === 1 ? "store" : "stores"} you are on the ${entry.label} rate.`;
-
-  const rateFor = (plan: Plan) => band[plan.key] as number | null;
-  const monthlyFor = (plan: Plan) => {
-    const rate = rateFor(plan);
-    return rate === null ? null : rate * storeCount;
-  };
-
   return (
     <section className="section section--tint" id="pricing">
       <div className="wrap">
@@ -270,235 +182,78 @@ export function Pricing({ copy = HOME_COPY.pricing }: { copy?: HomeCopy["pricing
           <p className="lede">{copy.lede}</p>
         </div>
 
-        {/* The calculator: one number in, every price on the section follows. */}
-        <div className="pricing__calc reveal">
-          <div className="pricing__calc-top">
-            <label htmlFor="pricing-store-count">How many stores do you have?</label>
-            <p className="pricing__readout">
-              <strong>{storeCount}</strong>
-              <span>{plural}</span>
-            </p>
-          </div>
-          <input
-            id="pricing-store-count"
-            className="pricing__slider"
-            type="range"
-            min={SLIDER_MIN}
-            max={SLIDER_MAX}
-            value={storeCount}
-            onChange={(event) => setStoreCount(Number(event.target.value))}
-            aria-describedby="pricing-band-note"
-          />
-          {/*
-            * ONE VISIBLE SENTENCE, AND A HIDDEN TWIN OF THE LONGEST SENTENCE
-            * EACH BAND CAN PRODUCE, ALL IN ONE GRID CELL.
-            *
-            * The buttons below used to move 21px under the thumb that had just
-            * pressed them, because a band note is one line for some bands and
-            * two or three for others. That was fixed twice with min-height
-            * media queries measured against the copy of the day, and a rebuild
-            * broke it a third time.
-            *
-            * So the height is no longer measured. A grid row is as tall as its
-            * tallest item, so hidden twins reserve exactly what the longest
-            * sentence needs at any width, with nothing to re-measure when a
-            * word changes. The sentence is one line now rather than three, and
-            * the twins stay: the mechanism costs nothing and the next copy
-            * change does not have to remember to reinstate it.
-            *
-            * THE TWINS CARRY EACH BAND'S HIGHEST STORE COUNT, not the current
-            * one, because the count changes the wrap as well. With
-            * `tabular-nums` in the stylesheet every two-digit count is exactly
-            * as wide as every other, so a twin at the top of its band covers
-            * every count inside it.
-            */}
-          <p id="pricing-band-note" className="pricing__band-note">
-            <span data-active="true">{noteForBand(band, storeCount)}</span>
-            {BANDS.map((entry) => (
-              <span key={entry.id} aria-hidden="true">
-                {noteForBand(entry, Math.min(entry.max, SLIDER_MAX))}
-              </span>
-            ))}
-          </p>
-
-          {/*
-            THE FULL RATE CARD, behind the page's existing disclosure pattern.
-
-            `<details>`/`<summary>` is what the FAQ uses, so this introduces no
-            new component and no JavaScript — and it collapses by default
-            because the two cards below are the decision, not the twelve-cell
-            table. The table scrolls inside its own container rather than
-            widening the page; §10 of the brief asks for exactly that, and the
-            stylesheet does it with one `overflow-x`.
-          */}
-          <details className="ratecard">
-            <summary className="ratecard__toggle">See the full rate card</summary>
-            <div className="ratecard__scroll">
-              <table className="ratecard__table">
-                <caption className="vh">
-                  Coordination rates per store per month, by portfolio size
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Per store / month</th>
-                    {BANDS.map((entry) => (
-                      <th scope="col" key={entry.id}>
-                        {entry.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {MAIN_PLANS.map((plan) => (
-                    <tr key={plan.key}>
-                      <th scope="row">{plan.title}</th>
-                      {BANDS.map((entry) => (
-                        <td key={entry.id}>{rateCell(entry[plan.key])}</td>
-                      ))}
-                    </tr>
-                  ))}
-                  <tr>
-                    <th scope="row">Compliance only</th>
-                    {BANDS.map((entry) => (
-                      <td key={entry.id}>{rateCell(entry.compliance)}</td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p className="ratecard__note">
-              Compliance administration on its own:{" "}
-              {BANDS.map((entry) => rateCell(entry.compliance)).join(" · ")}.
-            </p>
-          </details>
-        </div>
-
-        <div
-          className="switcher pricing__bands reveal"
-          role="group"
-          aria-label="Choose your portfolio size"
-        >
-          {BANDS.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              className={entry.id === bandId ? "is-on" : undefined}
-              aria-pressed={entry.id === bandId}
-              onClick={() => setBandId(entry.id)}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-
         <div className="pricing__plans reveal">
           {/*
-            THE TWO PLANS THE READER IS CHOOSING BETWEEN. One grid, every width
-            — the nineteen-row comparison matrix this used to swap to below
-            768px existed because THREE stacked cards ran to 2294px on a phone,
-            and two do not.
+            THREE THINGS EVERY JOB GETS, not three options to choose between —
+            which is why none is highlighted. `.pkgs` is an auto-fit grid, so
+            they sit three across on a desktop and stack on a phone with no
+            breakpoint of their own.
+
+            `alignItems: "stretch"` is the one override. The grid aligns its
+            cards to the top, which suited plan cards of deliberately different
+            weight; three equal statements with a ragged bottom edge read as
+            three sizes of thing. It is set here rather than in marketing.css
+            because it belongs to this arrangement of cards and to nothing else
+            that uses the class.
           */}
-          <div className="pkgs pkgs--two">
-            {MAIN_PLANS.map((plan) => {
-              const isComplete = plan.key === "complete";
-              const rate = rateFor(plan);
-              const monthly = monthlyFor(plan);
-              return (
-                <article className={`pkg${isComplete ? " is-match" : ""}`} key={plan.key}>
-                  {isComplete && saving !== null && (
-                    <span className="pkg__flag">Most popular — save £{saving} per store</span>
-                  )}
-                  <PlanIcon icon={plan.icon} />
-                  <h3>{plan.title}</h3>
-                  <p className="pkg__for">{plan.for}</p>
-                  <Price amount={rate} was={entryBand[plan.key]} />
-                  {monthly !== null ? (
-                    <p className="pkg__total">
-                      ≈ <strong>£{money(monthly)}</strong>
-                      /month for {storeCount} {plural}
-                    </p>
-                  ) : (
-                    <p className="pkg__total pkg__total--talk">
-                      Priced against your own portfolio at the review.
-                    </p>
-                  )}
-                  <ul className="pkg__list">
-                    {cardPoints(plan).map((point) => (
-                      <li key={point}>
-                        <Tick />
-                        <span>{point}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              );
-            })}
+          <div className="pkgs" style={{ alignItems: "stretch" }}>
+            {CARDS.map((card) => (
+              <article className="pkg" key={card.key}>
+                <CardIcon icon={card.icon} />
+                <h3>{card.title}</h3>
+                <p className="pkg__for">{card.for}</p>
+                <ul className="pkg__list">
+                  {card.points.map((point) => (
+                    <li key={point}>
+                      <Tick />
+                      <span>{point}</span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
           </div>
 
           {/*
-            COMPLIANCE ADMINISTRATION, AS SMALL PRINT RATHER THAN A CARD.
+            THE MANAGED PLAN, AS ONE LINE RATHER THAN A CARD.
 
-            It is part of Complete and is offered alone for an estate that
-            already has its repairs handled. As an equal card it asked the
-            reader to compare three things when the decision is between two, so
-            what remains is the one sentence that tells somebody in that
-            position the option exists, and the rate card behind the disclosure
-            above, which prices it at every band.
+            It still exists and a portfolio can still have it, but it is no
+            longer what the page sells, so it is told to the reader it applies
+            to and priced in a conversation. The sentence is `TERMS.managedPlan`
+            — the same one the FAQ and the landing pages quote.
           */}
           <p className="pkgfine">
-            Compliance administration is also available on its own, where repairs are
-            already handled — from £{entryBand.compliance} per store / month, portfolios
-            of five sites and above.
+            {TERMS.managedPlan} It adds one named coordinator, planned maintenance and
+            compliance dates across every site. <Link href="/contact">Ask us about a managed plan</Link>.
           </p>
         </div>
 
         <div className="pkgfoot reveal">
           <ul className="pricing__notes">
+            {/*
+              NOT REPEATED HERE: the call-out terms. They are the second card,
+              word for word, an inch above this list — a note saying the same
+              two sentences again was the page talking to itself.
+            */}
+            <li>{TERMS.perJob} Nothing is booked until you approve it.</li>
             <li>
-              Maintsupp coordinates portfolios of five sites and above. Portfolio minimum
-              £{PORTFOLIO_MINIMUM} per month.
+              Kiosk installs and removals, strip-outs, fit-outs and other projects are
+              scoped and quoted separately.
             </li>
             <li>
-              Includes {INCLUDED_JOBS} coordinated jobs per store per month, pooled across
-              your portfolio over a rolling quarter. Additional coordinated jobs £
-              {ADDITIONAL_JOB} each.
+              To get a price, <Link href="/#report">report the job</Link> with a photograph, or
+              call us. We confirm the price and the time with you.
             </li>
-            <li>
-              If a portfolio exceeds its allowance for two consecutive quarters, we move it
-              to a lower per-store band rather than keep charging per job.
-            </li>
-            <li>
-              Onboarding and asset capture £{ONBOARDING_PER_STORE} per store, capped at £
-              {money(ONBOARDING_CAP)} — covering site register, access rules, asset capture
-              and certificate baseline.
-            </li>
-            <li>Out-of-hours and P1 escalation £{OUT_OF_HOURS_P1} per incident.</li>
-            <li>
-              Projects and kiosk works are scoped and quoted separately — a fixed fee, or{" "}
-              {PROJECT_PERCENT}% of third-party project spend, minimum £{PROJECT_MINIMUM}.
-            </li>
-            <li>
-              Sites added mid-term are charged pro-rata at your current band, plus £
-              {ONBOARDING_PER_STORE} onboarding.
-            </li>
-            <li>Service hours Mon–Fri, 8:30am–5:30pm.</li>
-            <li>Three-month initial term, then 30 days&rsquo; notice.</li>
-            {/* Contractor invoices are the other half of what a reader pays and
-                they are not ours, so the note says so where the fees are. */}
-            <li>
-              Contractor invoices are separate and come from the contractor at their own
-              agreed rates. Maintsupp charges the coordination fee and nothing on top.
-            </li>
+            <li>Office hours Mon–Fri, 8:30am–5:30pm. Emergencies in London, 24 hours.</li>
             {/*
               THE POSITIVE FORM, deliberately. "+ VAT" and every synonym for it
               are withdrawn from this site; what replaces them is not silence
-              but the statement that the number shown is the number payable.
+              but the statement that the price quoted is the price payable.
             */}
             <li>
-              Prices shown are the total payable. MAINTSUPP LTD is not currently VAT
+              Prices quoted are the total payable. MAINTSUPP LTD is not currently VAT
               registered.
             </li>
-            <li>Final quote confirmed at your free portfolio review.</li>
           </ul>
         </div>
       </div>

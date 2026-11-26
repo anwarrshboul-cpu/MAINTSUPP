@@ -1070,8 +1070,14 @@ export function ReportJob({ copy = HOME_COPY.reportJob }: { copy?: HomeCopy["rep
                 <rect x="3" y="11" width="18" height="11" rx="2" />
                 <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
-              For existing Maintsupp clients. Not a client yet?{" "}
-              <a href="#review">Book a free portfolio review</a> below.
+              {/* One span, so the sentence wraps as one block. `.qj__note` is a
+                  flex row; left bare, the text, the link and the full stop were
+                  three flex items with a gap between each. */}
+              <span>
+                No account needed. Send the job and we confirm the price and the time
+                with you before any work starts. Running several sites?{" "}
+                <a href="#review">Book a free portfolio review</a>.
+              </span>
             </p>
             <p
               className={`formstatus${status.tone ? ` ${status.tone}` : ""}`}

@@ -49,21 +49,26 @@ import { HOME_COPY, type HomeCopy } from "./copy";
  */
 
 /**
- * THE BANDS THE PRICING SECTION USES, PLUS THE ONE IT DOES NOT SERVE.
+ * THE SIZES A BUYER ACTUALLY HAS, SMALLEST FIRST.
  *
- * These were "1–5", "6–10", "11–25", "26+" — invented for this form and
- * matching nothing else on the page, so a reader who had just used the
- * calculator had to translate their own portfolio into a second vocabulary,
- * and a lead arrived in a band the rate card could not price.
+ * These were "5–10", "11–25", "26–50", "51+" and, last, "Fewer than 5" — the
+ * pricing calculator's four bands plus "the honest way to say no" to anybody
+ * under the five-site floor. Selecting that last option showed a note telling
+ * the reader the business coordinated portfolios of five sites and above.
  *
- * `UNDER_MINIMUM` is last on purpose. It is not a band — it is the honest
- * option for somebody below the five-site floor, and selecting it shows the
- * note rather than blocking the submit: a three-site operator opening two
- * more this year is worth hearing from, and telling them so is better than a
- * validation error they cannot fix.
+ * REVERSED 2026-11-25, with the pricing section. The published plans and their
+ * floor are withdrawn (`./rates.ts`): a single shop or kiosk is now the buyer
+ * the site is written for, so the smallest size is FIRST, it is a size rather
+ * than a refusal, and the note it shows points that reader at the quickest
+ * route to a price instead of turning them away. The four larger ranges are
+ * unchanged, so a lead from a portfolio still arrives in the same words.
+ *
+ * The value is free text to `/api/leads` (`siteRange`, forty characters), and
+ * the leads inbox prints it followed by "sites" — which is why the first
+ * option is a range and not the numeral one.
  */
-const UNDER_MINIMUM = "Fewer than 5";
-const SITE_RANGES = ["5–10", "11–25", "26–50", "51+", UNDER_MINIMUM] as const;
+const SMALLEST_RANGE = "1–4";
+const SITE_RANGES = [SMALLEST_RANGE, "5–10", "11–25", "26–50", "51+"] as const;
 
 const REVIEW_POINTS = [
   "A review of how repairs are reported and chased today",
@@ -494,19 +499,28 @@ export function FinalCta({ copy = HOME_COPY.finalCta }: { copy?: HomeCopy["final
                 </select>
                 {errorFor("sites") && <p className="field__err">{errorFor("sites")}</p>}
                 {/*
-                  SAYS NO, AND STILL TAKES THE ENQUIRY.
+                  SAYS YES, AND POINTS AT THE FASTER DOOR.
 
-                  The floor is five sites and the page says so in three other
-                  places, so a four-site operator has to be told — but told, not
-                  stopped. `aria-live` because the note appears in response to a
-                  choice the reader just made, and a message that arrives
-                  silently below a select is a message half the readers of this
-                  form never get.
+                  This note used to tell a reader with fewer than five sites
+                  that the business did not take them. There is no floor any
+                  more, so it tells them the opposite — and that if what they
+                  want is one job priced, the Report a Job form gets them there
+                  without a conversation first. The link is `/#report` rather
+                  than `#report` because this form is also the whole of
+                  /contact, where the report form is not on the page. It
+                  still never blocks the submit. `aria-live` because the note
+                  appears in response to a choice the reader just made, and a
+                  message that arrives silently below a select is a message half
+                  the readers of this form never get.
                 */}
                 <p className="field__note" aria-live="polite">
-                  {sites === UNDER_MINIMUM
-                    ? "Maintsupp coordinates portfolios of five sites and above. If you're opening more sites this year, send the form anyway and we'll pick it up when you reach five."
-                    : ""}
+                  {sites === SMALLEST_RANGE ? (
+                    <>
+                      One site is enough. If you need a single job priced,{" "}
+                      <Link href="/#report">Report a Job</Link> is the quickest way: send the
+                      job and we confirm the price and the time.
+                    </>
+                  ) : null}
                 </p>
               </div>
 

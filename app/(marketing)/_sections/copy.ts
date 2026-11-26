@@ -73,10 +73,14 @@ export const HOME_COPY = {
   whoWeHelp: {
     eyebrow: "Who we help",
     heading: "Built for retailers and commercial operators without an in-house FM team.",
-    /* "Typically 5–50 locations" stays word for word: the pricing calculator
-       opens on the bottom of that range and `tests/homepage-v3.test.mjs` checks
-       the two agree. What is added is the buyer the range never covered. */
-    note: "Typically 5–50 locations spread across regions on a monthly plan — and single shops and kiosks in London, one job at a time.",
+    /* REWRITTEN 2026-11-25, with the pricing section. It read "Typically 5–50
+       locations spread across regions on a monthly plan — and single shops and
+       kiosks in London, one job at a time", which put the subscription first
+       and the one-job buyer second. The published plans are withdrawn
+       (`./rates.ts`), so the order is now the order the business sells in: one
+       job first, the managed plan on request. The range it used to agree with —
+       the calculator's five-store floor — no longer exists. */
+    note: "From one shop or kiosk in London to a portfolio of 50 locations across regions. Start with a single job; a managed monthly plan is available on request.",
   },
 
   /* Services */
@@ -114,10 +118,18 @@ export const HOME_COPY = {
   },
 
   /* Pricing */
+  /* REWRITTEN 2026-11-25. The heading was "Simple per-store pricing. No hidden
+     markups." and the lede promised that contractors invoice directly and are
+     never marked up. Both described the monthly coordination fee, which the
+     site no longer publishes. A one-off job is quoted as one price, so the
+     no-markup claim is gone with the model it was true of — it is not restated
+     in a weaker form, because for a single quoted price it would not be a
+     claim the reader could check. The lede is the offer in the owner's words:
+     we confirm the price and the time. */
   pricing: {
     eyebrow: "Pricing",
-    heading: "Simple per-store pricing. No hidden markups.",
-    lede: "Contractors invoice you directly at their agreed rates — we never mark up trades. You pay one clear coordination fee.",
+    heading: "Pay per job. The price is agreed before work starts.",
+    lede: "Tell us what needs doing. We confirm the price and the time before anything is booked — with no subscription, no minimum term and no call-out charge when we carry out the repair.",
   },
 
   /* Case study */
@@ -145,14 +157,14 @@ export const HOME_COPY = {
   faq: {
     eyebrow: "Straight answers",
     heading: "Frequently asked questions",
-    lede: "The questions we are asked before every portfolio review, answered the way we answer them on the call.",
+    lede: "The questions we are asked most, answered the way we answer them on the call.",
   },
 
   /* Contact and booking */
   finalCta: {
     eyebrow: "Contact us or book a portfolio review",
     heading: "Not sure where your maintenance is leaking time and money?",
-    lede: "Book a free portfolio review — 30 minutes, no obligation. Or use the same form to tell us what you need.",
+    lede: "Tell us what you need and we will come back to you with a price. Running several sites? Book a free portfolio review — 30 minutes, no obligation.",
     /* Was "best suited to multi-site commercial operators … rather than one-off
        domestic repairs", which turned away the one-off COMMERCIAL job the owner
        now takes. The line it draws is still drawn — no domestic work. */
@@ -253,7 +265,7 @@ export const SEO_COPY = {
        nothing about what the questions were. Still bare: the template adds the
        brand once. */
     title: "FAQs: Commercial Maintenance, Contractors & Costs",
-    description: "Straight answers on one-off jobs, 24/7 emergency call-outs, contractors, pricing and compliance for shops and multi-site commercial portfolios.",
+    description: "Straight answers on one-off jobs, pay-per-job pricing, 24/7 emergency call-outs, contractors and compliance for shops, kiosks and multi-site portfolios.",
   },
 } as const;
 

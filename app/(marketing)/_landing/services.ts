@@ -1,4 +1,5 @@
 import type { LandingPage } from "./types.ts";
+import { MANAGED_PLAN_MINIMUM_SITES, TERMS, inWords } from "../_sections/rates.ts";
 
 /**
  * THE NINE LONDON SERVICE PAGES.
@@ -35,6 +36,21 @@ const WHO_ANSWER =
 
 const PRICE_ANSWER =
   "Each job is quoted individually, and you have the price before any work is booked.";
+
+/*
+ * THE CALL-OUT PROMISE AND THE MANAGED PLAN ARE QUOTED, NOT TYPED (2026-11-25).
+ *
+ * Until that date these pages sent a reader to "the per-store rates published on
+ * the pricing page" and to "the out-of-hours fee", and said a plan carried "no
+ * markup on trades". The owner withdrew the published plans (`_sections/rates.ts`
+ * records the decision), so a London page that still promised a published rate
+ * was promising a page that no longer shows one. The sentences that replaced
+ * them come from `TERMS`, the same object the pricing cards and the FAQ read, so
+ * what a search visitor is told about a call-out is word for word what the
+ * homepage tells them.
+ */
+const CALL_OUT_ANSWER = `${TERMS.callOut} ${TERMS.noRepairVisit}`;
+const PLAN_ANSWER = TERMS.managedPlan;
 
 export const SERVICE_PAGES: readonly LandingPage[] = [
   /* ---------------------------------------------------------------- */
@@ -378,7 +394,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       { q: "How much does a shop fit-out cost in London?", a: `It depends on the size of the unit, the finish and how many trades are involved. ${PRICE_ANSWER}` },
       {
         q: "Can you look after the shop once it is open?",
-        a: "Yes. Repairs can be booked one job at a time, and portfolios of five sites and above can go on a monthly coordination plan with published per-store pricing.",
+        a: `Yes. Repairs are booked one job at a time, each priced before work starts. ${PLAN_ANSWER}`,
       },
       { q: "Who carries out the work?", a: WHO_ANSWER },
       { q: "Do you fit out homes?", a: DOMESTIC_ANSWER },
@@ -473,7 +489,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         q: "Do you carry out EICRs for shops?",
         a: "The inspection and the certificate are carried out by qualified electrical contractors. We arrange the visit, chase the certificate, track any remedial works and record the next due date.",
       },
-      { q: "How much does a commercial electrician cost in London?", a: `${PRICE_ANSWER} For an emergency you are told how the call-out is charged before anyone is sent.` },
+      { q: "How much does a commercial electrician cost in London?", a: `${PRICE_ANSWER} ${CALL_OUT_ANSWER} For an emergency you have the price before anyone is sent.` },
       { q: "Do you work inside shopping centres?", a: CENTRES_ANSWER },
       { q: "Do you take domestic electrical work?", a: DOMESTIC_ANSWER },
     ],
@@ -827,7 +843,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "We tell you what happens next",
-          body: "The trade being sent, the realistic time to attend and how the call-out is charged — before you commit.",
+          body: "The trade being sent, the realistic time to attend and the price — before you commit.",
         },
         {
           title: "Made safe",
@@ -861,7 +877,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       },
       {
         q: "What does an emergency call-out cost?",
-        a: "You are told how the call-out is charged before anyone is sent. Clients on a monthly coordination plan pay the out-of-hours fee published on the pricing page, and the contractor’s own charge for the work.",
+        a: `You have the price before anyone is sent. ${CALL_OUT_ANSWER}`,
       },
       {
         q: "Do I need a contract to use the emergency line?",
@@ -899,10 +915,10 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     crumb: "Retail and shop maintenance",
     title: "Retail & Shop Maintenance Services London",
     description:
-      "Retail maintenance in London for shops, kiosks and stores: reactive repairs, planned maintenance and compliance. One-off jobs or a monthly plan per store.",
+      "Retail maintenance in London for shops, kiosks and stores: reactive repairs, planned maintenance and compliance. Pay per job, priced before work starts.",
     eyebrow: "Retail maintenance",
     h1: "Retail and shop maintenance in London",
-    lede: "Reactive repairs, planned maintenance and compliance for shops, kiosks and retail units across London. Use MAINTSUPP for one job, or put every store on a monthly plan with published per-store pricing — either way you deal with one coordinator and see the photo evidence before a job is closed.",
+    lede: "Reactive repairs, planned maintenance and compliance for shops, kiosks and retail units across London. Book one job at a time, each priced before work starts, or ask about a managed plan for a portfolio — either way you deal with one coordinator and see the photo evidence before a job is closed.",
     photo: {
       src: "/assets/pages/page-services-hero-v1.jpg",
       alt: "A tradesperson in a hi-vis vest on a stepladder repairing an illuminated shopfront sign on a rain-wet high street at dusk",
@@ -944,7 +960,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "Reporting",
-          body: "A client portal and a monthly report on jobs, spend and compliance for stores on a plan.",
+          body: "A client portal for every customer, and a monthly report on jobs, spend and compliance for portfolios on a managed plan.",
           href: "/how-it-works",
           linkLabel: "How it works",
         },
@@ -955,8 +971,8 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       heading: "One job, or every store",
       items: [
         "One-off jobs: any shop, kiosk or retail unit in London, quoted before work starts",
-        "Monthly multi-site coordination: portfolios of five sites and above, with the per-store rates published on the pricing page",
-        "On a plan, contractors invoice you directly at their own rates, with no markup on trades",
+        `Managed monthly plan: arranged on request, for portfolios of ${inWords(MANAGED_PLAN_MINIMUM_SITES)} sites and above`,
+        "On a managed plan, the contractors you already use keep invoicing you directly at the rates you agreed",
         "Keep the contractors you already trust, and use the vetted network where you have no cover",
         "Photo evidence checked before any job is closed",
       ],
@@ -964,7 +980,7 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
     faqs: [
       {
         q: "Do you maintain single shops, or only chains?",
-        a: "Both. A single shop or kiosk can book a one-off job. Portfolios of five sites and above can go on a monthly coordination plan.",
+        a: `Both. A single shop or kiosk can book a one-off job, priced before work starts. ${PLAN_ANSWER}`,
       },
       {
         q: "Who is responsible for shop repairs, the tenant or the landlord?",
@@ -979,8 +995,13 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
         a: "It is the maintenance side of facilities management: the repairs, the planned maintenance and the compliance visits, coordinated for retailers who have no facilities team of their own.",
       },
       {
-        q: "Do you mark up contractors’ prices?",
-        a: "On a monthly plan, no: the contractor invoices you directly at their agreed rate and MAINTSUPP charges its coordination fee and nothing on top. A one-off job is quoted before work starts.",
+        /* Was "Do you mark up contractors’ prices?", answered with the
+           coordination fee "and nothing on top". That fee is withdrawn, and a
+           one-off job is one price that includes MAINTSUPP's own margin, so
+           the honest question is who is paid, not whether a markup exists. The
+           wording is the shared FAQ's answer to the same question. */
+        q: "Who pays the contractor?",
+        a: "For a one-off job you approve one price before work starts, and that is the price you pay. On a managed monthly plan, contractors you already use can keep invoicing you directly at the rates you agreed with them.",
       },
       {
         q: "Can we keep our existing contractors?",
@@ -988,13 +1009,13 @@ export const SERVICE_PAGES: readonly LandingPage[] = [
       },
       {
         q: "How much does retail maintenance cost?",
-        a: "The monthly per-store rates are published on the pricing page. A one-off job is quoted individually before work starts.",
+        a: `${PRICE_ANSWER} There is no subscription and no minimum term. ${CALL_OUT_ANSWER}`,
       },
       { q: "Who carries out the work?", a: WHO_ANSWER },
       { q: "Do you work inside shopping centres?", a: CENTRES_ANSWER },
     ],
     related: [
-      { href: "/pricing", label: "Pricing for monthly plans" },
+      { href: "/pricing", label: "How pricing works" },
       { href: "/how-it-works", label: "How a job runs" },
       { href: "/case-study", label: "Case study: 27 stores" },
       { href: "/london/emergency-repairs", label: "24-hour emergency repairs" },

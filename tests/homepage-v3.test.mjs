@@ -212,7 +212,7 @@ test("what this replaces names things, and does not re-run the comparison table"
 
 /* ── 6. Pricing, with no conflicting old pricing left behind ─────────────── */
 
-test("there is exactly one price table on the marketing site", async () => {
+test("no file on the marketing site states a price, and the FAQ agrees with the page", async () => {
   /*
    * THE DEFECT THIS CLOSES, and it was live. The FAQ answered "What does it
    * cost?" with "We do not publish fixed fees" — written when the site
@@ -220,64 +220,66 @@ test("there is exactly one price table on the marketing site", async () => {
    * three plans across three bands. A reader who read both was told the page
    * they were looking at did not exist.
    *
-   * The rule is not "no prices in the FAQ". It is that `pricing.tsx` is the
-   * only file allowed to state one, because a second copy anywhere is a second
-   * thing to keep true, and the one that goes stale is never the one somebody
-   * is looking at.
+   * The rule was that `pricing.tsx` is the only file allowed to state a
+   * figure, because a second copy anywhere is a second thing to keep true.
+   *
+   * RE-POINTED 2026-11-25, AND THE RULE IS STRICTER FOR IT. The owner withdrew
+   * the published plans: every job is priced individually and the site prints
+   * no figure at all. So the one exception is gone — `pricing.tsx` is read
+   * like every other file — and what this test was called, "there is exactly
+   * one price table on the marketing site", is now "there is none".
    */
   const offenders = [];
   for (const [name, source] of await marketingSources()) {
-    if (name.endsWith("pricing.tsx") || name.endsWith(".css")) continue;
-    const figures = [...rendered(source).matchAll(/£\d/g)];
+    if (name.endsWith(".css")) continue;
+    const figures = [...rendered(source).matchAll(/£\s?\d/g)];
     if (figures.length) offenders.push(`${name} (${figures.length})`);
   }
-  assert.deepEqual(offenders, [], "only pricing.tsx may quote a figure");
-
-  const content = await read(`${SECTIONS_DIR}/content.ts`);
-  assert.doesNotMatch(
-    rendered(content),
-    /do not publish fixed fees/,
-    "the FAQ must not deny the prices the page publishes",
-  );
-  const cost = content.slice(content.indexOf('"q": "What does it cost?"'));
-  /* "every rate is published on this page" now, because the answer quotes the
-     two entry rates as well as pointing at the section. What is being held is
-     that the FAQ agrees the prices exist and says where they are — not one
-     particular wording of it. */
-  assert.match(
-    cost.slice(0, cost.indexOf("\n  }")),
-    /(?:every rate is|rates are) published on this page/,
-    "it must point at the one place the rates live",
-  );
+  assert.deepEqual(offenders, [], "no file may quote a figure, pricing.tsx included");
 
   /*
-   * AND THE RULE ABOVE GOT STRONGER RATHER THAN WEAKER when that answer began
-   * quoting figures.
+   * THE SAME DEFECT, FROM THE OTHER SIDE. The contradiction the first version
+   * of this test caught was an FAQ denying prices the page printed. With the
+   * prices withdrawn, the stale sentence is the opposite one: an answer still
+   * saying the rates are "published on this page" would send a reader looking
+   * for a table that is not there.
+   */
+  const content = await read(`${SECTIONS_DIR}/content.ts`);
+  const cost = content.slice(content.indexOf('"q": "What does it cost?"'));
+  const answer = rendered(cost.slice(0, cost.indexOf("\n  }")));
+  assert.doesNotMatch(
+    answer,
+    /published on this page/,
+    "the FAQ must not point at rates the page no longer prints",
+  );
+  assert.doesNotMatch(rendered(content), /per store per month/, "nor price anything by the store");
+
+  /*
+   * AND WHAT REPLACED THE DERIVED FIGURES IS DERIVED SENTENCES.
    *
-   * The commercial brief requires it to name "Essential from £60 per store,
-   * Complete from £100 per store", and separately requires every figure to
-   * agree across the cards, the rate card, the totals, the footnotes and this
-   * sentence. Typing them into `content.ts` would have tripped the offenders
-   * check above — which exists because a second typed copy is a second thing
-   * to keep true. So the NUMBERS moved to `rates.ts`, and both files
-   * interpolate them: the check passes for the right reason, because a `£${…}`
-   * has no digit after the sign.
+   * When this answer began quoting rates, the NUMBERS moved to `rates.ts` and
+   * both files interpolated them, so the offenders check passed for the right
+   * reason. The same file now holds the commercial TERMS as sentences, and the
+   * answer quotes them for the same reason: the pricing cards and this answer
+   * cannot then word the offer two ways.
    *
-   * These three pins are what stop that being undone by somebody
-   * "simplifying" the answer back to a literal.
+   * These pins are what stop that being undone by somebody "simplifying" the
+   * answer back to typed prose.
    */
   const rates = await read(`${SECTIONS_DIR}/rates.ts`);
   assert.doesNotMatch(
     rendered(rates),
     /£/,
-    "rates.ts holds quantities; the two files that render them own the sign",
+    "rates.ts holds the terms and one count, and no currency sign",
   );
-  assert.match(
-    rendered(content),
-    /\$\{ENTRY_BAND\.essential\}/,
-    "the cost answer must derive the entry rate, never restate it",
-  );
-  assert.match(rendered(content), /\$\{ENTRY_BAND\.complete\}/);
+  const pricing = rendered(await read(`${SECTIONS_DIR}/pricing.tsx`));
+  for (const term of ["perJob", "callOut", "noRepairVisit", "managedPlan"]) {
+    assert.ok(
+      answer.includes(`\${TERMS.${term}}`),
+      `the cost answer must quote TERMS.${term}, never restate it`,
+    );
+    assert.ok(pricing.includes(`TERMS.${term}`), `and the pricing section must quote TERMS.${term} too`);
+  }
 });
 
 /* ── 7. The FAQ, shared rather than copied ───────────────────────────────── */
@@ -410,36 +412,41 @@ test("Report a Job is last, and moving it changed nothing about how it submits",
   assert.match(form, /id="report"/, "and the anchor travels with the section");
 });
 
-/* ── 10. The slider ──────────────────────────────────────────────────────── */
+/* ── 10. The slider (withdrawn with the published plans) ─────────────────── */
 
-test("the pricing calculator opens at five stores", async () => {
-  /* RE-POINTED AT `rates.ts`. `SLIDER_MIN` and `SLIDER_MAX` moved there with
-     the band table when the cost FAQ began deriving the entry rates too — see
-     the header of that file for why. The claim is unchanged; only the file
-     that holds the number is. `pricing.tsx` is still where the opening value
-     is bound to the floor, so that half stays pinned there. */
-  const pricing = await read(`${SECTIONS_DIR}/pricing.tsx`);
-  const rates = await read(`${SECTIONS_DIR}/rates.ts`);
+test("there is no pricing calculator, and the page says it serves from one site up", async () => {
   /*
-   * RE-POINTED, at a stronger claim. This pinned the literal `useState(5)`
-   * beside `SLIDER_MIN = 1`, which made "opens at five" and "the control starts
-   * at one" two separate facts that could drift. The approved bands now start
-   * AT five — 5–10 is the bottom band — so the floor and the opening value are
-   * the same number, and the source says so once: `useState(SLIDER_MIN)`.
+   * RE-POINTED 2026-11-25, on the owner's decision. This held the slider: its
+   * floor and its opening value were one number (five, `SLIDER_MIN` in
+   * `rates.ts`), its range reached past the top band, and the "who we help"
+   * note named the same floor — "Typically 5–50 locations" — so the calculator
+   * opened on the bottom of the range the page claimed to serve.
    *
-   * The range also had to grow. It ended at 40, and the top band is 51+, so a
-   * reader could not reach "Book a Portfolio Review" by dragging.
+   * The published plans are withdrawn and the calculator went with them. The
+   * property worth keeping is the agreement between the pricing section and
+   * the note about who the page is for, and it is kept: there is no control
+   * left with a floor, and the note starts at ONE site, which is where the
+   * offer now starts.
    */
-  assert.match(rates, /export const SLIDER_MIN = 5;/, "five, and it is the floor as well as the opening value");
-  assert.match(pricing, /useState\(SLIDER_MIN\)/, "opened from the floor, not from a second literal");
-  assert.match(rates, /export const SLIDER_MAX = 60;/, "the range must reach past the 51+ band");
-  /* Five is the number the page already claims to serve from. */
-  /* RE-POINTED (decision L): the section's note is data now — `HOME_COPY.whoWeHelp.note`
-     in `_sections/copy.ts` — so the number is checked there, and the section is
-     checked to be drawing it. */
+  const pricing = rendered(await read(`${SECTIONS_DIR}/pricing.tsx`));
+  const rates = rendered(await read(`${SECTIONS_DIR}/rates.ts`));
+  assert.doesNotMatch(rates, /SLIDER_M(?:IN|AX)/, "no slider bounds are left to keep in step");
+  assert.doesNotMatch(pricing, /useState|type="range"/, "and no control is left to open at a floor");
+  /* The section's note is data — `HOME_COPY.whoWeHelp.note` in
+     `_sections/copy.ts` (decision L) — so the words are checked there, and the
+     section is checked to be drawing them. */
   const who = await read(`${SECTIONS_DIR}/who-we-help.tsx`);
   const whoCopy = await read(`${SECTIONS_DIR}/copy.ts`);
-  assert.match(whoCopy, /Typically 5–50 locations/, "the calculator opens on the bottom of that range");
+  assert.match(
+    whoCopy,
+    /From one shop or kiosk in London to a portfolio of 50 locations/,
+    "the note starts where the offer does",
+  );
+  assert.doesNotMatch(
+    rendered(whoCopy),
+    /Typically 5–50 locations/,
+    "and no longer names a floor the business does not have",
+  );
   assert.match(who, /\{copy\.note\}/, "and the section renders that note");
 });
 

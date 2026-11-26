@@ -151,13 +151,22 @@ export function FeatureRow({
   );
 }
 
-/** The closing band on every page but Contact, which IS the form. */
+/**
+ * The closing band on every page but Contact, which IS the form.
+ *
+ * `primary` exists for one caller, `/pricing` (2026-11-25): a page that tells
+ * a reader they pay per job has to end on the way to get a job priced, not on
+ * a portfolio review. Every other page leaves it out and keeps the booking
+ * button, which is why it is optional rather than a second component.
+ */
 export function PageCta({
   heading = "Want to see how this would run across your sites?",
   lede = "Book a free portfolio review — 30 minutes, no obligation. Or tell us what you need and we will come back to you.",
+  primary,
 }: {
   heading?: string;
   lede?: string;
+  primary?: { href: string; label: string };
 }) {
   return (
     <section className="section section--dark pagecta">
@@ -168,7 +177,13 @@ export function PageCta({
           <p className="lede">{lede}</p>
         </div>
         <div className="pagecta__actions">
-          <BookingButton className="btn btn--primary btn--lg" />
+          {primary ? (
+            <Link className="btn btn--primary btn--lg" href={primary.href}>
+              {primary.label}
+            </Link>
+          ) : (
+            <BookingButton className="btn btn--primary btn--lg" />
+          )}
           <Link className="btn btn--outline btn--lg" href="/contact">
             Contact us
           </Link>
