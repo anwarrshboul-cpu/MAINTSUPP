@@ -120,9 +120,9 @@ export function ContractorChoice({ copy = HOME_COPY.yourContractors }: { copy?: 
         */}
         <p className="note choice__note reveal">
           Most portfolios run a mix, and the split is yours to set — per trade, per region
-          or per site, changed whenever you want it changed. Whichever panel a contractor
-          comes from, they invoice you directly at their own agreed rates: the coordination
-          fee is the only thing Maintsupp charges for.
+          or per site, changed whenever you want it changed. For a one-off job you approve
+          one price before work starts; on a managed plan, the contractors you bring keep
+          invoicing you directly at the rates you agreed with them.
         </p>
 
         {/* For the other reader of this section (2026-10-04): the contractor

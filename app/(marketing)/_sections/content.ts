@@ -17,7 +17,7 @@
  * The on-page enquiry form is deliberately still there as the fallback for
  * anyone who would rather write than book a slot.
  */
-import { ENTRY_BAND, INCLUDED_JOBS, MINIMUM_SITES, inWords } from "./rates";
+import { MANAGED_PLAN_MINIMUM_SITES, TERMS, inWords } from "./rates";
 
 /*
  * THE BOOKING DESTINATION, WITH THE SLUG THAT ACTUALLY EXISTS.
@@ -417,11 +417,16 @@ export const faq = [
        and because the list below still said the opposite — "below five sites,
        call trades directly" — to exactly that reader. */
     "q": "Do you take one-off jobs for a single shop or kiosk?",
-    "a": "Yes. In London a single shop, kiosk, restaurant or office can book one job — a repair, an electrician, a kiosk install or removal, a strip-out — and each job is quoted before work starts. The monthly coordination plans are for portfolios of five sites and above."
+    /* REWORDED 2026-11-25. It ended "The monthly coordination plans are for
+       portfolios of five sites and above", which made the one-off job sound
+       like the exception to a subscription business. The published plans are
+       withdrawn (`./rates.ts`); the one-off job is now the offer, and the
+       answer says the two things that reader is checking for. */
+    "a": `Yes. In London a single shop, kiosk, restaurant or office can book one job — a repair, an electrician, a kiosk install or removal, a strip-out. ${TERMS.perJob} There is no subscription and no minimum number of sites.`
   },
   {
     "q": "Do you offer 24/7 emergency call-outs?",
-    "a": "Yes, for commercial premises in London. Call 07852 224644 at any hour. We tell you the realistic attendance time before you commit, send a vetted contractor to make the site safe, and arrange the permanent repair. Office hours for everything else are Monday to Friday, 8:30am to 5:30pm."
+    "a": "Yes, for commercial premises in London. Call 07852 224644 at any hour. We tell you the price and the realistic attendance time before you commit, send a vetted contractor to make the site safe, and arrange the permanent repair. Office hours for everything else are Monday to Friday, 8:30am to 5:30pm."
   },
   {
     "q": "Can you cover sites outside London?",
@@ -447,7 +452,12 @@ export const faq = [
   },
   {
     "q": "Who pays the contractor?",
-    "a": "The standard starting model is that the contractor invoices you directly for technical work, and MAINTSUPP invoices its coordination fee separately. Alternative arrangements need separate agreement."
+    /* REWRITTEN 2026-11-25. The answer described the withdrawn model — the
+       contractor invoices you, MAINTSUPP invoices a coordination fee — as "the
+       standard starting model". A one-off job is one approved price, so that
+       is what the first sentence says; direct invoicing survives only where it
+       is still true, for contractors a client brings to a managed plan. */
+    "a": "For a one-off job you approve one price before work starts, and that is the price you pay. On a managed monthly plan, contractors you already use can keep invoicing you directly at the rates you agreed with them; that is set out when the plan is arranged."
   },
   {
     "q": "Do you guarantee a first-time fix?",
@@ -455,44 +465,49 @@ export const faq = [
   },
   {
     "q": "How quickly can mobilisation begin?",
-    "a": "Typically one to two weeks, depending on portfolio size, the quality of your site data, contractor coverage in your regions and any integrations required."
+    "a": "A one-off job can be booked as soon as you approve the price. Setting up a managed plan for a portfolio typically takes one to two weeks, depending on portfolio size, the quality of your site data, contractor coverage in your regions and any integrations required."
   },
   {
     "q": "What does it cost?",
-    /* REWRITTEN FOR HOMEPAGE V3, because it had come to contradict the page.
-       It read: "We do not publish fixed fees, because a small reactive-only
-       estate and a large fully managed portfolio are not the same product."
-       That was true when the site published no prices. The Pricing section now
-       publishes a per-store rate for two plans across four portfolio bands,
-       so the old answer told a reader the page was lying to them.
+    /* REWRITTEN 2026-11-25, for the third time and for the same reason as the
+       second: it had come to contradict the page.
 
-       THE TWO FIGURES ARE INTERPOLATED, NOT TYPED, and that is the whole
-       reason `./rates.ts` exists. The commercial brief asks this answer to
-       quote the entry rates AND asks every figure to agree across the cards,
-       the rate card, the totals, the footnotes and this sentence.
-       `tests/homepage-v3.test.mjs` forbids a typed `£<digit>` outside
-       `pricing.tsx` precisely so a second copy cannot go stale — deriving
-       them satisfies the brief and keeps that rule, because a `£${…}` has no
-       digit after the sign. Never type one in here. */
-    "a": `Coordination is priced per store per month and every rate is published on this page — Essential from £${ENTRY_BAND.essential} per store, Complete from £${ENTRY_BAND.complete} per store, falling as the portfolio grows. It includes ${inWords(INCLUDED_JOBS)} coordinated jobs per store per month, pooled across the whole portfolio, so a bad month at one site doesn't cost you extra. Projects, kiosk works and out-of-hours escalation are scoped and quoted separately, and contractors invoice you directly for the technical work. Our minimum portfolio is ${inWords(MINIMUM_SITES)} sites for a monthly plan; a one-off job in London is quoted individually. Your final quote is confirmed at the free portfolio review.`
+       It first said "We do not publish fixed fees". Homepage V3 published
+       per-store rates and the answer was changed to quote them. The owner has
+       now withdrawn those plans (`./rates.ts`), so an answer that opened
+       "Coordination is priced per store per month and every rate is published
+       on this page" would tell a reader the page was lying to them.
+
+       EVERY COMMERCIAL TERM IN IT IS QUOTED FROM `TERMS`, NOT TYPED. That is
+       the rule the interpolated rates kept, applied to sentences instead of
+       numbers: the pricing cards, `/pricing` and the London pages read the
+       same four sentences, so the call-out promise cannot be worded two ways.
+       There is still no pound sign followed by a digit in this file, and
+       `tests/homepage-v3.test.mjs` still refuses one. */
+    "a": `${TERMS.perJob} Nothing is booked until you approve it. There is no subscription and no minimum term. ${TERMS.callOut} ${TERMS.noRepairVisit} Use of the MAINTSUPP portal is included. Kiosk installs and removals, strip-outs, fit-outs and other projects are scoped and quoted separately. ${TERMS.managedPlan}`
   },
   {
-    /* ADDED WITH THE COMMERCIAL UPDATE, immediately after the cost answer,
-       because it is the question the cost answer provokes. It turns a lead
-       away FROM THE MONTHLY PLAN in plain words, which is the point: below five
-       sites the coordination fee costs more than the coordination saves, and
-       saying so is worth more than the fee.
+    /* WAS "What if we only have three or four sites?", added with the
+       commercial update to turn a small operator away FROM THE MONTHLY PLAN in
+       plain words, and changed in October 2026 to add that a one-off job in
+       London was still possible.
 
-       CHANGED IN OCTOBER 2026. It used to send that reader to "call trades
-       directly". The owner now takes one-off jobs in London, so the honest
-       answer has two halves: the plan is still not for you, and the job still
-       can be. */
-    "q": "What if we only have three or four sites?",
-    "a": "Then the monthly plan is not for you yet, and we'd rather say so than take the fee. Our minimum is five sites — below that the coordination cost outweighs what you'd save. In London you can still use us for one-off jobs, each quoted before work starts. If you're opening more this year, come back to us about a plan when you reach five."
+       REWRITTEN 2026-11-25. With the published plans withdrawn there is no
+       floor for that reader to be under, so the question is now the one they
+       actually ask, and the answer is no. The managed plan's own starting
+       size is still stated — derived from `rates.ts`, where it is the one
+       figure left. */
+    "q": "Is there a minimum number of sites?",
+    "a": `No. One shop or one kiosk with one job is enough, and each job is priced before work starts. The only thing with a minimum is the managed monthly plan, which is arranged on request for portfolios of ${inWords(MANAGED_PLAN_MINIMUM_SITES)} sites and above.`
   },
   {
     "q": "Can store teams report jobs directly?",
-    "a": "Yes. Approved users submit a structured request with site, fault type, urgency, photographs and access details. Permissions and approval rules are set during onboarding."
+    /* WIDENED 2026-11-25. "Approved users submit a structured request…
+       Permissions and approval rules are set during onboarding" described an
+       existing client only, while the Report a Job form on this page has
+       always accepted a request from anyone. A first-time customer is now the
+       reader the site is written for, so the answer says so. */
+    "a": "Yes. Anyone at the site can report a job with the form on this site: the site, the fault, how urgent it is, photographs and access details. No account is needed for a first job. Regular customers get portal logins, so store teams can raise and track jobs themselves, with permissions and approval rules agreed at set-up."
   }
 ] as const;
 

@@ -44,6 +44,14 @@ import type { HomeSectionKey } from "../lib/site-content.ts";
  * want it already know to look, and the three routes into it are unchanged
  * because the `#report` anchor travels with the section.
  *
+ * STILL LAST, BUT NO LONGER FOR EXISTING CLIENTS ONLY (2026-11-25). The owner
+ * withdrew the monthly plans and sells one job at a time (`_sections/rates.ts`),
+ * so this form is now also how a first-time customer gets a job priced: the
+ * pricing section and `/pricing` both send them to `#report`, and the note
+ * under the form says no account is needed. It did not move, because nobody
+ * reaches it by scrolling in either case — the routes in are the header link,
+ * the hero's second button and, now, the pricing section's own link.
+ *
  * The page was sixteen before the v2 rebuild: hero, proof, process, trades,
  * problem, services, an early CTA band, how it works, portal, packages,
  * calculator, sectors, evidence, trust, FAQ and the final CTA. Four of those

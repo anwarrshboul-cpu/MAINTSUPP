@@ -1,4 +1,5 @@
 import type { LandingCard, LandingFaq, LandingPage } from "./types.ts";
+import { TERMS } from "../_sections/rates.ts";
 
 /**
  * THE LONDON HUB, THE THREE PRIORITY CENTRES AND THE FOUR AREAS.
@@ -89,6 +90,16 @@ const CENTRE_STEPS = (centre: string): readonly LandingCard[] => [
   },
 ];
 
+/*
+ * The call-out promise, QUOTED from `_sections/rates.ts` and always with its
+ * other half (2026-11-25). These pages used to say a reader would be "told how
+ * the call-out is charged"; the owner's terms now answer that outright — no
+ * charge when the repair is carried out, and a visit with no repair to follow
+ * priced first. Both sentences travel together, because the first one alone
+ * reads as a promise the second one qualifies.
+ */
+const CALL_OUT_ANSWER = `${TERMS.callOut} ${TERMS.noRepairVisit}`;
+
 const centreFaqs = (centre: string, owner: string): readonly LandingFaq[] => [
   {
     q: `Are you an approved contractor at ${centre}?`,
@@ -104,7 +115,7 @@ const centreFaqs = (centre: string, owner: string): readonly LandingFaq[] => [
   },
   {
     q: "Do you only work for chains?",
-    a: "No. A single shop or kiosk can book a one-off job. Portfolios of five sites and above can go on a monthly coordination plan.",
+    a: `No. A single shop or kiosk can book a one-off job, priced before work starts. ${TERMS.managedPlan}`,
   },
   {
     q: "Can you attend in an emergency?",
@@ -112,7 +123,7 @@ const centreFaqs = (centre: string, owner: string): readonly LandingFaq[] => [
   },
   {
     q: "How is a job priced?",
-    a: "Each job is quoted individually, and you have the price before any work is booked.",
+    a: `Each job is quoted individually, and you have the price before any work is booked. ${CALL_OUT_ANSWER}`,
   },
   {
     q: "Who carries out the work?",
@@ -123,7 +134,7 @@ const centreFaqs = (centre: string, owner: string): readonly LandingFaq[] => [
 const AREA_FAQ_TAIL: readonly LandingFaq[] = [
   {
     q: "Do you take one-off jobs?",
-    a: "Yes. A single shop, kiosk, restaurant or office can book one job. Portfolios of five sites and above can go on a monthly coordination plan.",
+    a: `Yes. A single shop, kiosk, restaurant or office can book one job, priced before work starts. ${TERMS.managedPlan}`,
   },
   {
     q: "Is there an emergency line?",
@@ -206,7 +217,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "Retail and shop maintenance",
-          body: "Reactive repairs, planned maintenance and compliance, one-off or on a monthly plan.",
+          body: "Reactive repairs, planned maintenance and compliance, priced per job or on a managed plan.",
           href: "/london/shop-maintenance",
         },
       ],
@@ -235,7 +246,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
         },
         {
           title: "We quote",
-          body: "You have the price before any work is booked. For an emergency you are told how the call-out is charged before anyone is sent.",
+          body: `You have the price before any work is booked. ${CALL_OUT_ANSWER}`,
         },
         {
           title: "Access is arranged",
@@ -250,7 +261,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     faqs: [
       {
         q: "Do you take one-off jobs, or only contracts?",
-        a: "Both. A single shop, kiosk, restaurant or office in London can book one job, quoted before work starts. Portfolios of five sites and above can go on a monthly coordination plan with per-store pricing published on the pricing page.",
+        a: `Both. A single shop, kiosk, restaurant or office in London can book one job, priced before work starts. ${TERMS.managedPlan}`,
       },
       {
         q: "Which parts of London do you cover?",
@@ -270,7 +281,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
       },
       {
         q: "How is a one-off job priced?",
-        a: "Each job is quoted individually, and you have the price before any work is booked.",
+        a: `Each job is quoted individually, and you have the price before any work is booked. ${CALL_OUT_ANSWER}`,
       },
       {
         q: "Do you work on homes?",
@@ -279,7 +290,7 @@ export const PLACE_PAGES: readonly LandingPage[] = [
     ],
     related: [
       { href: "/services", label: "All services" },
-      { href: "/pricing", label: "Pricing for monthly plans" },
+      { href: "/pricing", label: "How pricing works" },
       { href: "/how-it-works", label: "How a job runs" },
       { href: "/case-study", label: "Case study: 27 stores" },
       { href: "/contact", label: "Contact us" },

@@ -192,59 +192,24 @@ test("no price is shown + VAT", async () => {
    * a different hat, and putting one of them back would satisfy a naive check
    * for the exact string while defeating the instruction.
    *
-   * WHAT DID NOT CHANGE. Four figures are still pinned, for the same reason:
-   * they are the money a client is quoted outside the per-store rate, and the
-   * risk of an edit that strips a qualifier is that it strips the sentence
-   * around it too.
+   * WHAT DID NOT CHANGE — UNTIL 2026-11-25. Eight figures were pinned here as
+   * named constants in `rates.ts` (the portfolio minimum, the included and
+   * additional jobs, onboarding and its cap, the out-of-hours fee, the project
+   * percentage and its minimum), each with the sentence that carried it to the
+   * reader, because the risk of an edit that strips a qualifier is that it
+   * strips the sentence around it too.
    *
-   * RE-POINTED at the approved portfolio terms. The old four (£295/month
-   * minimum, £65 each additional job, £125 per incident, £25/store setup) were
-   * replaced wholesale by the pricing rebuild: the minimum is £300, additional-
-   * job pricing is gone entirely in favour of two coordinated jobs per store
-   * per month, and onboarding is £75/store capped at £1,200. They are pinned as
-   * the CONSTANTS now rather than as strings, because the markup interpolates
-   * them — a figure typed into a sentence is the defect the next test forbids.
+   * RE-POINTED, on the owner's decision and not on a refactor. The published
+   * plans are withdrawn and all eight figures went with them: every job is
+   * priced individually, and `rates.ts` now holds the commercial terms as
+   * sentences (`TERMS`). The claim those pins made survives and is held in its
+   * new form — what a client is told about money is a named value in
+   * `rates.ts`, never typed into the markup; it is now the sentence that is
+   * named rather than the number. The eight constants are asserted GONE, so
+   * a figure cannot come back by restoring one of them.
    */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  /* RE-POINTED AGAIN, at `rates.ts`. The constants moved there when the cost
-     FAQ began deriving the entry rates as well — one module knows the numbers,
-     three places render them. The claim is unchanged and is the one that
-     matters: a figure a client is quoted is a named constant, never typed into
-     a sentence. Two of the four also changed value with the commercial update
-     (P1 escalation is now £95, and the portfolio terms gained an
-     additional-job rate and a project percentage), and three new ones arrived
-     with the replacement footnotes. */
   const rates = await read("app/(marketing)/_sections/rates.ts");
-
-  for (const figure of [
-    "export const PORTFOLIO_MINIMUM = 325",
-    "export const INCLUDED_JOBS = 4",
-    "export const ADDITIONAL_JOB = 50",
-    "export const ONBOARDING_PER_STORE = 75",
-    "export const ONBOARDING_CAP = 1200",
-    "export const OUT_OF_HOURS_P1 = 95",
-    "export const PROJECT_PERCENT = 12",
-    "export const PROJECT_MINIMUM = 350",
-  ]) {
-    assert.ok(rates.indexOf(figure) > 0, `${figure} is missing`);
-  }
-  /* And each one still reaches the reader inside its sentence. */
-  for (const sentence of [
-    /* Wrapped across two source lines like the one below it, so matched in
-       two pieces. */
-    /Portfolio minimum/,
-    /£\{PORTFOLIO_MINIMUM\} per month\./,
-    /Includes \{INCLUDED_JOBS\} coordinated jobs per store per month/,
-    /* JSX wraps this one across two source lines between the sign and the
-       interpolation, so it is matched in two pieces rather than one. */
-    /Additional coordinated jobs £/,
-    /\{ADDITIONAL_JOB\} each\./,
-    /Onboarding and asset capture £\{ONBOARDING_PER_STORE\} per store, capped at £/,
-    /Out-of-hours and P1 escalation £\{OUT_OF_HOURS_P1\} per incident/,
-    /\{PROJECT_PERCENT\}% of third-party project spend, minimum £\{PROJECT_MINIMUM\}/,
-  ]) {
-    assert.match(pricing, sentence, `${sentence} no longer reaches the page`);
-  }
 
   /*
    * Comments stripped, exactly as the urgency-chip test does it. The note that
@@ -253,14 +218,47 @@ test("no price is shown + VAT", async () => {
    * pass — which is how a rule loses the only record of why it exists.
    */
   const rendered = pricing.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+  for (const figure of [
+    "PORTFOLIO_MINIMUM",
+    "INCLUDED_JOBS",
+    "ADDITIONAL_JOB",
+    "ONBOARDING_PER_STORE",
+    "ONBOARDING_CAP",
+    "OUT_OF_HOURS_P1",
+    "PROJECT_PERCENT",
+    "PROJECT_MINIMUM",
+  ]) {
+    assert.doesNotMatch(
+      rates,
+      new RegExp(`export const ${figure}\\b`),
+      `${figure} was withdrawn with the published plans`,
+    );
+    assert.ok(!rendered.includes(figure), `and pricing.tsx no longer prints ${figure}`);
+  }
+  /* The terms that replaced them are named in `rates.ts` … */
+  for (const term of ['perJob: "', 'callOut: "', 'noRepairVisit: "', "managedPlan: `"]) {
+    assert.ok(rates.indexOf(term) > 0, `TERMS lost ${term}`);
+  }
+  /* … and each one still reaches the reader inside its sentence. */
+  for (const sentence of [
+    /\{TERMS\.perJob\} Nothing is booked until you approve it\./,
+    /* The call-out terms are two points on their own card, one after the
+       other, rather than a note. */
+    /points: \[\s+TERMS\.callOut,\s+TERMS\.noRepairVisit,/,
+    /<p className="pkgfine">\s*\{TERMS\.managedPlan\}/,
+  ]) {
+    assert.match(pricing, sentence, `${sentence} no longer reaches the page`);
+  }
+
   assert.doesNotMatch(rendered, /\+\s*VAT/i, "no rendered string may carry + VAT");
   /*
    * RE-POINTED FROM THE WORD TO THE QUALIFIER, for the same reason as the
    * blanket check in `homepage-v3.test.mjs` — see the longer note there.
    *
    * "+ VAT" was withdrawn because it qualified a published price. What the
-   * commercial update adds is the positive statement — the number shown is the
-   * number payable, and the company is not VAT registered — which is the
+   * commercial update adds is the positive statement — the number quoted is
+   * the number payable, and the company is not VAT registered — which is the
    * opposite of the claim that was removed and is the one a reader comparing
    * quotes needs. Banning the three letters outright made that sentence
    * unwriteable while catching nothing the qualifier checks miss.
@@ -276,9 +274,13 @@ test("no price is shown + VAT", async () => {
       "the only permitted mention is the company's registration status",
     );
   }
+  /* RE-POINTED 2026-11-25 by one word: "Prices shown" became "Prices quoted",
+     because the page shows none and the statement is about the price a
+     customer is given. The statement itself, and the rule that it must be on
+     the page, are unchanged. */
   assert.match(
     flat,
-    /Prices shown are the total payable\. MAINTSUPP LTD is not currently VAT registered\./,
+    /Prices quoted are the total payable\. MAINTSUPP LTD is not currently VAT registered\./,
     "and that statement must actually be on the page",
   );
   for (const substitute of [/ex\.?\s*VAT/i, /exclud\w* VAT/i, /plus VAT/i, /VAT on top/i]) {
@@ -295,89 +297,61 @@ test("no price is shown + VAT", async () => {
   );
 });
 
-test("the Total Care saving is derived from the prices above it", async () => {
+test("no saving is claimed, because there are no two prices to compare", async () => {
   /*
-   * "Most popular — save £20 per store" is true at both numbered bands, and it
-   * is computed rather than typed so it cannot come to contradict the cards.
-   * The arithmetic is checked here against the same table the component uses.
-   */
-  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  /*
-   * RE-POINTED TWICE, and the CLAIM has never moved: the badge is arithmetic
-   * over the band table, never a typed figure.
+   * RE-POINTED 2026-11-25, on the owner's decision. This held the badge —
+   * "Most popular — save £20 per store" — to the arithmetic of the band table,
+   * so that it could not come to contradict the cards above it, and it pinned
+   * the approved rates at each band because they were quoted to clients.
    *
-   * First to the approved rates and four bands, the top one carrying no rate
-   * at all. Now to `rates.ts`, which is where the table lives since the cost
-   * FAQ began deriving the entry rates too — and to the commercial update's
-   * numbers, where the saving is £15 rather than £20 at every band.
+   * The published plans are withdrawn: there is no band table and there are
+   * no two plans, so there is no saving of one against the other. The claim —
+   * a saving is arithmetic over the prices on screen, never a typed figure —
+   * is held in the only form left to it: NO saving is claimed. And the band
+   * table is asserted gone rather than merely unused, because a badge that
+   * came back without it would be a typed figure by definition.
    */
-  const rates = await read("app/(marketing)/_sections/rates.ts");
-  const bands = [...rates.matchAll(
-    /essential: (\d+), compliance: (\d+), complete: (\d+)/g,
-  )].map(([, essential, compliance, complete]) => ({
-    essential: Number(essential),
-    compliance: Number(compliance),
-    complete: Number(complete),
-  }));
+  const strip = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const pricing = strip(await read("app/(marketing)/_sections/pricing.tsx"));
+  const rates = strip(await read("app/(marketing)/_sections/rates.ts"));
 
-  /* The approved figures, pinned because they are quoted to clients. */
-  assert.deepEqual(bands, [
-    { essential: 65, compliance: 55, complete: 100 },
-    { essential: 61, compliance: 51, complete: 92 },
-    { essential: 57, compliance: 47, complete: 84 },
-  ]);
-
-  /* The badge claims a saving per band; each band's cards must produce it. It
-     is £15 at all three numbered bands, which the brief states as a rule
-     ("Complete is exactly £15 per store below buying Essential and Compliance
-     separately, at every band") and is therefore a property to hold rather than
-     a coincidence worth hiding. */
   assert.deepEqual(
-    bands.map((band) => band.essential + band.compliance - band.complete),
-    [20, 20, 20],
+    [...rates.matchAll(/\b(?:essential|compliance|complete): (?:\d+|null)/g)].map((match) => match[0]),
+    [],
+    "no band rows are left in rates.ts",
   );
-
-  /* The fourth band exists and carries no rate. A figure here would be a price
-     for a portfolio nobody has scoped. */
-  assert.match(rates, /label: "51\+ stores"/, "the top band is published as a band");
-  assert.match(
-    rates,
-    /essential: null,[\s\S]{0,40}complete: null,/,
-    "and carries no rate — it offers a review instead",
-  );
-  assert.match(pricing, /Book a Portfolio Review/, "which is what it offers");
-
-  assert.match(pricing, /save £\{saving\} per store/, "the badge must read the computed figure");
+  assert.doesNotMatch(rates, /label: "/, "nor a band to label");
+  for (const gone of ["saving", "save £", "Most popular", "band.essential", "pkg__flag"]) {
+    assert.ok(!pricing.includes(gone), `pricing.tsx still carries ${gone}`);
+  }
+  /* The top band used to offer a review in place of a rate. A portfolio is
+     still offered a conversation — on the managed plan's own line. */
   assert.match(
     pricing,
-    /band\.essential \+ band\.compliance - band\.complete/,
-    "and must derive it from the band on screen rather than a typed number",
+    /<Link href="\/contact">Ask us about a managed plan<\/Link>/,
+    "a portfolio is still given a way to ask",
   );
-  /* The badge cannot render in the band that has no numbers to subtract. */
-  assert.match(pricing, /saving !== null && \(/, "no saving is claimed where there are no rates");
 });
 
-test("the store count drives the band, the rate and the monthly total", async () => {
+test("no count is asked for, so no rate can be shown that a reader does not qualify for", async () => {
   /*
-   * The calculator is the section's one input. If any of these stops being
-   * derived, the page can show a reader a rate their own store count does not
-   * qualify for — which is worse than showing no calculator at all.
+   * RE-POINTED 2026-11-25, on the owner's decision. The calculator was the
+   * section's one input, and this held every number it produced to be derived
+   * from the count: "if any of these stops being derived, the page can show a
+   * reader a rate their own store count does not qualify for — which is worse
+   * than showing no calculator at all."
+   *
+   * The decision took the second branch of that sentence. There is no
+   * calculator, so what is held is that none of its parts survives on its own
+   * to show a figure with nothing behind it.
    */
-  const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  const rates = await read("app/(marketing)/_sections/rates.ts");
-  assert.match(pricing, /type="range"/, "there is a real slider, not a band picker alone");
-  assert.match(rates, /export function bandForCount/, "the band is computed from the count");
-  /* RE-POINTED: the multiplication moved into `monthlyFor`, which also has to
-     answer `null` in the band that carries no rate. The claim — the total is
-     rate x count and never a typed figure — is unchanged. */
-  assert.match(
-    pricing,
-    /rate === null \? null : rate \* storeCount/,
-    "the monthly total is rate x count, not a typed figure, and absent without a rate",
-  );
-  /* The struck-through price is the entry band's, so it cannot contradict it. */
-  assert.match(pricing, /was=\{entryBand\[plan\.key\]\}/);
-  assert.match(pricing, /was > amount/, "and only shows once the reader is past that band");
+  const strip = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const pricing = strip(await read("app/(marketing)/_sections/pricing.tsx"));
+  const rates = strip(await read("app/(marketing)/_sections/rates.ts"));
+  for (const part of ['type="range"', "storeCount", "monthlyFor", "entryBand", "was={", "rateFor"]) {
+    assert.ok(!pricing.includes(part), `pricing.tsx still carries ${part}`);
+  }
+  assert.doesNotMatch(rates, /bandForCount/, "and nothing is left to compute a band from a count");
 });
 
 /*
@@ -394,157 +368,154 @@ test("the store count drives the band, the rate and the monthly total", async ()
  */
 
 /**
- * Every feature the cards listed before the matrix existed, in order.
+ * Every point the cards make, in order.
  *
- * RE-POINTED TWICE, and THE POINT OF THE LIST IS UNCHANGED: a rename, a
+ * RE-POINTED THREE TIMES, and THE POINT OF THE LIST IS UNCHANGED: a rename, a
  * regrouping or a card being deleted must not be able to smuggle a dropped
- * feature past it.
+ * line past it.
  *
  * First when the pricing rebuild renamed Coordination to Essential and Total
- * Care to Complete. Now that the commercial update deletes the standalone
- * Compliance Administration card: its six features did not disappear with it,
- * they moved onto Complete, where the brief lists them. Two of them —
- * "Provider booking" and "Certificate chasing" — are ONE bullet there
- * ("Provider booking and certificate chasing"), which is the only content
- * change and is what takes the table from thirteen rows to twelve.
+ * Care to Complete; then when the commercial update folded the standalone
+ * Compliance Administration card into Complete. Now (2026-11-25) on the
+ * owner's decision to withdraw the published plans altogether. The cards that
+ * replaced the two plan cards do not describe a plan: they say how a job is
+ * priced, what a call-out costs and what comes with it. So the list is those
+ * nine points.
  *
- * `compliance` is no longer a plan key at all. It is still a RATE key on the
- * band table, which is what prices the compliance-only line and its rate-card
- * row, and the test below asserts no feature claims it.
+ * Two of the nine are not strings but the shared terms, and are recorded here
+ * by the name they are read from — which is itself the thing being pinned: the
+ * call-out card must QUOTE the promise, not retype it.
+ *
+ * What the twelve plan features described — intake and triage, quote control,
+ * certificate reminders — has not left the site. It is the Services and How it
+ * works sections, which never depended on this table.
  */
-const CARD_FEATURES = {
-  essential: [
-    "Intake & triage",
-    "Contractor assignment",
-    "Quote control",
-    "Attendance chasing",
-    "Photo-verified close-out",
-    "Monthly report",
+const CARD_POINTS = {
+  "per-job": [
+    "You approve the price before anything is booked",
+    "No subscription and no minimum term",
+    "No minimum number of sites: one kiosk, one job",
   ],
-  complete: [
-    "Certificate register",
-    "90/60/30-day reminders",
-    "Provider booking and certificate chasing",
-    "Remedial tracking",
-    "Traffic-light compliance dashboard",
-    "Quarterly portfolio review",
+  "call-out": [
+    "TERMS.callOut",
+    "TERMS.noRepairVisit",
+    "Emergencies in London: the price and the attendance time before you commit.",
+  ],
+  portal: [
+    "Live status for every job",
+    "Before and after photographs",
+    "Reports and documents in one place",
   ],
 };
 
-test("every feature the cards listed still exists, once, in the shared table", async () => {
+test("every point the cards make still exists, once, in the one table", async () => {
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
-  /* RE-POINTED: the slice used to end at the `planHas` helper the matrix
-     needed. With the matrix gone the table ends where `cardPoints` begins. */
+  /* RE-POINTED: the slice ran from the `FEATURES` table to `cardPoints`. The
+     table is `CARDS` now and it ends where the component begins. */
   const table = pricing.slice(
-    pricing.indexOf("const FEATURES"),
-    pricing.indexOf("function cardPoints"),
+    pricing.indexOf("const CARDS"),
+    pricing.indexOf("export function Pricing"),
   );
-  const rows = [...table.matchAll(/\{ label: "([^"]+)", plan: "(\w+)" \}/g)].map(
-    ([, label, plan]) => ({ label, plan }),
+  const cards = [...table.matchAll(/key: "([\w-]+)",[\s\S]*?points: \[([\s\S]*?)\],\n  \},/g)].map(
+    ([, key, points]) => ({
+      key,
+      points: [...points.matchAll(/^\s+(?:"([^"]+)"|(TERMS\.\w+)),$/gm)].map(
+        (match) => match[1] ?? match[2],
+      ),
+    }),
   );
 
-  for (const [plan, labels] of Object.entries(CARD_FEATURES)) {
-    assert.deepEqual(
-      rows.filter((row) => row.plan === plan).map((row) => row.label),
-      labels,
-      `${plan} lost or reordered a feature`,
-    );
+  assert.deepEqual(
+    cards.map((card) => card.key),
+    Object.keys(CARD_POINTS),
+    "the three cards, in order",
+  );
+  for (const card of cards) {
+    assert.deepEqual(card.points, CARD_POINTS[card.key], `${card.key} lost or reordered a point`);
   }
-  assert.equal(rows.length, 12, "a feature was added or dropped without this test moving");
-  /* And nothing still claims the withdrawn plan key. `compliance` prices a
-     line of small print and a rate-card row; it has no feature list of its
-     own, so a row pointing at it would render nowhere. */
-  assert.deepEqual(rows.filter((row) => row.plan === "compliance"), []);
-
-  /* No label may be typed twice — that is the defect a second presentation
-     invites, and it is what would let the card and the matrix disagree. */
-  assert.equal(new Set(rows.map((r) => r.label)).size, rows.length);
+  const all = cards.flatMap((card) => card.points);
+  assert.equal(all.length, 9, "a point was added or dropped without this test moving");
+  /* No point may be made twice — that is the defect a second card invites. */
+  assert.equal(new Set(all).size, all.length);
+  /* And nothing still claims a plan key. A row pointing at a plan would
+     render nowhere, as it would have for the withdrawn compliance key. */
+  assert.doesNotMatch(table, /plan: "/);
 });
 
-test("every presentation renders from that table, not from copies of it", async () => {
+test("the cards render from that table, and the terms from rates.ts", async () => {
   /*
-   * RE-POINTED, and STRENGTHENED rather than weakened.
+   * RE-POINTED, and the rule is the one it has always been: ONE copy of the
+   * facts, however many places print them.
    *
-   * There used to be two presentations — cards above 768px, a nineteen-row
-   * matrix below it — and the risk this test existed for was the second copy
-   * of the facts. The rebuild deleted the matrix; the commercial update then
-   * deleted the Compliance Administration card too. So the risk is now carried
-   * by TWO cards, Essential and Complete, where Complete's list rolls up
-   * Essential's. That is the same defect in a smaller space, so the same rule
-   * applies — and with one fewer presentation there is one fewer place for a
-   * typed list to drift.
+   * It began as two presentations of one feature table — cards above 768px, a
+   * matrix below it. The rebuild deleted the matrix; the commercial update
+   * left two cards and a rate card over one band table. On 2026-11-25 the
+   * owner withdrew the published plans, and the section is three cards over
+   * `CARDS`, with the facts that matter most — the commercial terms — held one
+   * level further out, in `rates.ts`, because the FAQ, /pricing and the London
+   * pages print them too.
    *
-   * The £-literal check below gets stricter as a direct result: with no
-   * footnote figures typed into the markup at all, the expected list is empty.
+   * So two things are pinned: the cards are drawn from the table rather than
+   * typed into the markup, and every term on the section is a reference to
+   * `TERMS`, never a second copy of the sentence.
+   *
+   * The £-literal check gets stricter again as a direct result. It forbade a
+   * pound sign followed by a digit; the section now types no pound sign at all.
    */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  const uncommented = pricing.replace(/\/\*[\s\S]*?\*\//g, "");
 
-  /* Every card's bullets are derived, including Complete's summary lines. */
-  assert.match(pricing, /cardPoints\(plan\)\.map\(/, "the card must render derived points");
-  /* The compliance-only offer is one sentence now rather than a card, so there
-     is no second bullet list to derive. What replaced the pin is the rate-card
-     table, which is the other presentation of the same numbers and must be
-     built from the band table rather than typed out. */
+  assert.match(pricing, /\{CARDS\.map\(\(card\) => \(/, "the cards are drawn from the one table");
   assert.match(
     pricing,
-    /BANDS\.map\(\(entry\) => \(/,
-    "the rate card's columns come from the band table",
+    /\{card\.points\.map\(\(point\) => \(/,
+    "and so is every bullet on them",
   );
+  assert.match(pricing, /<h3>\{card\.title\}<\/h3>/, "a card's heading is its entry's, not typed in the markup");
   assert.match(
     pricing,
-    /<td key=\{entry\.id\}>\{rateCell\(entry\[plan\.key\]\)\}<\/td>/,
-    "and every cell in it is a lookup, not a figure",
+    /import \{ TERMS \} from "\.\/rates";/,
+    "the terms come from the one module that states them",
   );
-  assert.match(
-    pricing,
-    /<td key=\{entry\.id\}>\{rateCell\(entry\.compliance\)\}<\/td>/,
-    "including the compliance-only row",
-  );
-  assert.match(
-    pricing,
-    /`Everything in \$\{titleOf\(key\)\}`/,
-    "Complete's roll-up wording must be built from the plan titles, not typed",
-  );
-  assert.match(
-    pricing,
-    /FEATURES\.filter\(\(feature\) => feature\.plan === plan\.key\)/,
-    "and each card's own bullets must be selected out of the one table",
-  );
-  /* Prices in every card come from the band on screen. */
-  assert.match(pricing, /const rateFor = \(plan: Plan\) => band\[plan\.key\]/);
-  /* The compliance-only sentence quotes the ENTRY rate rather than the band on
-     screen, deliberately — it reads "from £55", which is a floor and not a
-     price for the portfolio in the calculator. It is still derived. */
-  assert.match(
-    pricing,
-    /from £\{entryBand\.compliance\} per store \/ month/,
-    "including the compliance-only line's",
-  );
+  const body = uncommented.slice(uncommented.indexOf("export function Pricing"));
+  for (const term of ["perJob", "managedPlan"]) {
+    assert.ok(body.includes(`{TERMS.${term}}`), `the section must print TERMS.${term} by reference`);
+  }
+  /* The call-out terms reach the page as two points of the `CARDS` table, so
+     that is where the reference is — and nowhere else in the file, because a
+     note repeating the card above it was removed on purpose. */
+  const table = uncommented.slice(uncommented.indexOf("const CARDS"), uncommented.indexOf("export function Pricing"));
+  for (const term of ["callOut", "noRepairVisit"]) {
+    assert.ok(table.includes(`TERMS.${term},`), `the call-out card must list TERMS.${term} by reference`);
+    assert.ok(!body.includes(`TERMS.${term}`), `and the markup must not repeat TERMS.${term} beneath it`);
+  }
+  /* No sentence that `TERMS` states may be typed a second time in this file —
+     that is how a card comes to make a promise the FAQ no longer makes. */
+  const rates = await read("app/(marketing)/_sections/rates.ts");
+  const sentences = [...rates.matchAll(/^\s{2}\w+: "([^"]+)",$/gm)].map((match) => match[1]);
+  assert.equal(sentences.length, 3, "the three terms that are plain strings");
+  for (const sentence of sentences) {
+    assert.ok(!uncommented.includes(sentence), `"${sentence}" is typed here as well as in rates.ts`);
+  }
 
-  /* One price table. No £ figure may be typed into the markup at all — that
-     is how a card comes to quote a price the band no longer charges. */
-  const body = pricing
-    .slice(pricing.indexOf("export function Pricing"))
-    .replace(/\/\*[\s\S]*?\*\//g, "");
-  const literals = [...body.matchAll(/£(\d[\d,]*)/g)].map((m) => m[0]);
-  assert.deepEqual(
-    literals,
-    [],
-    `every figure must be interpolated from a constant; found ${literals.join(", ")}`,
-  );
+  /* No figure anywhere in the file. */
+  assert.doesNotMatch(uncommented, /£/, "no pound sign is typed into the section at all");
 });
 
-test("availability is stated in words, never in colour alone", async () => {
+test("what a card says is stated in words, never in colour alone", async () => {
   /*
-   * RE-POINTED from the matrix to the cards.
+   * RE-POINTED from the matrix to the cards, and (2026-11-25) from the plan
+   * cards to the three that replaced them.
    *
    * The matrix carried this contract because a tick in a table is a glyph, and
    * a glyph read out by a screen reader is nothing. The rebuild deleted the
-   * matrix, so the contract moves to the presentation that replaced it: the
+   * matrix, so the contract moved to the presentation that replaced it: the
    * card bullet lists. It has not been dropped, and it has not been softened
-   * — what a plan includes must still be a WORD, not a tint and not a shape.
+   * — what a card tells a reader must still be a WORD, not a tint and not a
+   * shape.
    */
   const pricing = await read("app/(marketing)/_sections/pricing.tsx");
+  const uncommented = pricing.replace(/\/\*[\s\S]*?\*\//g, "");
 
   /* The matrix stays gone. If it comes back, it comes back with this test. */
   assert.doesNotMatch(pricing, /pmx/, "the comparison matrix was deleted, not hidden");
@@ -552,7 +523,7 @@ test("availability is stated in words, never in colour alone", async () => {
   assert.doesNotMatch(css, /pmx/, "and so were its styles");
 
   /* Each bullet is text. The tick beside it is decoration and says so, which
-     is what stops a reader being told a plan includes a checkmark. */
+     is what stops a reader being told a card includes a checkmark. */
   assert.match(
     pricing,
     /<Tick \/>[\s\S]{0,40}?<span>\{point\}<\/span>/,
@@ -564,66 +535,71 @@ test("availability is stated in words, never in colour alone", async () => {
     "and the glyph is hidden from assistive technology rather than named twice",
   );
 
-  /* The band that includes no rate says so in words too, rather than showing
-     an empty price and leaving the reader to infer it. */
-  assert.match(pricing, /const REVIEW = "Book a Portfolio Review"/);
+  /*
+   * RE-POINTED. This pinned the band that carried no rate, which said "Book a
+   * Portfolio Review" in words (`REVIEW`, drawn as `.pkg__talk`) rather than
+   * showing an empty price and leaving the reader to infer it. No card has a
+   * price line now, so there is no empty one to explain. What is held in its
+   * place is the other half of "never in colour alone": no card is set apart
+   * from the others by styling. The highlight and the flag that marked one
+   * plan as the popular choice are gone, and nothing has replaced them,
+   * because the three cards are not a choice.
+   */
+  for (const mark of ["is-match", "pkg__flag", "pkg__talk", "pkg__price"]) {
+    assert.ok(!uncommented.includes(mark), `pricing.tsx still carries ${mark}`);
+  }
   assert.match(
     pricing,
-    /className="pkg__talk"/,
-    "the review offer renders as its own labelled price line",
+    /<article className="pkg" key=\{card\.key\}>/,
+    "every card is the same element with the same class",
   );
 
-  /* The block is a real landmark with a real heading, and the smaller option
-     is beside the choice rather than inside it — the structural half of what
-     the table's <caption> and row headers used to provide. */
+  /* The block is a real landmark with a real heading. */
   assert.match(pricing, /<section className="section section--tint" id="pricing">/);
   /* RE-POINTED (decision L): the heading is `HOME_COPY.pricing.heading` now. The
-     words are checked where they live and the section is checked to draw them —
-     the price FIGURES are still `rates.ts`, and no console may type one. */
+     words are checked where they live and the section is checked to draw them. */
   assert.match(pricing, /<h2 className="h2">\{copy\.heading\}<\/h2>/, "and carries its heading");
+  /* RE-POINTED 2026-11-25: it was "Simple per-store pricing. No hidden
+     markups." — a heading for the published plans, withdrawn with them. */
   assert.match(
     await read("app/(marketing)/_sections/copy.ts"),
-    /heading: "Simple per-store pricing/,
+    /heading: "Pay per job\. The price is agreed before work starts\."/,
     "which is the shipped heading",
   );
   /*
    * RE-POINTED: the smaller option is no longer a card beside the choice, it
-   * is a line of small print under it.
+   * is a line of small print under it — and since 2026-11-25 the "smaller
+   * option" is the managed plan rather than compliance-only administration.
    *
-   * The structural claim is the one that survives and it is unchanged — the
-   * compliance-only offer must be presented as something OTHER than a third
-   * plan, so a reader is not asked to weigh three things when the decision is
-   * between two. It used to be an `<aside>` with its own heading; it is now a
-   * sentence plus a row in the rate card, which is a stronger form of the same
-   * statement rather than a weaker one.
-   *
-   * What replaces the heading pin is the rate card's own landmark furniture: a
-   * disclosure with a real label, and a table with a caption and row headers —
-   * which is exactly what the deleted matrix's `<caption>` used to provide.
+   * The structural claim is the one that survives and it is unchanged: the
+   * offer that is not for every reader must be presented as something OTHER
+   * than one more card, so nobody is asked to weigh it against the rest.
    */
   assert.doesNotMatch(pricing, /className="pkgalt"/, "the third card stays deleted");
-  assert.doesNotMatch(
-    await read("app/(marketing)/marketing.css"),
-    /\.pkgalt/,
-    "and so do its styles",
-  );
+  assert.doesNotMatch(css, /\.pkgalt/, "and so do its styles");
   assert.match(
     pricing,
     /<p className="pkgfine">/,
-    "the compliance-only offer is small print under the two cards",
+    "the managed plan is small print under the three cards",
   );
   assert.match(
     pricing,
-    /Compliance administration is also available on its own/,
+    /\{TERMS\.managedPlan\} It adds one named coordinator, planned maintenance and/,
     "and says what it is",
   );
-  assert.match(
-    pricing,
-    /<summary className="ratecard__toggle">See the full rate card<\/summary>/,
-    "the full table is behind a labelled disclosure",
-  );
-  assert.match(pricing, /<caption className="vh">/, "which the table names for a screen reader");
-  assert.match(pricing, /<th scope="row">Compliance only<\/th>/, "and prices it at every band");
+  /*
+   * The rate card's landmark furniture — a labelled disclosure, a captioned
+   * table, row headers — was pinned here. The rate card is withdrawn with the
+   * rates, so there is nothing to label. The pins are kept as a condition
+   * rather than deleted: a table that returns to this section returns with a
+   * caption and row headers, or this fails.
+   */
+  if (/<table/.test(uncommented)) {
+    assert.match(pricing, /<caption className="vh">/, "a table must be named for a screen reader");
+    assert.match(pricing, /<th scope="row">/, "and its rows must be headed");
+  } else {
+    assert.doesNotMatch(uncommented, /<details|<summary/, "with no table there is no disclosure left to label");
+  }
 });
 
 test("the pricing section fits its column, and the page never scrolls sideways", async () => {

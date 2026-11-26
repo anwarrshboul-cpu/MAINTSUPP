@@ -1,3 +1,5 @@
+import { MANAGED_PLAN_MINIMUM_SITES, inWords } from "../_sections/rates.ts";
+
 /**
  * Public identity, shared by the homepage graph and each page's breadcrumbs.
  * These IDs always name production, including on a preview: a preview must not
@@ -24,9 +26,13 @@ export const organization = {
   image: `${SITE_ORIGIN}/assets/photos/hero-london-maintenance.jpg`,
   /* Widened in October 2026 with the proposition: one-off jobs for a single
      shop or kiosk in London sit beside the monthly plans for five sites and
-     above. It still says "coordinates" and "vetted contractor network", because
-     that is the model and the owner's copy rules hold it to that. */
-  description: "MAINTSUPP coordinates repairs, planned maintenance, compliance administration and store works for commercial premises through a vetted contractor network: one-off jobs for shops and kiosks in London, and monthly coordination for UK portfolios of five or more sites.",
+     above. Re-ordered 2026-11-25, when the published plans were withdrawn: the
+     one-off job, priced before work starts, is the offer, and the managed plan
+     is on request. It still says "coordinates" and "vetted contractor network",
+     because that is the model and the owner's copy rules hold it to that. The
+     size the plan starts at is read from `rates.ts`, the one place that states
+     it, rather than typed a second time here. */
+  description: `MAINTSUPP coordinates repairs, planned maintenance, compliance administration and store works for commercial premises through a vetted contractor network: one-off jobs for shops and kiosks in London, each priced before work starts, and a managed monthly plan on request for UK portfolios of ${inWords(MANAGED_PLAN_MINIMUM_SITES)} or more sites.`,
   foundingDate: "2026-06-04",
   founder: { "@type": "Person", name: "Anwar Shboul" },
   telephone: "+44 7852 224644",

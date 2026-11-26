@@ -49,8 +49,10 @@
  * here: it is derived from the navigation actually in force (`requiredAnchors`),
  * plus the three sections that are fixed for reasons of their own — the hero
  * carries the page's H1, the contact panel is the only form that asks who you
- * are, and "Report a Job" is the door an existing client's store manager walks
- * through, whose `#report` anchor is a LOCKED link in `site-navigation.ts`.
+ * are, and "Report a Job" is the door anyone with a fault walks through — an
+ * existing client's store manager, or since 2026-11-25 a first-time customer who
+ * wants a job priced — whose `#report` anchor is a LOCKED link in
+ * `site-navigation.ts`.
  *
  * A PLAIN MODULE, not "use client": the editor, the save route and the public
  * render all read this, and a value exported from a "use client" file is a client
@@ -207,7 +209,7 @@ const HOME_SECTIONS: readonly SectionDefinition[] = [
     key: "reportJob",
     label: "Report a Job form",
     anchor: "report",
-    fixed: "The door an existing client's store manager walks through. Its #report anchor is a locked navigation link.",
+    fixed: "The door anyone with a fault walks through: an existing client's store team, or a new customer who wants a job priced. Its #report anchor is a locked navigation link.",
   },
 ];
 

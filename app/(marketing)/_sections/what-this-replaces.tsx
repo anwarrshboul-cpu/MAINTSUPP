@@ -91,7 +91,7 @@ const REPLACES: ReadonlyArray<{ icon: string; gone: string; instead: string }> =
     icon: P.licence,
     gone: "A CAFM licence per user",
     instead:
-      "A portal included with the coordination fee, with a login for every store that needs one.",
+      "A portal included at no extra cost, with a login for every store that needs one.",
   },
 ];
 

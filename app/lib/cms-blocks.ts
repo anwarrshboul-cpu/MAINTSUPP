@@ -178,7 +178,7 @@ export const CMS_OMISSIONS: readonly string[] = [
  * reading SOURCE TEXT: `stage-twentyeight-landing-rebuild` walks every `.ts`/`.tsx`
  * under `app/(marketing)` for six forbidden phrases, and `homepage-v3` walks the
  * same tree twice more — once for a VAT qualifier, once for a `£` followed by a
- * digit outside `pricing.tsx`.
+ * digit (outside `pricing.tsx` until 2026-11-25, and with no exception since).
  *
  * A CMS moves copy out of source and into rows. **The day the first CMS page is
  * published, all three of those rules go blind** — not relaxed, not reconsidered,
@@ -196,10 +196,14 @@ export const CMS_OMISSIONS: readonly string[] = [
  *   - the VAT sentence is a factual one. MAINTSUPP LTD is not currently VAT
  *     registered, so a price qualified "+ VAT" would be wrong rather than merely
  *     unwise;
- *   - the price is a SINGLE-SOURCE rule. `rates.ts` is the only file on the site
- *     that knows a number, and it self-checks its own invariant at module load. A
- *     price typed into a CMS page is a second source that cannot be checked
- *     against the first, and nothing would notice when the two disagreed.
+ *   - the price is a NO-PUBLISHED-PRICE rule. It began as a single-source rule,
+ *     when `rates.ts` held the per-store rates and a price typed into a CMS page
+ *     would have been a second source nothing could reconcile with the first. On
+ *     2026-11-25 the owner withdrew the published plans: every job is priced
+ *     individually and `rates.ts` now holds the commercial terms as sentences and
+ *     no figure at all. A price typed into a page would therefore be a published
+ *     price the business no longer offers, which is a stronger reason for the
+ *     same refusal.
  *
  * This is a restriction on the owner's own console, so it is stated plainly in
  * `CMS_OMISSIONS` rather than discovered as a mysterious refusal.
@@ -220,13 +224,14 @@ export const CONTENT_RULES: ReadonlyArray<{ pattern: RegExp; reason: string }> =
   { pattern: /plus\s+VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
   { pattern: /VAT\s+extra/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
   { pattern: /subject\s+to\s+VAT/i, reason: "MAINTSUPP LTD is not currently VAT registered" },
-  /* A price. `rates.ts` is the site's single source for every number and checks
-     its own invariant at module load; a figure typed here could not be checked
-     against it, and nothing would notice when the two disagreed. */
+  /* A price. Since 2026-11-25 the site publishes none: every job is priced
+     individually, before work starts, and `rates.ts` records those terms as
+     sentences with no figure in them. A figure typed here would be a published
+     price the business does not offer. */
   {
     pattern: /£\s*\d/,
     reason:
-      "a price cannot be typed into a page — app/(marketing)/_sections/rates.ts is the single source for every figure on the site, and a second one could not be reconciled with it",
+      "a price cannot be typed into a page — MAINTSUPP no longer publishes prices: every job is priced individually before work starts, and app/(marketing)/_sections/rates.ts is the single source for those terms",
   },
 ];
 

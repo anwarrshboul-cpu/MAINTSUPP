@@ -1,33 +1,42 @@
 import type { Metadata } from "next";
-import { HeroActions, PageCta, PageHero, PageSection } from "../_components/page-parts";
+import Link from "next/link";
+import { PageCta, PageHero, PageSection } from "../_components/page-parts";
 import { ContractorChoice } from "../_sections/contractor-choice";
 import { faq as SHIPPED_QUESTIONS } from "../_sections/content";
 import { ApprovedPhoto } from "../_sections/approved-photo";
 import { Pricing } from "../_sections/pricing";
 import { readPublicSiteContent } from "../../lib/site-content-public.ts";
-import { ENTRY_BAND } from "../_sections/rates";
+import { TERMS } from "../_sections/rates";
 import { pageSocial } from "../../lib/page-social";
 
 /**
- * /pricing — the coordination fee, and how the money moves.
+ * /pricing — how a job is priced, and what a visit costs.
  *
- * Was the `#pricing` anchor on the homepage. Every figure on this page is drawn
- * by the homepage's own `Pricing` section from `rates.ts`, so there is one rate
- * card and it cannot disagree with itself; `tests/homepage-v3.test.mjs` refuses a
- * price typed anywhere else in the marketing tree, and this file types none.
- * What this page adds is the explanation around those numbers and the pricing
- * questions from the shared FAQ list (the resolved one, so a question staff
- * edit changes here too).
+ * Was the `#pricing` anchor on the homepage, then a page that explained the
+ * monthly coordination fee: a rate card, "one coordination fee", "contractors
+ * invoice you directly". The owner withdrew the published plans on 2026-11-25
+ * (`_sections/rates.ts` records why), so this page now explains the offer that
+ * replaced them — pay per job, the price confirmed before work starts.
+ *
+ * It still draws the homepage's own `Pricing` section rather than a second
+ * copy, and it still types no figure: `tests/homepage-v3.test.mjs` refuses a
+ * price anywhere in the marketing tree, with no exception left. The commercial
+ * terms are QUOTED from `TERMS` for the reason the rates used to be derived —
+ * the cards, the FAQ and this page cannot then word the call-out promise three
+ * ways. What this page adds is the explanation around those terms and the
+ * pricing questions from the shared FAQ list (the resolved one, so a question
+ * staff edit changes here too).
  */
 
-/* "Pricing" alone rendered as "Pricing | MAINTSUPP". The title now says what is
-   priced and the one thing about it a buyer cares about. */
-const TITLE = "Maintenance Pricing Per Store | No Trade Markup";
-/* The two entry rates are INTERPOLATED from `rates.ts`, never typed — the same
-   rule, and the same reason, as the cost answer in `_sections/content.ts`:
-   `tests/homepage-v3.test.mjs` forbids a typed pound-and-digit outside
-   `pricing.tsx`, and a figure derived here cannot go stale. */
-const DESCRIPTION = `Published monthly rates: Essential from £${ENTRY_BAND.essential} and Complete from £${ENTRY_BAND.complete} per store, with no markup on trades. One-off jobs in London are quoted individually.`;
+/* "Pricing" alone rendered as "Pricing | MAINTSUPP". The title says what is
+   priced and the one thing about it a buyer cares about — which used to be
+   "per store, no trade markup" and is now "per job, no subscription". Kept
+   under fifty characters, like every other page title here, because the
+   layout appends " | MAINTSUPP" and a search result cuts the line at about
+   sixty. */
+const TITLE = "Maintenance Pricing: Pay Per Job, No Subscription";
+/* At most 160 characters: a longer line is cut off in search results. */
+const DESCRIPTION = "Pay per job for shop, kiosk and commercial repairs: the price is confirmed before work starts. No subscription. No call-out charge when we carry out the repair.";
 
 export const metadata: Metadata = {
   title: TITLE,
@@ -36,28 +45,28 @@ export const metadata: Metadata = {
   ...pageSocial("/pricing", TITLE, DESCRIPTION),
 };
 
-const BILLING = [
+const HOW_PRICING_WORKS = [
   {
-    title: "One coordination fee",
-    body: "A monthly fee per store for the coordination itself — intake, triage, contractor management, evidence checks and reporting. The rate card above shows exactly what each plan includes.",
+    title: "One price per job",
+    body: "Send the job with a photograph. We confirm the price and the time with you, and nothing is booked until you approve it.",
   },
   {
-    title: "Contractors invoice you directly",
-    body: "Trades bill you at their agreed rates. We reconcile every invoice against the approved quote, and we never add a markup to a contractor’s price.",
+    title: "No call-out charge with the repair",
+    body: `${TERMS.callOut} ${TERMS.noRepairVisit}`,
   },
   {
     title: "Projects quoted separately",
-    body: "Kiosk moves, refreshes, signage and multi-trade store works are scoped and quoted one by one, so a project never hides inside a monthly fee.",
+    body: "Kiosk installs and removals, strip-outs, fit-outs, signage and multi-trade store works are scoped and quoted one by one, so a project never hides inside a repair.",
   },
 ] as const;
 
 /* The questions a buyer asks about money, in the shared list's own words. */
 const PRICING_QUESTIONS = [
   "What does it cost?",
+  "Is there a minimum number of sites?",
+  "Do you take one-off jobs for a single shop or kiosk?",
   "Who pays the contractor?",
-  "What if we only have three or four sites?",
   "Can we keep our current contractors?",
-  "How quickly can mobilisation begin?",
 ];
 
 export default async function PricingPage() {
@@ -72,8 +81,8 @@ export default async function PricingPage() {
       <PageHero
         crumbs={[{ name: "Home", path: "/" }, { name: "Pricing", path: "/pricing" }]}
         eyebrow="Pricing"
-        title="Clear per-store pricing, with no markup on trades"
-        lede="You pay one coordination fee per store. Contractors invoice you directly at their agreed rates, and every cost is reconciled against the approved quote."
+        title="Pay per job, with the price agreed before work starts"
+        lede="Tell us what needs doing and we confirm the price and the time before anything is booked. No subscription, no minimum term, and no call-out charge when we carry out the repair."
         media={
           <ApprovedPhoto
             src="/assets/pages/page-pricing-hero-v1.jpg"
@@ -84,14 +93,23 @@ export default async function PricingPage() {
           />
         }
       >
-        <HeroActions secondary={{ href: "/contact", label: "Ask for a quote" }} />
+        {/* The page's own two doors, in the order this reader needs them: get
+            a job priced, or ask. `HeroActions` leads with the portfolio review,
+            which is the right first button on every other page and the wrong
+            one on the page that says you pay per job. */}
+        <Link className="btn btn--primary btn--lg" href="/#report">
+          Report a Job
+        </Link>
+        <Link className="btn btn--ghost btn--lg" href="/contact">
+          Ask for a price
+        </Link>
       </PageHero>
 
       <Pricing copy={home.copy.pricing} />
 
-      <PageSection tint eyebrow="How billing works" heading="Three lines on the bill, and nothing hidden between them">
+      <PageSection tint eyebrow="How pricing works" heading="Three things you know before any work starts">
         <ul className="factgrid factgrid--three reveal" role="list">
-          {BILLING.map((item, index) => (
+          {HOW_PRICING_WORKS.map((item, index) => (
             <li className="factcard" key={item.title}>
               <span className="factcard__n">{index + 1}</span>
               <h3 className="factcard__title">{item.title}</h3>
@@ -104,7 +122,7 @@ export default async function PricingPage() {
       <ContractorChoice copy={home.copy.yourContractors} />
 
       {questions.length ? (
-        <PageSection eyebrow="Pricing questions" heading="What people ask before they sign">
+        <PageSection eyebrow="Pricing questions" heading="What people ask before they book">
           <div className="pagefaq reveal">
             {questions.map((entry) => (
               <details key={entry.q}>
@@ -116,7 +134,11 @@ export default async function PricingPage() {
         </PageSection>
       ) : null}
 
-      <PageCta heading="Want a figure for your own portfolio?" />
+      <PageCta
+        heading="Want a price for a job?"
+        lede="Send the job with a photograph and we confirm the price and the time. Running several sites? Tell us about the portfolio and we will come back to you."
+        primary={{ href: "/#report", label: "Report a Job" }}
+      />
     </main>
   );
 }

@@ -14,18 +14,23 @@
  * destinations. They will change again, and when they do it should be obvious
  * which file to edit and which to leave alone.
  *
- * THE FIGURES ARE COMPUTED, NOT COPIED. Almost nothing below types a price.
- * The expectations are derived from `rates.ts` and checked against the page, so
- * this file cannot drift from the source the way a second list of numbers
- * would — which is the same argument `rates.ts` itself exists for. The four
- * exceptions are the approved rate table, the portfolio minimum, the three
- * destination addresses and the §1.7 forbidden list, which are quoted from the
- * brief on purpose: they are what a client is told, and a test that derived
- * them from the code could never catch the code being wrong.
+ * THE TERMS ARE QUOTED HERE ON PURPOSE. This paragraph used to read "the
+ * figures are computed, not copied": the page printed rates, and the
+ * expectations were derived from `rates.ts` so this file could not drift from
+ * it. RE-POINTED 2026-11-25, on the owner's decision: the published monthly
+ * plans are withdrawn and the page prints no figure at all — every job is
+ * priced individually (`rates.ts` records the decision). What a client is told
+ * is now four sentences (`TERMS`) and one count (the size of portfolio the
+ * managed plan starts at). Those are typed below, once, for the reason the
+ * approved rate table was: they are what a client is told, and a test that
+ * derived them from the code could never catch the code being wrong.
+ * Everything else still derives — from `TERMS`, never from a second copy. The
+ * other typed exceptions are unchanged: the three destination addresses and
+ * the forbidden list, which has only grown.
  */
 
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -39,6 +44,20 @@ const SECTIONS = "app/(marketing)/_sections";
 /** Source with comments removed, so a note explaining a withdrawal is not the thing. */
 const code = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+
+/** Every TypeScript source the marketing site is built from, as [name, source]. */
+async function marketingSources() {
+  const out = [];
+  const walk = async (relative) => {
+    for (const entry of await readdir(path.join(root, relative), { withFileTypes: true })) {
+      const next = `${relative}/${entry.name}`;
+      if (entry.isDirectory()) await walk(next);
+      else if (/\.tsx?$/.test(entry.name)) out.push([next, await read(next)]);
+    }
+  };
+  await walk("app/(marketing)");
+  return out;
+}
 
 /* `rates.ts` imports nothing, so it transpiles and loads on its own. */
 const rates = await import(
@@ -73,98 +92,184 @@ async function serverIsUp() {
 }
 
 /* ------------------------------------------------------------------ */
-/* §1 — the approved rate card                                         */
+/* §1 — the commercial terms (the rate card is withdrawn)              */
 /* ------------------------------------------------------------------ */
 
-test("the approved rates, exactly as they are quoted to clients", () => {
+/*
+ * RE-POINTED 2026-11-25, ON THE OWNER'S DECISION AND NOT ON A REFACTOR.
+ *
+ * Six tests stood here and held the approved rate card: the rates at each
+ * band, the £20 rule between the two plans, the £325 minimum against the entry
+ * rate, the slider's floor, `bandForCount`, and the brief's table of monthly
+ * totals. All six protected ONE contract — that what a client is quoted is the
+ * approved thing, and that every place it is printed agrees.
+ *
+ * The owner withdrew the published monthly plans (decided 2026-11-19, released
+ * 2026-11-25; the header of `rates.ts` records it). Every job is now priced
+ * individually, so the page prints no rate, no band and no total. The contract
+ * did not go away; its subject changed. What a client is quoted is now four
+ * sentences, and the same two failures are still possible: a sentence that is
+ * not the approved one, and two places that word it differently. The tests
+ * below hold those, one for one:
+ *
+ *   the approved rates           → the approved terms, word for word
+ *   Complete is £20 below …      → the call-out promise keeps its condition
+ *   the minimum × the entry rate → the managed plan's size and its sentence
+ *   the selector's floor         → there is no selector to describe a portfolio
+ *   bandForCount                 → `rates.ts` exports no rate machinery at all
+ *   the brief's monthly totals   → no rate, band or total reaches the source
+ */
+
+test("the approved terms, exactly as they are quoted to clients", () => {
   /*
-   * The one place in this file that types a price. Everything else derives
-   * from `rates.ts`, and deriving these too would be a test asserting that a
-   * number equals itself.
+   * The one place in this file that types the terms. Everything else derives
+   * from `TERMS`, and deriving these too would be a test asserting that a
+   * sentence equals itself.
    */
   assert.deepEqual(
-    rates.BANDS.map((band) => [band.label, band.essential, band.complete, band.compliance]),
-    [
-      ["5–10 stores", 65, 100, 55],
-      ["11–25 stores", 61, 92, 51],
-      ["26–50 stores", 57, 84, 47],
-      ["51+ stores", null, null, null],
-    ],
+    { ...rates.TERMS },
+    {
+      perJob: "Every job is priced individually, and you have the price before any work is booked.",
+      callOut: "No call-out charge when we carry out the repair.",
+      noRepairVisit: "A visit with no repair to follow is priced before anyone attends.",
+      managedPlan: "A managed monthly plan is available on request for portfolios of five sites and above.",
+    },
   );
 });
 
-test("Complete is £20 below buying the two parts, at every band", () => {
-  /* The brief states it as a rule rather than as three coincidences, so it is
-     held as one: any band that carries rates must satisfy it. */
-  for (const band of rates.BANDS) {
-    if (band.complete === null) continue;
-    assert.equal(
-      band.essential + band.compliance - band.complete,
-      20,
-      `${band.label} breaks the £20 rule`,
+test("the call-out promise keeps its condition, everywhere it is made", async () => {
+  /*
+   * The owner chose the form on 2026-11-25: no call-out charge WHEN THE REPAIR
+   * IS CARRIED OUT, and a visit with no repair to follow is priced before
+   * anyone attends. An unconditional "no call-out fee" is a different and more
+   * expensive promise — the contractor who attends and repairs nothing is still
+   * paid — and it is one edit away wherever the sentence is shortened to fit a
+   * heading.
+   *
+   * Two things are held. Where the term is QUOTED from `TERMS`, its other half
+   * is quoted in the same file the same number of times. Where it is RESTATED
+   * in running copy — a card title, a lede, a meta description, none of which
+   * can take a capitalised sentence — the condition is still attached.
+   */
+  let quoted = 0;
+  for (const [name, source] of await marketingSources()) {
+    const body = code(source).replace(/\s+/g, " ");
+    const first = (body.match(/TERMS\.callOut\b/g) ?? []).length;
+    const second = (body.match(/TERMS\.noRepairVisit\b/g) ?? []).length;
+    assert.equal(first, second, `${name} quotes one half of the call-out terms without the other`);
+    quoted += first;
+
+    for (const [claim] of body.matchAll(/no call-out (?:charge|fee)s?[^.`"<]*/gi)) {
+      assert.match(
+        claim,
+        /(?:when we carry out|with) the repair/i,
+        `${name} makes the promise unconditional: "${claim}"`,
+      );
+    }
+  }
+  assert.ok(
+    quoted >= 5,
+    "the pricing card, the cost FAQ, /pricing and both sets of London pages all quote it",
+  );
+});
+
+test("the managed plan's size and the sentence that states it cannot contradict each other", async () => {
+  /*
+   * Was §10.3: £325 had to equal 5 × £65, or the calculator's readout and the
+   * footnote beneath it said different things about the same portfolio. The
+   * figures are withdrawn. The one number with a commercial meaning still
+   * stated on the site is the size of portfolio the managed plan starts at, and
+   * the same defect is still available: a count typed into a sentence, beside
+   * a constant that comes to say something else.
+   */
+  assert.equal(rates.MANAGED_PLAN_MINIMUM_SITES, 5);
+  assert.equal(rates.inWords(rates.MANAGED_PLAN_MINIMUM_SITES), "five");
+  assert.match(
+    await read(`${SECTIONS}/rates.ts`),
+    /managedPlan: `A managed monthly plan is available on request for portfolios of \$\{inWords\(MANAGED_PLAN_MINIMUM_SITES\)\} sites and above\.`/,
+    "the sentence interpolates the constant, so the two cannot drift",
+  );
+  /* And nobody else types the count: every other mention is that sentence, or
+     the constant put into words. */
+  for (const [name, source] of await marketingSources()) {
+    if (name.endsWith("/rates.ts")) continue;
+    assert.doesNotMatch(
+      code(source),
+      /\b(?:five|5)(?: or more)? (?:sites|stores)\b/i,
+      `${name} types the managed plan's size instead of reading it from rates.ts`,
     );
   }
 });
 
-test("the minimum and the entry rate cannot contradict each other", () => {
-  /*
-   * §10.3. £325 must equal 5 × £65 — otherwise the calculator's readout at five
-   * stores and the footnote beneath it say different things about the same
-   * portfolio, and a reader doing the multiplication finds the page wrong.
-   *
-   * `rates.ts` throws on import if this is violated, so a bad pairing cannot
-   * reach a build at all. This asserts the values as well, because a module
-   * that guards itself can still be given two numbers that agree and are both
-   * wrong.
-   */
-  assert.equal(rates.PORTFOLIO_MINIMUM, 325);
-  assert.equal(rates.MINIMUM_SITES, 5);
-  assert.equal(rates.ENTRY_BAND.essential * rates.MINIMUM_SITES, rates.PORTFOLIO_MINIMUM);
-});
-
-test("the selector cannot describe a portfolio the business will not take", () => {
-  /* §10.2. Five is the floor, not a default — the minimum is five sites and the
-     page says so in the footnotes, the FAQ and the enquiry form. */
-  assert.equal(rates.SLIDER_MIN, rates.MINIMUM_SITES);
-  assert.equal(rates.SLIDER_MAX, 60);
-  assert.equal(rates.BANDS[0].min, 5, "and the bottom band starts there too");
-  for (const band of rates.BANDS) {
-    assert.ok(band.min >= 5, `${band.label} reaches below the minimum`);
+test("the section has no selector, so it cannot describe a portfolio at all", async () => {
+  /* Was §10.2: the slider's floor had to be the five-site minimum. With no
+     published plan there is nothing for a reader to size, and a control that
+     asks "how many stores?" on a page that sells one job would be the old page
+     back. The stronger form of "the floor is five" is that there is no floor,
+     because there is no control. */
+  const pricing = code(await read(`${SECTIONS}/pricing.tsx`));
+  for (const control of ['type="range"', "<input", "<select", "<button", "useState", "storeCount", "switcher"]) {
+    assert.ok(!pricing.includes(control), `pricing.tsx still carries ${control}`);
   }
 });
 
-test("bandForCount puts every count in the brief's band", () => {
-  const label = (count) => rates.bandForCount(count).label;
-  assert.equal(label(5), "5–10 stores");
-  assert.equal(label(10), "5–10 stores");
-  assert.equal(label(11), "11–25 stores");
-  assert.equal(label(25), "11–25 stores");
-  assert.equal(label(26), "26–50 stores");
-  assert.equal(label(50), "26–50 stores");
-  assert.equal(label(51), "51+ stores");
-  assert.equal(label(60), "51+ stores");
+test("rates.ts exports the terms and one count, and no rate machinery", async () => {
+  /* Was the `bandForCount` table. The function, the bands it chose between and
+     every constant that carried a price are gone; listing the module's whole
+     surface is what stops one of them coming back unnoticed. */
+  assert.deepEqual(Object.keys(rates).sort(), ["MANAGED_PLAN_MINIMUM_SITES", "TERMS", "inWords"]);
+  const source = code(await read(`${SECTIONS}/rates.ts`));
+  assert.doesNotMatch(source, /£/, "no currency sign");
+  assert.deepEqual(
+    [...source.matchAll(/export const (\w+) = \d/g)].map((match) => match[1]),
+    ["MANAGED_PLAN_MINIMUM_SITES"],
+    "one exported number, and it is a count of sites rather than a price",
+  );
 });
 
-test("the monthly totals in the brief are what rate × count produces", () => {
+/**
+ * The words the withdrawn plans were priced in, by their distinguishing phrase.
+ *
+ * Narrow on purpose. "per store" alone is not here ("a WhatsApp group per
+ * store" is a sentence the page still needs), and neither is "coordinated
+ * jobs" (the London pages say where jobs have been coordinated). Each entry is
+ * a phrase that only a published plan, its rate card or its terms ever used.
+ */
+const WITHDRAWN_PLAN_WORDS = [
+  "per store per month",
+  "per store / month",
+  "per-store pricing",
+  "per-store rates",
+  "Portfolio minimum",
+  "coordination fee",
+  "coordinated jobs per store",
+  "monthly coordination plan",
+  "rate card",
+  "initial term",
+  "Onboarding and asset capture",
+  "out-of-hours fee",
+  "published on this page",
+  "published on the pricing page",
+  "no markup on trades",
+  "never mark up",
+  "Most popular",
+  "Bespoke",
+];
+
+test("no rate, band or total reaches the source the page is built from", async () => {
   /*
-   * §1.4's table, checked against the arithmetic the page does — which is the
-   * point of quoting it: the brief and the component have to agree about what
-   * a portfolio of eight stores costs, and neither one is allowed to be the
-   * only source of that.
+   * Was §1.4's table of monthly totals, checked against rate × count. There is
+   * no arithmetic left to check, so what is held is its absence, across every
+   * file a visitor's page is built from and not only the two the older
+   * withdrawn-strings test reads: the London pages and `/pricing` quoted the
+   * plans as well. (`homepage-v3` separately refuses a pound sign followed by
+   * a digit across the same tree.)
    */
-  const expected = [
-    [5, 325, 500],
-    [8, 520, 800],
-    [10, 650, 1000],
-    [15, 915, 1380],
-    [20, 1220, 1840],
-    [30, 1710, 2520],
-    [40, 2280, 3360],
-  ];
-  for (const [count, essential, complete] of expected) {
-    const band = rates.bandForCount(count);
-    assert.equal(band.essential * count, essential, `Essential at ${count} stores`);
-    assert.equal(band.complete * count, complete, `Complete at ${count} stores`);
+  for (const [name, source] of await marketingSources()) {
+    const body = code(source).replace(/\s+/g, " ");
+    for (const gone of WITHDRAWN_PLAN_WORDS) {
+      assert.ok(!body.includes(gone), `${name} still says "${gone}"`);
+    }
   }
 });
 
@@ -173,17 +278,21 @@ test("the monthly totals in the brief are what rate × count produces", () => {
 /* ------------------------------------------------------------------ */
 
 /**
- * The withdrawn strings, quoted from §1.7 of the brief.
+ * The withdrawn strings, quoted from §1.7 of the brief — and, since
+ * 2026-11-25, every figure the page printed after it.
  *
- * "£55" is excluded deliberately and the brief says why: it is forbidden "as a
- * headline tier price" and is now the compliance-only rate, where it is
- * correct. "21 stores" is excluded for the same reason — forbidden in the
- * pricing totals, kept in the hero chip and the case study, which is where the
- * portfolio actually is.
+ * "£55" and "21 stores" were excluded from the first list deliberately: £55 was
+ * forbidden only "as a headline tier price" and was the compliance-only rate,
+ * and "21 stores" was forbidden in the pricing totals but kept in the hero chip
+ * and the case study. "£65" and "save £20 per store" were then REMOVED from
+ * the list on 2026-10-08, when the owner raised Essential by 5 at every band
+ * and they became live prices.
  *
- * "£65" and "save £20 per store" were removed from this list on 2026-10-08:
- * the owner raised Essential by 5 at every band, so £65 is now the 5–10 store
- * Essential rate and £20 is the Complete saving at every band.
+ * ALL OF THOSE EXCEPTIONS ENDED ON 2026-11-25. The owner withdrew the
+ * published plans, so there is no live price for an exception to protect: the
+ * rates at every band, the minimum, the onboarding, out-of-hours and project
+ * figures and the saving badge are all in the list now. ("21 stores" is still
+ * not: it is a description of a portfolio, not a price.)
  */
 const WITHDRAWN = [
   "£85",
@@ -197,6 +306,26 @@ const WITHDRAWN = [
   "waived on a 12-month term",
   "Waived on a 12-month term",
   "£375 at 5 stores",
+  /* Withdrawn 2026-11-25 with the published plans. */
+  "£65",
+  "£61",
+  "£57",
+  "£100",
+  "£92",
+  "£84",
+  "£55",
+  "£51",
+  "£47",
+  "£325",
+  "£75",
+  "£1,200",
+  "£95",
+  "£350",
+  "save £",
+  "Essential from",
+  "Complete from",
+  "See the full rate card",
+  "What if we only have three or four sites?",
 ];
 
 test("none of the withdrawn pricing strings survives in the source", async () => {
@@ -212,44 +341,84 @@ test("none of the withdrawn pricing strings survives in the source", async () =>
 /* §1.2–1.6 — the shape of the section                                 */
 /* ------------------------------------------------------------------ */
 
-test("two cards, and compliance-only is small print beneath them", async () => {
-  /* §10.5. The decision is between two plans. Compliance administration is
-     still sold and still priced — as a sentence and a rate-card row. */
+test("three cards, none of them a plan, and the managed plan is small print beneath them", async () => {
+  /*
+   * RE-POINTED 2026-11-25. This was §10.5 — "two cards, and compliance-only is
+   * small print beneath them" — and what it protected was the SHAPE of the
+   * decision: a reader chooses between exactly the things the business sells,
+   * and anything else is a sentence rather than another card.
+   *
+   * The business now sells one thing, a job at a price agreed first, so the
+   * cards are no longer a choice at all: they are the three things every job
+   * gets. The shape is held the same way. The cards are these three, in this
+   * order; and the one offer that is not for everybody, the managed plan, is
+   * small print quoting `TERMS` rather than a fourth card.
+   */
   const pricing = await read(`${SECTIONS}/pricing.tsx`);
   const body = code(pricing);
-  const plans = [...body.matchAll(/^\s{4}key: "(\w+)",$/gm)].map((m) => m[1]);
-  assert.deepEqual(plans, ["essential", "complete"], "exactly two plans, in this order");
-  assert.ok(!body.includes("COMPLIANCE_PLAN"), "the third plan object is gone");
-  assert.ok(!body.includes('className="pkgalt"'), "and so is its card");
-  assert.match(pricing, /<p className="pkgfine">/, "the offer survives as small print");
+  const cards = [...body.matchAll(/^\s{4}key: "([\w-]+)",\n\s{4}title: "([^"]+)",$/gm)].map(
+    (match) => [match[1], match[2]],
+  );
+  assert.deepEqual(
+    cards,
+    [
+      ["per-job", "Priced per job"],
+      ["call-out", "No call-out charge with the repair"],
+      ["portal", "Portal included"],
+    ],
+    "exactly three cards, in this order",
+  );
+  for (const plan of ['key: "essential"', 'key: "complete"', "COMPLIANCE_PLAN", 'className="pkgalt"', "is-match", "pkg__flag"]) {
+    assert.ok(!body.includes(plan), `the withdrawn plan furniture is back: ${plan}`);
+  }
+  assert.match(
+    pricing,
+    /<p className="pkgfine">\s*\{TERMS\.managedPlan\}/,
+    "the managed plan survives as small print, in the shared words",
+  );
 });
 
-test("§4.2's new question is in the source, not only on a running server", async () => {
+test("§4.2's question is in the source, not only on a running server", async () => {
   /* The live half of this file skips without a dev server, so a question pinned
      only there is a question nothing protects in CI. */
   const content = await read(`${SECTIONS}/content.ts`);
-  assert.match(content, /"q": "What if we only have three or four sites\?"/);
   /*
-   * RE-POINTED (October 2026), on the owner's decision, not on a rewording.
+   * RE-POINTED TWICE, both times on the owner's decision and not on a rewording.
    *
-   * §4.2 had this answer send a reader with fewer than five sites away to "call
-   * trades directly". The owner has since begun taking one-off jobs in London
-   * from a single shop or kiosk, so that sentence would now turn away work the
-   * business sells. The two things §4.2 exists to protect are still asserted:
-   * the answer still declines the PLAN in plain words, and still states the
-   * minimum as five sites. What changed is the alternative it offers.
+   * §4.2 added "What if we only have three or four sites?" to turn a small
+   * operator away from the monthly plan in plain words. October 2026 kept that
+   * refusal and changed the alternative it offered, when one-off jobs began.
+   * On 2026-11-25 the published plans were withdrawn altogether. There is no
+   * plan left for a reader to be too small for, so the entry now carries the
+   * question a single shop actually asks — "Is there a minimum number of
+   * sites?" — and the answer is no.
+   *
+   * What §4.2 existed to protect is still asserted, in its new form: the page
+   * says in plain words who the offer is for; it states the one size limit
+   * that remains, the managed plan's, from the constant rather than a typed
+   * number; and it never sends the one-off job away.
    */
-  assert.match(content, /the monthly plan is not for you yet/);
-  assert.match(content, /we'd rather say so than take the fee/);
-  assert.match(content, /Our minimum is five sites/);
-  assert.match(content, /one-off jobs, each quoted before work starts/);
+  assert.match(content, /"q": "Is there a minimum number of sites\?"/);
+  assert.doesNotMatch(
+    code(content),
+    /What if we only have three or four sites\?/,
+    "the question it replaced is gone, not kept beside it",
+  );
+  assert.match(content, /No\. One shop or one kiosk with one job is enough/);
+  assert.match(content, /each job is priced before work starts/);
+  assert.match(content, /The only thing with a minimum is the managed monthly plan/);
+  assert.doesNotMatch(
+    code(content),
+    /the monthly plan is not for you yet/,
+    "nobody is turned away from a plan the page no longer sells",
+  );
   assert.doesNotMatch(
     content,
     /better served calling trades directly/,
     "the answer must not turn away the one-off job the business now takes",
   );
   const costAt = content.indexOf('"q": "What does it cost?"');
-  const newAt = content.indexOf('"q": "What if we only have three or four sites?"');
+  const newAt = content.indexOf('"q": "Is there a minimum number of sites?"');
   assert.ok(costAt > 0, "the cost answer is still there");
   assert.ok(newAt > costAt, "and the new one sits after it");
   /* Immediately after: nothing between the two entries but the closing brace
@@ -259,55 +428,97 @@ test("§4.2's new question is in the source, not only on a running server", asyn
     "immediately after — no other question was inserted between them",
   );
 
-  /* §4.1 quotes its answer word for word, and the brief writes both counts as
-     WORDS. Interpolating the constants is what keeps the sentence from becoming
-     a second typed copy; `inWords` is what keeps it reading as English. */
-  assert.match(content, /\$\{inWords\(INCLUDED_JOBS\)\} coordinated jobs per store per month/);
-  assert.match(content, /Our minimum portfolio is \$\{inWords\(MINIMUM_SITES\)\} sites/);
-  assert.equal(rates.inWords(rates.INCLUDED_JOBS), "four");
-  assert.equal(rates.inWords(rates.MINIMUM_SITES), "five");
+  /*
+   * §4.1's answer used to interpolate two counts so that the sentence did not
+   * become a second typed copy of a number. The same rule now covers whole
+   * sentences: the cost answer QUOTES all four terms, so the FAQ, the pricing
+   * cards, /pricing and the London pages cannot word the offer four ways.
+   */
+  const cost = code(content.slice(costAt, newAt));
+  for (const term of ["perJob", "callOut", "noRepairVisit", "managedPlan"]) {
+    assert.ok(
+      cost.includes(`\${TERMS.${term}}`),
+      `the cost answer must quote TERMS.${term}, never restate it`,
+    );
+  }
+  assert.match(
+    content,
+    /portfolios of \$\{inWords\(MANAGED_PLAN_MINIMUM_SITES\)\} sites and above/,
+    "and the minimum in the answer beneath it is the constant, in words",
+  );
+  assert.equal(rates.inWords(rates.MANAGED_PLAN_MINIMUM_SITES), "five");
 });
 
-test("the full rate card uses the page's own disclosure, and scrolls", async () => {
-  /* §1.5 and §10.10. `<details>`/`<summary>` is what the FAQ uses — no new UI
-     pattern — and the table scrolls inside its own box rather than widening
-     the document. */
-  const pricing = await read(`${SECTIONS}/pricing.tsx`);
-  assert.match(pricing, /<details className="ratecard">/);
-  assert.match(pricing, /<summary className="ratecard__toggle">See the full rate card<\/summary>/);
-  assert.ok(!code(pricing).includes("useState(false)"), "a disclosure needs no state");
+test("there is no rate card left to disclose, and none can come back half-built", async () => {
+  /*
+   * RE-POINTED 2026-11-25. §1.5 and §10.10 put the full rate card behind the
+   * page's own `<details>` and made its table scroll inside its own box rather
+   * than widening the document. The rate card is withdrawn with the rates, so
+   * the first half of the claim is now its absence.
+   *
+   * The second half is kept as a condition rather than dropped. The stylesheet
+   * rules were left in place, unused, when the markup went; if a table ever
+   * returns to this section it has to return scrolling in its own box, and the
+   * two assertions that guaranteed that are still here waiting for it.
+   */
+  const pricing = code(await read(`${SECTIONS}/pricing.tsx`));
+  for (const gone of ["<details", "<summary", "<table", "ratecard"]) {
+    assert.ok(!pricing.includes(gone), `pricing.tsx still carries ${gone}`);
+  }
+  assert.ok(!pricing.includes("useState"), "and a section with nothing to open needs no state");
 
   const css = await read("app/(marketing)/marketing.css");
-  assert.match(css, /\.ratecard__scroll\{overflow-x:auto/, "the table scrolls, the page does not");
-  const block = css.slice(css.indexOf(".ratecard{"), css.indexOf(".ratecard__note"));
-  assert.doesNotMatch(block, /min-width:\s*\d+px/, "nothing in it may force the page wide");
+  if (css.includes(".ratecard{")) {
+    assert.match(css, /\.ratecard__scroll\{overflow-x:auto/, "the table scrolls, the page does not");
+    const block = css.slice(css.indexOf(".ratecard{"), css.indexOf(".ratecard__note"));
+    assert.doesNotMatch(block, /min-width:\s*\d+px/, "nothing in it may force the page wide");
+  }
 });
 
-test("every footnote the brief lists is on the page, and none of the old ones", async () => {
+test("every note the offer depends on is on the page, and none of the plan's", async () => {
+  /*
+   * RE-POINTED 2026-11-25. The brief's twelve footnotes were the terms of the
+   * monthly plan: its minimum, its included jobs, its onboarding and
+   * out-of-hours fees, its term. The plan is no longer published, so its terms
+   * are no longer printed. The five notes that replaced them are the terms of
+   * a single job, and they are held the same way and for the same reason — a
+   * note is where an edit strips a qualifier and takes the sentence with it.
+   * (The call-out terms are not among them on purpose: they are the second
+   * card, directly above the list, and are pinned there.)
+   *
+   * Two of them carried over. Office hours are the same hours under a plainer
+   * label, and the VAT statement is the same statement with one word changed:
+   * "Prices shown" became "Prices quoted", because the page shows none.
+   */
   const pricing = await read(`${SECTIONS}/pricing.tsx`);
-  const notes = pricing.slice(pricing.indexOf('<ul className="pricing__notes">'));
+  const notes = pricing
+    .slice(pricing.indexOf('<ul className="pricing__notes">'))
+    .replace(/\s+/g, " ");
   for (const fragment of [
-    "Maintsupp coordinates portfolios of five sites and above",
-    "Includes {INCLUDED_JOBS} coordinated jobs per store per month",
+    "{TERMS.perJob} Nothing is booked until you approve it.",
+    "projects are scoped and quoted separately",
+    'To get a price, <Link href="/#report">report the job</Link> with a photograph',
+    "Office hours Mon–Fri, 8:30am–5:30pm. Emergencies in London, 24 hours.",
+    "Prices quoted are the total payable. MAINTSUPP LTD is not currently VAT registered.",
+  ]) {
+    assert.ok(notes.includes(fragment), `the notes lost "${fragment}"`);
+  }
+  /* The plan's own terms, by their distinguishing clause — and the two that
+     were already withdrawn before them. */
+  for (const gone of [
+    "coordinates portfolios of five sites and above",
+    "coordinated jobs per store per month",
     "exceeds its allowance for two consecutive quarters",
     "Onboarding and asset capture",
     "Out-of-hours and P1 escalation",
-    "Projects and kiosk works are scoped and quoted separately",
     "Sites added mid-term are charged pro-rata",
-    "Service hours Mon–Fri, 8:30am–5:30pm",
     "Three-month initial term, then 30 days",
     "Contractor invoices are separate",
-    "Prices shown are the total payable",
     "Final quote confirmed at your free portfolio review",
-  ]) {
-    assert.ok(notes.includes(fragment), `the footnotes lost "${fragment}"`);
-  }
-  /* The withdrawn ones, by their distinguishing clause. */
-  for (const gone of [
     "Compliance pricing assumes a standard retail asset profile",
     "out-of-hours P1 incidents",
   ]) {
-    assert.ok(!code(pricing).includes(gone), `"${gone}" was replaced, not kept`);
+    assert.ok(!code(pricing).includes(gone), `"${gone}" was withdrawn with the plan, not kept`);
   }
 });
 
@@ -353,32 +564,54 @@ test("the booking link is one constant, and never a dead calendar", async () => 
   }
 });
 
-test("the enquiry form offers the pricing bands, plus the honest way to say no", async () => {
-  /* §3 and §10.6. The options were invented for this form and matched nothing
-     else on the page; a lead could arrive in a band the rate card cannot
-     price. */
+test("the enquiry form takes a portfolio of any size, smallest first, and still takes the enquiry", async () => {
+  /*
+   * RE-POINTED 2026-11-25. §3 and §10.6 made the form's options the pricing
+   * bands, plus "Fewer than 5" as "the honest way to say no". Both halves went
+   * with the published plans: there are no bands left to match, and nobody is
+   * under a floor.
+   *
+   * What the test protected is still held. The options are not invented: the
+   * four larger ranges are the ones a portfolio lead has always arrived in,
+   * and the one boundary with a commercial meaning — where the managed plan
+   * starts — is exactly where the new smallest range ends. And the option that
+   * gets a note is still an option that submits.
+   */
   const form = await read(`${SECTIONS}/final-cta.tsx`);
-  /* Sliced to the END OF THE DECLARATION, not to a byte count — the same
-     anti-pattern this release removes from three other suites. A comment or a
+  /* Sliced to the END OF THE DECLARATION, not to a byte count — a comment or a
      longer label above it must not be able to truncate what is compared. */
   const from = form.indexOf("const SITE_RANGES = [");
   const ranges = form.slice(from, form.indexOf("] as const;", from));
-  const offered = [...ranges.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(offered, ["5–10", "11–25", "26–50", "51+"]);
-  assert.match(form, /const UNDER_MINIMUM = "Fewer than 5";/);
-  assert.match(form, /SITE_RANGES = \["5–10", "11–25", "26–50", "51\+", UNDER_MINIMUM\]/);
+  assert.match(ranges, /^const SITE_RANGES = \[SMALLEST_RANGE, "/, "the smallest size is offered first");
+  const larger = [...ranges.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(
+    larger,
+    ["5–10", "11–25", "26–50", "51+"],
+    "the four larger ranges are unchanged, so a portfolio lead still arrives in the same words",
+  );
+  assert.doesNotMatch(code(form), /UNDER_MINIMUM|Fewer than 5/, "nobody is under a minimum any more");
 
-  /* Every band the calculator can reach must be selectable in the form. */
-  const labels = rates.BANDS.map((band) => band.label.replace(" stores", ""));
-  assert.deepEqual(offered, labels, "the form's bands are the pricing bands");
+  /* The smallest range ends where the managed plan begins, read from the one
+     place that states it. */
+  const floor = rates.MANAGED_PLAN_MINIMUM_SITES;
+  assert.ok(form.includes(`const SMALLEST_RANGE = "1–${floor - 1}";`), "it stops one short of the managed plan");
+  assert.ok(larger[0].startsWith(`${floor}–`), "and the next range starts at it");
 
-  /* It says no and still takes the enquiry. */
-  assert.match(form, /sites === UNDER_MINIMUM/);
-  assert.match(form, /coordinates portfolios of five sites and above\. If you're opening more/);
+  /* It says yes, points at the quicker form, and still takes the enquiry. */
+  assert.match(form, /sites === SMALLEST_RANGE/);
+  assert.match(form, /One site is enough\./);
+  /* A link to `/#report`, not `#report` and not "on this page": this form is
+     also the whole of /contact, where the report form is not on the page. */
+  assert.match(form, /<Link href="\/#report">Report a Job<\/Link> is the quickest way/);
   assert.match(form, /className="field__note" aria-live="polite"/, "and says so out loud");
   assert.doesNotMatch(
     code(form),
-    /UNDER_MINIMUM[\s\S]{0,200}?(return|setError|disabled)/,
+    /coordinates portfolios of five sites and above/,
+    "the refusal it replaced is gone",
+  );
+  assert.doesNotMatch(
+    code(form),
+    /sites === SMALLEST_RANGE[\s\S]{0,200}?(return|setError|disabled)/,
     "choosing it must not block the submit",
   );
 });
@@ -553,77 +786,167 @@ test("the portal mock captions an address that exists", async () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* Live — the page a reader actually gets                              */
+/* 2026-11-25 — pay per job: the doors a first-time customer uses      */
 /* ------------------------------------------------------------------ */
 
-test("live: every figure agrees across the page", async (t) => {
-  if (!(await serverIsUp())) {
-    t.skip(`no dev server on ${BASE_URL}`);
-    return;
-  }
-  const html = await page("/");
-  const entry = rates.ENTRY_BAND;
-
-  /* The cards, at the count the calculator opens on. */
-  assert.ok(html.includes(`£${entry.essential}`), "the Essential rate");
-  assert.ok(html.includes(`£${entry.complete}`), "the Complete rate");
-  assert.ok(
-    html.includes(`£${entry.essential * rates.SLIDER_MIN}`),
-    "and the Essential portfolio total at five stores",
+test("the Report a Job form is open to a first-time customer", async () => {
+  /*
+   * Until 2026-11-25 the note under this form read "For existing Maintsupp
+   * clients. Not a client yet? Book a free portfolio review below." The route
+   * behind it (`/api/report-job`) has always been public, so the note was the
+   * only thing turning a new customer away — and it was turning away exactly
+   * the reader the pay-per-job offer is written for, at the moment they had a
+   * job in hand.
+   *
+   * Three places have to agree for the door to be open, and each is pinned:
+   * the note under the form, the FAQ that says who may report a job, and the
+   * two places that send a reader here to get a price.
+   */
+  const form = code(await read(`${SECTIONS}/report-job.tsx`));
+  assert.ok(form.includes("No account needed."), "the form says so");
+  assert.match(
+    form.replace(/\s+/g, " "),
+    /we confirm the price and the time with you before any work starts/,
+    "and says what happens next, in the offer's own terms",
   );
-  assert.ok(html.includes(`£${entry.complete * rates.SLIDER_MIN}`), "and Complete's");
+  assert.doesNotMatch(form, /For existing Maintsupp clients|Not a client yet/, "the refusal is gone");
 
-  /* The badge, the compliance-only line, and the footnote figures. */
-  assert.ok(html.includes(`save £${entry.essential + entry.compliance - entry.complete} per store`));
-  assert.ok(html.includes(`from £${entry.compliance} per store / month`));
-  assert.ok(html.includes(`Portfolio minimum £${rates.PORTFOLIO_MINIMUM} per month`));
-  assert.ok(html.includes(`Includes ${rates.INCLUDED_JOBS} coordinated jobs`));
-  assert.ok(html.includes(`Additional coordinated jobs £${rates.ADDITIONAL_JOB} each`));
-  assert.ok(html.includes(`Out-of-hours and P1 escalation £${rates.OUT_OF_HOURS_P1} per incident`));
-  assert.ok(html.includes(`${rates.PROJECT_PERCENT}% of third-party project spend`));
-  assert.ok(html.includes(`minimum £${rates.PROJECT_MINIMUM}`));
+  const content = await read(`${SECTIONS}/content.ts`);
+  assert.match(content, /No account is needed for a first job\./, "the FAQ agrees");
 
-  /* The rate card: every band's every rate, including "Bespoke". */
-  for (const band of rates.BANDS) {
-    assert.ok(html.includes(band.label), `${band.label} is a column`);
-    for (const key of ["essential", "complete", "compliance"]) {
-      const cell = band[key] === null ? "Bespoke" : `£${band[key]}`;
-      assert.ok(html.includes(cell), `${band.label} / ${key} reads ${cell}`);
-    }
+  assert.match(
+    await read(`${SECTIONS}/pricing.tsx`),
+    /To get a price, <Link href="\/#report">report the job<\/Link>/,
+    "the pricing section sends a reader to it",
+  );
+  const pricingPage = await read("app/(marketing)/pricing/page.tsx");
+  assert.match(
+    pricingPage,
+    /<Link className="btn btn--primary btn--lg" href="\/#report">\s*Report a Job\s*<\/Link>/,
+    "/pricing opens on it",
+  );
+  assert.match(
+    pricingPage,
+    /primary=\{\{ href: "\/#report", label: "Report a Job" \}\}/,
+    "and closes on it",
+  );
+  /* `/#report`, never a bare `#report`, from anything that also renders off
+     the homepage: on /pricing and /contact a bare hash lands nowhere. */
+  for (const file of [`${SECTIONS}/pricing.tsx`, `${SECTIONS}/final-cta.tsx`, "app/(marketing)/pricing/page.tsx"]) {
+    assert.doesNotMatch(code(await read(file)), /href="#report"/, `${file} links to a hash its own page may not have`);
   }
 });
 
-test("live: the cost FAQ quotes the same two rates the cards do", async (t) => {
+test("/pricing explains pay-per-job in the shared terms, and types no figure", async () => {
+  /*
+   * /pricing was the long form of the rate card: "Clear per-store pricing,
+   * with no markup on trades", a description quoting the entry rates, and
+   * three cards headed "How billing works". It is the long form of the new
+   * offer now, and it is held to the same two rules as the section it draws:
+   * the commercial terms are quoted from `TERMS`, and no figure is typed.
+   */
+  const source = await read("app/(marketing)/pricing/page.tsx");
+  const body = code(source);
+  const title = /const TITLE = "([^"]+)";/.exec(source)?.[1] ?? "";
+  const description = /const DESCRIPTION = "([^"]+)";/.exec(source)?.[1] ?? "";
+  assert.match(title, /Pay Per Job/, "the title says what kind of pricing this is");
+  /* Fifty, not sixty: the layout appends " | MAINTSUPP" to every page title,
+     and a search result cuts the whole line at about sixty. */
+  assert.ok(title.length <= 50, `the title is ${title.length} characters before the layout's suffix`);
+  assert.ok(description.length > 0 && description.length <= 160, `the description is ${description.length} characters`);
+  assert.match(description, /No subscription\./);
+
+  assert.match(body, /import \{ TERMS \} from "\.\.\/_sections\/rates";/);
+  assert.match(
+    body,
+    /body: `\$\{TERMS\.callOut\} \$\{TERMS\.noRepairVisit\}`/,
+    "the call-out card is the shared promise, with its other half",
+  );
+  assert.doesNotMatch(body, /ENTRY_BAND|£/, "no rate is derived here and no figure is typed");
+  for (const gone of ["Clear per-store pricing", "How billing works", "One coordination fee", "before they sign"]) {
+    assert.ok(!body.includes(gone), `/pricing still says "${gone}"`);
+  }
+
+  /*
+   * THE QUESTIONS ARE LOOKED UP BY THEIR TEXT, which is a quiet way to lose
+   * one: the page filters the shared FAQ list by `q`, and a question renamed
+   * in `content.ts` simply stops appearing here, with no error anywhere. One
+   * was renamed in this very change ("What if we only have three or four
+   * sites?"), so every question the page asks for is checked to exist.
+   */
+  const from = body.indexOf("const PRICING_QUESTIONS = [");
+  const wanted = [...body.slice(from, body.indexOf("];", from)).matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(wanted.length >= 4, "the page still asks for its pricing questions");
+  const content = await read(`${SECTIONS}/content.ts`);
+  for (const question of wanted) {
+    assert.ok(content.includes(`"q": "${question}"`), `/pricing asks for a question the FAQ no longer has: "${question}"`);
+  }
+  assert.ok(wanted.includes("Is there a minimum number of sites?"), "including the one that replaced the three-or-four-sites question");
+});
+
+test("the London pages send a reader to how pricing works, not to a plan's rates", async () => {
+  /* The landing pages linked to /pricing as "Pricing for monthly plans" and
+     told a reader the per-store rates were "published on the pricing page".
+     Neither is true any longer; the label is pinned so the link cannot go on
+     promising a table that is not there. (The sentences themselves are covered
+     above: the withdrawn words are refused across the whole tree.) */
+  for (const file of ["app/(marketing)/_landing/services.ts", "app/(marketing)/_landing/places.ts"]) {
+    const source = code(await read(file));
+    assert.match(source, /\{ href: "\/pricing", label: "How pricing works" \}/, `${file} labels the link for what the page is`);
+    assert.doesNotMatch(source, /Pricing for monthly plans/, `${file} still promises plan pricing`);
+    assert.match(source, /import \{[^}]*\bTERMS\b[^}]*\} from "\.\.\/_sections\/rates\.ts";/, `${file} reads the terms rather than typing them`);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Live — the page a reader actually gets                              */
+/* ------------------------------------------------------------------ */
+
+test("live: the terms agree across the page, and no figure is printed", async (t) => {
   if (!(await serverIsUp())) {
     t.skip(`no dev server on ${BASE_URL}`);
     return;
   }
-  /* §10.4's hardest case: the FAQ is the one place a figure could drift
-     unnoticed, because it is prose. It is derived, and this is the proof. */
-  for (const where of ["/", "/faqs"]) {
+  /*
+   * RE-POINTED 2026-11-25. This fetched the homepage and found every rate,
+   * total and footnote figure on it. There are none to find, so it holds the
+   * two things that took their place: every term reaches a reader in the
+   * approved words, and no price does.
+   */
+  const html = await page("/");
+  for (const [key, sentence] of Object.entries(rates.TERMS)) {
+    assert.ok(html.includes(sentence), `TERMS.${key} reaches the page`);
+  }
+  /* The call-out promise is on its card and in the FAQ answer. */
+  assert.ok(html.split(rates.TERMS.callOut).length - 1 >= 2, "and the call-out promise is made in both places");
+  assert.ok(html.split(rates.TERMS.noRepairVisit).length - 1 >= 2, "each time with its other half");
+  assert.doesNotMatch(html, /£\s?\d/, "no figure is printed anywhere on the page");
+  for (const gone of WITHDRAWN_PLAN_WORDS) {
+    assert.ok(!html.includes(gone), `the page still says "${gone}"`);
+  }
+});
+
+test("live: the cost FAQ gives the same terms the cards do", async (t) => {
+  if (!(await serverIsUp())) {
+    t.skip(`no dev server on ${BASE_URL}`);
+    return;
+  }
+  /* §10.4's hardest case, unchanged in kind: the FAQ is the one place the
+     offer could drift unnoticed, because it is prose. It is quoted from
+     `TERMS`, and this is the proof. */
+  for (const where of ["/", "/faqs", "/pricing"]) {
     const html = await page(where);
+    for (const [key, sentence] of Object.entries(rates.TERMS)) {
+      assert.ok(html.includes(sentence), `${where}: TERMS.${key}`);
+    }
+    assert.ok(html.includes("Is there a minimum number of sites?"), `${where}: the question that replaced it`);
     assert.ok(
-      html.includes(`Essential from £${rates.ENTRY_BAND.essential} per store`),
-      `${where}: the Essential entry rate`,
+      html.includes(`portfolios of ${rates.inWords(rates.MANAGED_PLAN_MINIMUM_SITES)} sites and above`),
+      `${where}: the managed plan's size, in words`,
     );
     assert.ok(
-      html.includes(`Complete from £${rates.ENTRY_BAND.complete} per store`),
-      `${where}: the Complete entry rate`,
-    );
-    /* Spelled out, because §4.1 quotes the answer word for word and the brief
-       writes both counts as words. `inWords` is how the derived constant still
-       reads as English. */
-    assert.ok(
-      html.includes(`It includes ${rates.inWords(rates.INCLUDED_JOBS)} coordinated jobs per store`),
-      `${where}: the coordinated-job allowance, in words`,
-    );
-    assert.ok(
-      html.includes(`Our minimum portfolio is ${rates.inWords(rates.MINIMUM_SITES)} sites`),
-      `${where}: the minimum, in words`,
-    );
-    assert.ok(
-      html.includes("What if we only have three or four sites?"),
-      `${where}: the new FAQ is there too`,
+      !html.includes("What if we only have three or four sites?"),
+      `${where}: the withdrawn question is gone`,
     );
   }
 });
